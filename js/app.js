@@ -141,6 +141,7 @@ function shapeKo(tg) {
     case 'TQ': return `${tg.r}칸 내 위치 선택 · 주변 ${tg.ar}칸 정사각형`;
     case 'allies': return `${tg.r}칸 범위 · 모든 아군`;
     case 'allyLow': return `${tg.r}칸 · 생명 비율 낮은 아군`;
+    case 'owner': return `${tg.r}칸 내 주인`;
     default: return '자신';
   }
 }
@@ -224,7 +225,22 @@ function charmTags(c, rank) {
   }
   return t.join('');
 }
-const SUP_KO = { proc: '대미지 전투 스킬 사용 시 추가 공격', shieldLoss: '생명 15% 잃을 때마다 실드(최대 5회)', shield3: '3턴마다 실드', healLow: '턴 시작 시 생명 80% 미만이면 치유', endTurn: '턴 종료 시 가장 가까운 적 공격', atkSpd: '공격력·속도 증가', inkBurst: '전투 시작 전 쿨다운 1턴 감소 · 대미지 보너스', cloud: '시작 3턴 받는 대미지 감소 · 막기율 증가', none: '⚠ 지원 스킬 시뮬 미반영' };
+const SUP_KO = { proc: '대미지 전투 스킬 사용 시 추가 공격', shieldLoss: '생명 15% 잃을 때마다 실드(최대 5회)', shield3: '턴마다 방어력 증가 중첩 · 3중첩에 실드', healLow: '턴 시작 시 생명 80% 미만이면 치유', endTurn: '턴 종료 시 가장 가까운 적 공격', atkSpd: '공격력·속도 증가', inkBurst: '전투 시작 전 쿨다운 1턴 감소 · 대미지 보너스', cloud: '시작 3턴 받는 대미지 감소 · 막기율 증가', allyHeal: '아군 대상 전투 스킬 사용 시 아군 1명 치유', ga: '3턴 뒤 잃은 생명 50% 회복 · 봉인 해제(치명타율·명중)', nap: '7턴 뒤 파바(공격력·방어력 증가)', purity: '순수(받는 대미지 감소)', none: '⚠ 지원 스킬 시뮬 미반영' };
+/* Fantomon effect tags: value, stacks, chance, duration */
+const PET_EFF_KO = { ...EFF_KO, weak: '공격력 감소', delay: '행동 지연', vuln: '취약', dot: '지속 대미지' };
+const petEffTag = (e) => tag(`${e.k === 'dot' && e.el === 'fire' ? '작열' : PET_EFF_KO[e.k] || e.k}${e.v && e.k !== 'vuln' ? ' ' + Math.round(e.v * 100) + '%' : ''}${e.max ? ` (최대 ${e.max}중첩)` : ''} · ${Math.round((e.p == null ? 1 : e.p) * 100)}%${e.t ? ' · ' + e.t + '턴' : ''}`);
+const petExtraTags = (s) => [
+  s.big ? tag(`대형 대상 대미지 +${Math.round(s.big * 100)}%`) : '',
+  s.sp && s.sp.k === 'lucky' ? tag(`${Math.round(s.sp.p * 100)}% 확률 ${s.sp.m}배 대미지`) : '',
+  s.sp && s.sp.k === 'healChain' ? tag(`최대 ${s.sp.n}회 연쇄 치유`) : '',
+  s.rbuff ? tag(`무작위 버프 +${Math.round(s.rbuff * 100)}% · 1턴`) : '',
+  s.purity ? tag('순수 부여 (추정)', 'est') : '',
+  s.cleanse ? tag(`${Math.round(s.cleanse * 100)}% 디버프 1개 해제`) : '',
+  s.zi ? tag('실체화 시 바로 사용') : '',
+  s.est ? tag('추정 수치로 반영', 'est') : '',
+  ...(s.no || []).map((x) => tag(`⚠ 미반영 · ${x}`, 'warn')),
+].join('');
+const PET_PV_KO = { killSplash: '처치 시 주변 광역 대미지', dmgRedTaunt: '도발된 적에게서 받는 대미지 감소', healUp: '치유 효과 증가', regenAllies: '턴 시작 시 주변 아군 치유', phantom: '3턴 뒤 소멸 · 쓰러지거나 사라질 때 폭발' };
 
 /* ───────── team rendering ───────── */
 const RANK_OPTS = RANKS.map((r, i) => `<option value="${i + 1}">${r}</option>`).join('');
@@ -275,8 +291,16 @@ function petBlock(u) {
     body = `<div class="grid2"><label class="f"><span>지원 스킬 품질</span><select data-pf="rank" data-val="${pt.rank}">${RANK_OPTS}</select></label>
         <label class="f chk"><span>성년 (실체화해 함께 전투)</span><input type="checkbox" data-pf="adult" ${pt.adult ? 'checked' : ''} ${p.mat ? '' : 'disabled'}></label></div>
       <div class="grid4"><label class="f atk"><span>판타몬 공격</span><input type="number" data-pf="atk" value="${pt.atk}"></label><label class="f def"><span>방어</span><input type="number" data-pf="def" value="${pt.def}"></label><label class="f hp"><span>생명</span><input type="number" data-pf="hp" value="${pt.hp}"></label><label class="f spd"><span>속도</span><input type="number" data-pf="spd" value="${pt.spd}"></label></div>
-      <div class="sum" style="margin-left:0"><b style="margin-right:4px">지원: ${esc(sp.en)}</b><span class="tag el" style="background:${(EL[sp.el] || EL.none).c}">${(EL[sp.el] || EL.none).ko}</span>${tag(SUP_KO[sp.k] || sp.k, sp.k === 'none' ? 'warn' : '')}${sp.c ? tag(`${sp.c[q]}%${sp.ar ? ' · 주변 ' + sp.ar + '칸' : ''}`) : ''}${sp.lim ? tag('턴당 1회') : ''}</div>
-      ${pt.adult && p.mat ? `<div class="note" style="margin-left:0">실체화: 에너지 ${p.mat.init}/${p.mat.cap}에서 시작, 턴당 +50 · 피격당 +6 → 가득 차면 실체화해 아래 스킬을 순서대로 사용</div>` + p.skills.map((s, i) => `<div class="sum" style="margin-left:0"><b style="margin-right:4px">${i + 1}. ${esc(s.en)}</b>${skillTags({ ...s, cd: s.cd || 0 }, s.kind === 'heal' ? { healPct: s.hv[q] / 100, healFlat: 0 } : { coef: s.c[q] / 100, flat: 0 }, i + 1)}</div>`).join('') : ''}`;
+      <div class="petsk"><div class="pnm"><b>지원 · ${esc(sp.ko || sp.en)}</b> <small class="en">${esc(sp.en)}</small></div>
+        <div class="sum" style="margin-left:0"><span class="tag el" style="background:${(EL[sp.el] || EL.none).c}">${(EL[sp.el] || EL.none).ko}</span>${tag(SUP_KO[sp.k] || sp.k, sp.k === 'none' ? 'warn' : '')}${sp.c ? tag(`${sp.c[q]}%${sp.ar ? ' · 주변 ' + sp.ar + '칸' : ''}`) : ''}${sp.lim ? tag('턴당 1회') : ''}${((pt.adult && p.mat && sp.effAdult) || sp.eff || []).map(petEffTag).join('')}${sp.dispelBuff ? tag('버프 1개 해제') : ''}${petExtraTags(sp)}</div>
+        ${sp.d ? `<div class="desc">${esc(sp.d)}</div>` : ''}</div>
+      ${pt.adult && p.mat ? `<div class="note" style="margin-left:0">실체화: 에너지 ${p.mat.init}/${p.mat.cap}에서 시작, 턴당 +50 · 피격당 +6 → 가득 차면 실체화해 아래 스킬을 순서대로 사용 (사라지면 에너지가 다시 찹니다)</div>` + p.skills.map((s, i) => {
+        const n = s.kind === 'heal' ? { healPct: s.hv[q] / 100, healFlat: 0 } : s.kind === 'dmg' ? { coef: s.c[q] / 100, flat: 0 } : { bv: s.bv ? s.bv[q] / 100 : 0 };
+        const shield = s.kind === 'shield' ? tag(`${s.tg && s.tg.t === 'owner' ? s.tg.r + '칸 내 주인' : '아군'} · 실드 (판타몬 방어력 ${(n.bv * 100).toFixed(1)}%) · ${s.shT || 2}턴`) + tag(s.cd ? `${i + 1}번째 · ${s.cd + 1}턴마다` : `${i + 1}번째 · 매 턴`, 'time') : '';
+        const tags = s.kind === 'shield' ? `<span class="tag el" style="background:${EL.none.c}">${EL.none.ko}</span>${shield}` : skillTags({ ...s, eff: undefined, cd: s.cd || 0 }, n, i + 1);
+        return `<div class="petsk"><div class="pnm"><b>${i + 1}. ${esc(s.ko || s.en)}</b> <small class="en">${esc(s.en)}</small></div><div class="sum" style="margin-left:0">${tags}${(s.eff || []).map(petEffTag).join('')}${petExtraTags(s)}</div>${s.d ? `<div class="desc">${esc(s.d)}</div>` : ''}</div>`;
+      }).join('') + (p.pv || []).map((v) => `<div class="petsk"><div class="pnm"><b>비전 · ${esc(v.ko || v.en)}</b> <small class="en">${esc(v.en)}</small></div><div class="sum" style="margin-left:0">${v.k === 'none' ? tag('⚠ 미반영', 'warn') : tag(PET_PV_KO[v.k] || v.k) + tag('반영', 'ok')}${v.c ? tag(`${v.c[q]}%`) : ''}${(v.eff || []).map(petEffTag).join('')}</div>${v.d ? `<div class="desc">${esc(v.d)}</div>` : ''}</div>`).join('')
+      : p.mat ? `<div class="note" style="margin-left:0">성년을 켜면 실체화 스킬 ${p.skills.length}개${p.pv && p.pv.length ? ` · 비전 ${p.pv.length}개` : ''}도 전투에 반영합니다.</div>` : ''}`;
   }
   return `<div class="petbox"><div class="pet-row">${p ? `<canvas class="ava mob" width="96" height="96" data-pet="${p.id}"></canvas>` : ''}<label class="f" style="flex:1"><span>판타몬</span><select data-pf="id" data-val="${pt ? pt.id : ''}">${PET_OPTS}</select></label>${p ? '<button class="btn" data-act="petBase" title="캐릭터 능력치 × 판타몬 기본 비율로 채웁니다">비율로 채우기</button>' : ''}</div>${body}</div>`;
 }

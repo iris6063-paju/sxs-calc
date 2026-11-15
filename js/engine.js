@@ -104,8 +104,9 @@ function buildHero(d, opts) {
   return u;
 }
 /** Charms (비법) → stat changes applied to the template + immutable hook lists used during the fight */
+const newCh = () => ({ procs: [], inflicts: [], hurt: [], block: [], dmgUp: [], dmgRed: [], shields: [] });
 function compileCharms(list, u) {
-  const ch = { procs: [], inflicts: [], hurt: [], block: [], dmgUp: [], dmgRed: [], shields: [] };
+  const ch = newCh();
   let any = false;
   const l = lvi(u.level);
   for (const sl of list || []) {
@@ -158,11 +159,24 @@ function buildPet(d, owner) {
   u.atk = Math.max(1, +d.atk || 1); u.def = Math.max(0, +d.def || 0); u.hpMax = Math.max(1, +d.hp || 1); u.spd = Math.max(1, +d.spd || 1);
   for (const k of PCT) u[k] = HERO_DEFAULTS[k] / 100;
   for (const k of RAW) u[k] = 0;
-  u.skills = d.adult && p.mat ? p.skills.map((s, i) => ({ s: { ...s, ko: s.en }, n: s.kind === 'heal' ? { healPct: s.hv[q] / 100, healFlat: 0 } : { coef: s.c[q] / 100 / Math.max(1, s.hits || 1), flat: 0 }, cd: s.cd || 0, init: s.cd && s.cd < 90 ? s.cd + 1 : 0 })) : [];
+  const adult = !!(d.adult && p.mat);
+  // materialized skills: damage / heal / shield (bv × Fantomon DEF) / buff (bv)
+  u.skills = adult ? p.skills.map((s) => ({ s: { ...s, ko: s.ko || s.en }, n: s.kind === 'heal' ? { healPct: s.hv[q] / 100, healFlat: 0 } : s.kind === 'dmg' ? { coef: s.c[q] / 100 / Math.max(1, s.hits || 1), flat: 0 } : { bv: s.bv ? s.bv[q] / 100 : 0 }, cd: s.cd || 0, init: s.zi ? 0 : s.cd && s.cd < 90 ? s.cd + 1 : 0 })) : [];
   const sp = p.sup, A = flatBase(sp.g, owner.level), v = {};
   for (const [k, a] of Object.entries(sp.v || {})) v[k] = a[q] / 100;
-  u.sup = { k: sp.k, el: sp.el, ar: sp.ar || 0, lim: sp.lim || 0, eff: sp.eff, dispelBuff: sp.dispelBuff, healOwner: sp.healOwner, name: sp.en, coef: sp.c ? sp.c[q] / 100 : 0, flat: (sp.fm || 0) * R * A, healPct: sp.hv ? sp.hv[q] / 100 : 0, healFlat: (sp.hfm || 0) * R * A * CURE_BASE, v };
-  u.mat = d.adult && p.mat ? p.mat : null;
+  u.sup = { k: sp.k, el: sp.el, ar: sp.ar || 0, lim: sp.lim || 0, eff: adult && sp.effAdult ? sp.effAdult : sp.eff, dispelBuff: sp.dispelBuff, healOwner: sp.healOwner, big: sp.big || 0, cleanse: sp.cleanse || 0, defStk: sp.defStk || 0, name: sp.ko || sp.en, coef: sp.c ? sp.c[q] / 100 : 0, flat: (sp.fm || 0) * R * A, healPct: sp.hv ? sp.hv[q] / 100 : 0, healFlat: (sp.hfm || 0) * R * A * CURE_BASE, v };
+  u.mat = adult ? p.mat : null;
+  // adult-form passives
+  if (adult) for (const pv of p.pv || []) {
+    const val = (key) => (pv.v && pv.v[key] ? pv.v[key][q] / 100 : 0);
+    switch (pv.k) {
+      case 'killSplash': (u.ch = u.ch || newCh()).killSplash = { el: pv.el, ar: pv.ar, coef: pv.c ? pv.c[q] / 100 : 0, flat: 0 }; break;
+      case 'dmgRedTaunt': (u.ch = u.ch || newCh()).dmgRed.push(['vsTaunted', val(pv.key)]); break;
+      case 'healUp': u.healUp += val(pv.key); break;
+      case 'regenAllies': u.regenAllies = { r: pv.r, pct: pv.hv ? pv.hv[q] / 100 : 0, name: pv.ko || pv.en }; break;
+      case 'phantom': u.phantom = { life: pv.life, r: pv.r, el: pv.el, coef: pv.c ? pv.c[q] / 100 : 0, eff: pv.eff || [], name: pv.ko || pv.en }; break;
+    }
+  }
   return u;
 }
 function buildMob(key, level, opts, sr, fix, uws) {
@@ -241,7 +255,7 @@ export function simulate(P, seed, log) {
   const U = P.units.map((t) => ({
     ...t, hp: t.hpMax, alive: !t.out, st: [], turnNo: 0, next: 0, pool: 0,
     cds: t.skills.map((k) => k.init), shield: 0,
-    mAtk: 1, aAtk: 0, mDef: 1, aDef: 0, mSpd: 1, aSpd: 0, bBlock: 0, bCrit: 0, bDmg: 0, red: 1, vuln: 0, cold: 0, riven: 0, sigil: 0, wet: 0, blind: 0, moveAdd: 0, dodgeB: 0,
+    mAtk: 1, aAtk: 0, mDef: 1, aDef: 0, mSpd: 1, aSpd: 0, bBlock: 0, bCrit: 0, bDmg: 0, red: 1, vuln: 0, cold: 0, riven: 0, sigil: 0, wet: 0, blind: 0, moveAdd: 0, dodgeB: 0, bAcc: 0,
     dmg: 0, taken: 0, healed: 0, kills: 0, lastAil: -9, ailStreak: 0,
     casts: 0, eye: 0, stone: 0, marks: 0, lossAcc: 0, supTurn: -1, supN: 0, petStk: 0, undyingUsed: false, above50: true, voidUsed: false, energy: 0, reactCast: -1,
   }));
@@ -264,7 +278,8 @@ export function simulate(P, seed, log) {
   setBalance();
 
   function recalc(u) {
-    let mAtk = 1, mDef = 1, mSpd = 1, aAtk = 0, aSpd = 0, bBlock = 0, bCrit = 0, bDmg = 0, red = 1, vuln = 0, cold = 0, riven = 0, sigil = 0, wet = 0, blind = 0, sh = 0, mv = 0, aDef = 0, dodgeB = 0;
+    let mAtk = 1, mDef = 1, mSpd = 1, aAtk = 0, aSpd = 0, bBlock = 0, bCrit = 0, bDmg = 0, red = 1, vuln = 0, cold = 0, riven = 0, sigil = 0, wet = 0, blind = 0, sh = 0, mv = 0, aDef = 0, dodgeB = 0, bAcc = 0;
+    let kAtk = 0, kDef = 0, kSpd = 0; // stacking debuffs (e.g. Fantomon DEF Reduction ×3) add on top of the strongest plain one
     for (const s of u.st) {
       switch (s.k) {
         case 'defUp': aDef += s.v; break;
@@ -272,9 +287,11 @@ export function simulate(P, seed, log) {
         case 'dodgeUp': dodgeB = Math.max(dodgeB, s.v); break;
         case 'critStk': bCrit += s.v * s.n; break;
         case 'spdStk': aSpd += s.v * s.n; break;
-        case 'weak': mAtk = Math.min(mAtk, 1 - s.v); break;
-        case 'abreak': mDef = Math.min(mDef, 1 - s.v); break;
-        case 'slow': mSpd = Math.min(mSpd, 1 - s.v); break;
+        case 'weak': if (s.max) kAtk += s.v * s.n; else mAtk = Math.min(mAtk, 1 - s.v); break;
+        case 'abreak': if (s.max) kDef += s.v * s.n; else mDef = Math.min(mDef, 1 - s.v); break;
+        case 'slow': if (s.max) kSpd += s.v * s.n; else mSpd = Math.min(mSpd, 1 - s.v); break;
+        case 'accUp': bAcc += s.v; break;
+        case 'purity': red *= 1 - s.v; break;
         case 'atkUp': aAtk += s.v; break;
         case 'spdUp': aSpd += s.v; mv += s.move || 0; break;
         case 'blockUp': bBlock += s.v; break;
@@ -290,7 +307,8 @@ export function simulate(P, seed, log) {
         case 'shield': sh += s.v; break;
       }
     }
-    Object.assign(u, { mAtk, mDef, mSpd, aAtk, aSpd, bBlock, bCrit, bDmg, red, vuln, cold, riven, sigil, wet, blind, shield: sh, moveAdd: mv, aDef, dodgeB });
+    mAtk *= Math.max(0, 1 - kAtk); mDef *= Math.max(0, 1 - kDef); mSpd *= Math.max(0.1, 1 - kSpd);
+    Object.assign(u, { mAtk, mDef, mSpd, aAtk, aSpd, bBlock, bCrit, bDmg, red, vuln, cold, riven, sigil, wet, blind, shield: sh, moveAdd: mv, aDef, dodgeB, bAcc });
   }
   const has = (u, k) => { for (const s of u.st) if (s.k === k) return s; return null; };
   function addStatus(t, s) {
@@ -308,7 +326,7 @@ export function simulate(P, seed, log) {
     t.alive = false; t.hp = 0; occ[t.y * W + t.x] = -1;
     if (by) by.kills++;
     if (ev) ev.push({ e: 'die', u: t.id });
-    if (t.pet) return;
+    if (t.pet) { petGone(t); return; }
     aliveCount[t.team]--;
     if (aliveCount[t.team] <= 0) { B.over = true; B.winner = 1 - t.team; return; }
     if (by && by.alive && by.ch) {
@@ -514,7 +532,7 @@ export function simulate(P, seed, log) {
     d *= em;
     d *= (1 + a.dmgBoost + a.bDmg + boost) / (1 + t.dmgRes);
     d *= (1 + t.vuln + t.sigil) * t.red * redX;
-    const acc = a.acc + (o.acc || 0);
+    const acc = a.acc + (a.bAcc || 0) + (o.acc || 0);
     let kind = 0;
     const bc = t.blockRate + t.bBlock - 0.1 * t.riven - acc;
     if (bc > 0 && rnd() < bc) { d /= Math.max(1.5, 1 + t.blockEff - acc); kind = 2; }
@@ -553,6 +571,7 @@ export function simulate(P, seed, log) {
       if (k === 'freeze' && has(t, 'freeze')) return;
     }
     if (rnd() >= p) return;
+    if (k === 'delay') { t.next += v * interval(t); return; } // pushes the target's next action back
     const turns = e.t || 1;
     if (CONTROL[k]) { t.ailStreak = t.turnNo - t.lastAil <= 1 ? t.ailStreak + 1 : 1; t.lastAil = t.turnNo; }
     if (k === 'cold' || k === 'riven') {
@@ -561,7 +580,12 @@ export function simulate(P, seed, log) {
       addStatus(t, { k, n: 1, exp: t.turnNo + turns }); return;
     }
     if (k === 'abreak' || k === 'weak' || k === 'slow') {
-      const ex = has(t, k);
+      if (e.max > 1) { // stacking variant: +1 stack per application, duration refreshed
+        const sx = t.st.find((x) => x.k === k && x.max);
+        if (sx) { sx.n = Math.min(sx.max, sx.n + 1); sx.exp = t.turnNo + turns; recalc(t); return; }
+        addStatus(t, { k, v, n: 1, max: e.max, exp: t.turnNo + turns }); return;
+      }
+      const ex = t.st.find((x) => x.k === k && !x.max);
       if (ex) { ex.v = Math.max(ex.v, v); ex.exp = Math.max(ex.exp, t.turnNo + turns); recalc(t); return; }
       addStatus(t, { k, v, exp: t.turnNo + turns }); return;
     }
@@ -686,7 +710,7 @@ export function simulate(P, seed, log) {
     if (nd) { o.doom = 1; o.boost += nd.v; }
     const sp = s.sp || {};
     let dealt = 0;
-    const one = (t, coef, flat, mult) => { o.mult = mult || 1; if (sp.k === 'execute') o.mult *= 1 + Math.min(sp.max, Math.floor((1 - t.hp / t.hpMax) / 0.05) * sp.step); const d = hit(u, t, coef, flat, s.el, o); dealt += d; return d; };
+    const one = (t, coef, flat, mult) => { o.mult = mult || 1; if (s.big && t.big) o.mult *= 1 + s.big; if (sp.k === 'lucky' && rnd() < sp.p) o.mult *= sp.m; if (sp.k === 'execute') o.mult *= 1 + Math.min(sp.max, Math.floor((1 - t.hp / t.hpMax) / 0.05) * sp.step); const d = hit(u, t, coef, flat, s.el, o); dealt += d; return d; };
     const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
     if (sp.k === 'shieldBurst') {
       let sh = 0; for (let i = u.st.length - 1; i >= 0; i--) if (u.st[i].k === 'shield') { sh += u.st[i].v; u.st.splice(i, 1); } recalc(u);
@@ -763,7 +787,7 @@ export function simulate(P, seed, log) {
     const list = sp.ar ? U.filter((f) => f.alive && f.team !== u.team && dist(f.x, f.y, tx, ty) <= sp.ar) : [t];
     if (ev) ev.push({ e: 'cast', u: u.id, n: `${p.name} 지원`, el: sp.el, tg: list.map((f) => f.id), ax: tx, ay: ty, sh: 'T', ar: sp.ar, pet: 1 });
     for (const f of list) {
-      hit(p, f, sp.coef, sp.flat, sp.el, { noProc: 1, noReact: 1 });
+      hit(p, f, sp.coef, sp.flat, sp.el, { noProc: 1, noReact: 1, mult: sp.big && f.big ? 1 + sp.big : 1 });
       if (f.alive && sp.eff) for (const e of sp.eff) tryStatus(p, f, e);
       if (f.alive && sp.dispelBuff) { const bi = f.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(f, bi[Math.floor(rnd() * bi.length)]); recalc(f); } }
     }
@@ -775,10 +799,30 @@ export function simulate(P, seed, log) {
     if (!cell) for (const [dx, dyy, d] of DIAMOND) { if (!d) continue; if (d > 4) break; if (free(o.x + dx, o.y + dyy)) { cell = [o.x + dx, o.y + dyy]; break; } }
     if (!cell) return;
     p.out = false; p.alive = true; p.hp = p.hpMax; p.x = cell[0]; p.y = cell[1]; occ[p.y * W + p.x] = p.id; p.next = B.now + interval(p) * 0.5;
+    o.energy = 0; p.spawnT = p.turnNo; p.st = []; recalc(p);
+    // "cooldown resets upon materialization" / once-per-materialization skills start ready again
+    p.cds = p.skills.map((k) => (k.s.zi ? 0 : k.init));
     if (ev) ev.push({ e: 'spawn', u: p.id, x: p.x, y: p.y });
+  }
+  /** a materialized Fantomon fell or faded: Evanescent Phantom bursts, then Fantasmia starts refilling */
+  function petGone(p) {
+    if (p.phantom && !B.over) {
+      const ph = p.phantom; pvLabel(p, ph.name);
+      for (const f of U) if (f.alive && f.team !== p.team && dist(f.x, f.y, p.x, p.y) <= ph.r) { hit(p, f, ph.coef, 0, ph.el, { noProc: 1, noReact: 1 }); for (const e of ph.eff) if (f.alive) tryStatus(p, f, e); if (B.over) break; }
+    }
+    p.out = true;
   }
   function cleanse(t, n) { for (let i = 0; i < n; i++) { const di = t.st.map((x, j) => (!x.buff && x.k !== 'shield' ? j : -1)).filter((j) => j >= 0); if (!di.length) break; removeStatus(t, di[Math.floor(rnd() * di.length)]); } recalc(t); }
   function castSupport(u, k) {
+    const ok = castSupport0(u, k);
+    // Mandragora "Natural Power": the owner's technique on allies also heals 1 ally
+    if (ok && u.petI != null && !B.over) {
+      const p = U[u.petI];
+      if (p.sup.k === 'allyHeal') { const al = alliesOf(u).filter((a) => a.hp < a.hpMax && dist(a.x, a.y, u.x, u.y) <= 4); if (al.length) heal(p, al.reduce((b, a) => (a.hp / a.hpMax < b.hp / b.hpMax ? a : b), al[0]), u.hpMax * p.sup.healPct + p.sup.healFlat); }
+    }
+    return ok;
+  }
+  function castSupport0(u, k) {
     const s = k.s, n = k.n, allies = alliesOf(u);
     const within = (r) => allies.filter((a) => dist(a.x, a.y, u.x, u.y) <= r);
     const lowest = (list) => list.reduce((b, a) => (a.hp / a.hpMax < b.hp / b.hpMax ? a : b), list[0]);
@@ -786,6 +830,7 @@ export function simulate(P, seed, log) {
     const tg = s.buff ? { t: s.buff.to, r: s.buff.r } : s.tg || { t: 'self' };
     if (tg.t === 'self') targets = [u];
     else if (tg.t === 'allies') targets = within(tg.r);
+    else if (tg.t === 'owner') { const o = U[u.owner]; targets = o && o.alive && dist(o.x, o.y, u.x, u.y) <= tg.r ? [o] : []; if (!targets.length) return false; }
     else targets = [lowest(within(tg.r))];
     if (s.kind === 'heal') { targets = targets.filter((t) => t.hp < t.hpMax); if (!targets.length) return false; }
     if (s.buff && s.buff.max && targets.length > s.buff.max) { const rest = targets.filter((t) => t !== u).sort(() => rnd() - 0.5).slice(0, s.buff.max - 1); targets = [u, ...rest]; }
@@ -793,7 +838,12 @@ export function simulate(P, seed, log) {
     if (ev) ev.push({ e: 'cast', u: u.id, n: s.ko || s.en, el: s.el, tg: targets.map((t) => t.id), ax: u.x, ay: u.y, sh: 'B', sup: 1 });
     if (s.kind === 'heal') {
       const amt = (t, m) => { let v = (u.hpMax * n.healPct + n.healFlat) * m; if (s.sp && s.sp.k === 'lowBonus' && t.hp / t.hpMax < s.sp.th) v *= 1 + s.sp.v; return v; };
-      for (const t of targets) { heal(u, t, amt(t, 1)); if (s.dispel) cleanse(t, s.dispel); }
+      for (const t of targets) {
+        heal(u, t, amt(t, 1)); if (s.dispel) cleanse(t, s.dispel);
+        // Fantomon extras: Cure All random +10% ATK/DEF/SPD for 1 turn, Crystal Energy grants Purity
+        if (s.rbuff) { const r = Math.floor(rnd() * 3); addStatus(t, { k: r === 0 ? 'atkUp' : r === 1 ? 'defUp' : 'spdUp', v: (r === 0 ? t.atk : r === 1 ? t.def : t.spd) * s.rbuff, exp: t.turnNo + 1, buff: true }); }
+        if (s.purity && u.sup && u.sup.v.StatusDmgReducePer && !has(t, 'purity')) addStatus(t, { k: 'purity', v: u.sup.v.StatusDmgReducePer, exp: 1e9, buff: true });
+      }
       if (s.sp && s.sp.k === 'healChain') {
         const cnt = new Map([[targets[0].id, 1]]); let last = targets[0];
         for (let i = 0; i < s.sp.n; i++) { const c = allies.filter((a) => a.alive && a !== last && a.hp < a.hpMax && dist(a.x, a.y, last.x, last.y) <= tg.r); if (!c.length) break; last = c[Math.floor(rnd() * c.length)]; const h = cnt.get(last.id) || 0; heal(u, last, amt(last, Math.pow(1 - s.sp.decay, h))); cnt.set(last.id, h + 1); }
@@ -871,9 +921,11 @@ export function simulate(P, seed, log) {
     }
     if (u.alive && !B.over && u.petI != null) {
       const p = U[u.petI];
-      if (p.sup.k === 'healLow' && u.hp / u.hpMax < 0.8) heal(p, u, u.hpMax * p.sup.healPct + p.sup.healFlat);
+      if (p.sup.k === 'healLow' && u.hp / u.hpMax < 0.8) { heal(p, u, u.hpMax * p.sup.healPct + p.sup.healFlat); if (p.sup.cleanse && rnd() < p.sup.cleanse) cleanse(u, 1); }
       if (p.mat && p.out) { u.energy += 50; if (u.energy >= p.mat.cap) spawnPet(u, p); }
     }
+    // materialized Fantomon passive: Emerald Dew heals allies around it at its turn start
+    if (u.alive && !B.over && u.regenAllies) for (const a of alliesOf(u)) if (a !== u && dist(a.x, a.y, u.x, u.y) <= u.regenAllies.r) heal(u, a, u.hpMax * u.regenAllies.pct);
     if (u.alive && !B.over) {
       const stunned = has(u, 'stun'), locked = stunned || has(u, 'freeze') || has(u, 'frenzy');
       if (!stunned) for (let i = 0; i < u.cds.length; i++) if (u.cds[i] > 0) u.cds[i]--;
@@ -898,8 +950,28 @@ export function simulate(P, seed, log) {
           let best = null, bd = 9; for (const f of U) if (f.alive && f.team !== u.team) { const d = dist(f.x, f.y, u.x, u.y); if (d < bd) { bd = d; best = f; } }
           if (best) { if (ev) ev.push({ e: 'cast', u: u.id, n: `${p.name} 지원`, el: sp.el, tg: [best.id], ax: best.x, ay: best.y, sh: 'S', ar: 0, pet: 1 }); hit(p, best, sp.coef, sp.flat, sp.el, { noProc: 1, noReact: 1 }); }
           u.petStk++; if (u.petStk === 4 && sp.v.StatusDmgAddPer) addStatus(u, { k: 'dmgUp', v: sp.v.StatusDmgAddPer, exp: 1e9, buff: true });
-        } else if (sp.k === 'shield3') { u.petStk++; if (u.petStk % 3 === 0) addShield(u, u, eDef(u) * (sp.v.ShieldByDefence || 0), 3); }
+        } else if (sp.k === 'shield3') {
+          // Armor Protection: DEF Up stacks each turn; the 3rd stack is spent on a DEF-based shield
+          u.petStk++;
+          if (u.petStk % 3 === 0) { for (let i = u.st.length - 1; i >= 0; i--) if (u.st[i].armo) removeStatus(u, i); recalc(u); addShield(u, u, eDef(u) * (sp.v.ShieldByDefence || 0), 3); }
+          else if (sp.defStk && sp.v.DefenceScale) addStatus(u, { k: 'defUp', v: u.def * sp.v.DefenceScale, exp: 1e9, buff: true, armo: 1 });
+        } else if (sp.k === 'nap' && u.petStk < 7) {
+          // Just Nap: 7 Sleep stacks → Pava (estimate: ATK/DEF up for the rest of the battle)
+          if (++u.petStk === 7) {
+            pvLabel(u, `${p.name} · 파바`);
+            if (sp.v.AttackScale) addStatus(u, { k: 'atkUp', v: u.atk * sp.v.AttackScale, exp: 1e9, buff: true, nd: 1 });
+            if (sp.v.DefenceScale) addStatus(u, { k: 'defUp', v: u.def * sp.v.DefenceScale, exp: 1e9, buff: true, nd: 1 });
+          }
+        } else if (sp.k === 'ga' && u.turnNo === 3) {
+          // Radiant Sanctuary: Guardian Angel ends → restore 50% of lost HP, Power Unsealed for the battle
+          pvLabel(u, `${p.name} · 봉인 해제`);
+          heal(p, u, (u.hpMax - u.hp) * 0.5);
+          if (sp.v.CritRatePercent) addStatus(u, { k: 'critUp', v: sp.v.CritRatePercent, exp: 1e9, buff: true, nd: 1 });
+          if (sp.v.BlockAvoidPercent) addStatus(u, { k: 'accUp', v: sp.v.BlockAvoidPercent, exp: 1e9, buff: true, nd: 1 });
+        }
       }
+      // Evanescent Phantom: the materialized Fantomon fades after its 3rd turn
+      if (u.pet && u.phantom && u.alive && u.turnNo - u.spawnT >= u.phantom.life) { kill(u, null); return; }
       // monster passives at the end of the monster's turn
       if (u.alive && !B.over && u.mp) {
         const mp = u.mp;
@@ -946,6 +1018,8 @@ export function simulate(P, seed, log) {
       if (sp.k === 'inkBurst') { for (let i = 0; i < u.cds.length; i++) if (u.cds[i] > 0) u.cds[i]--; if (v.StatusDmgAddPer) addStatus(u, { ...perm, k: 'dmgUp', v: v.StatusDmgAddPer }); }
       else if (sp.k === 'cloud') { if (v.StatusDmgReducePer) addStatus(u, { k: 'dmgRed', v: v.StatusDmgReducePer, exp: 3, buff: true }); if (v.BlockPercent) addStatus(u, { ...perm, k: 'blockUp', v: v.BlockPercent }); }
       else if (sp.k === 'atkSpd') { if (v.AttackScale) addStatus(u, { ...perm, k: 'atkUp', v: u.atk * v.AttackScale }); if (v.SpeedScale) addStatus(u, { ...perm, k: 'spdUp', v: u.spd * v.SpeedScale }); }
+      else if (sp.k === 'ga') addStatus(u, { k: 'ga', exp: 3, buff: true, nd: 1 });
+      else if (sp.k === 'purity' && v.StatusDmgReducePer) addStatus(u, { ...perm, k: 'purity', v: v.StatusDmgReducePer });
     }
     u.above50 = u.hp / u.hpMax >= 0.5;
   }

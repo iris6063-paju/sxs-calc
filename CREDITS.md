@@ -8,7 +8,8 @@
 
 - **Purrwikimania** — https://www.purrwikimania.com/combat/
   피해 계산 순서, 속도(행동 간격), 치명 · 막기, 원소 배율, 레벨 보정, 팀 전투 규칙, 스킬 계수 · 레벨 기준표, 적 능력치 · 층 구성,
-  몹 스킬과 몹 · 보스 비전(패시브) 71종의 설명(`tools/passives.mjs` 의 전투 모델과 한국어 번역 이름은 이 설명을 바탕으로 이 프로젝트에서 만든 것입니다).
+  몹 스킬과 몹 · 보스 비전(패시브) 71종의 설명(`tools/passives.mjs` 의 전투 모델과 한국어 번역 이름은 이 설명을 바탕으로 이 프로젝트에서 만든 것입니다),
+  판타몬 19종의 지원 · 실체화 스킬 · 비전 설명과 품질별 수치(`/pets`; `tools/pets_fx.mjs` 의 전투 모델과 한국어 번역도 이 프로젝트에서 만든 것입니다).
   `js/gamedata.js` 의 수치는 이 사이트가 정리한 표에서 계산기에 필요한 부분(직업 18종의 전투스킬, 판타지아 등반 4개 지역)을 추려 변환한 것입니다.
 - **Keripo — "[Sword x Staff] Damage Formula (Datamined)"** — https://keripo.com/2026/10/sword-x-staff-damage-formula-datamined/
   (원 정리: Reddit r/SwordxStaff_Official, 디컴파일 u/ninjan74) 피해 구간(Z1~Z6) 구조와 판정 순서 교차 확인.

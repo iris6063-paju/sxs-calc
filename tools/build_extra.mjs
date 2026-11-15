@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { PV } from './passives.mjs';
+import { PFX } from './pets_fx.mjs';
 
 const [, , DL, DL2, OUT] = process.argv;
 const J = (f) => JSON.parse(fs.readFileSync(path.join(DL, f), 'utf8'));
@@ -170,6 +171,8 @@ if (fs.existsSync(petsPath)) {
     const role = strip((/<dt>Role<\/dt><dd>([\s\S]*?)<\/dd>/.exec(h) || [])[1] || '');
     const bm = /HP (\d+)%[^A]*ATK (\d+)%[^D]*DEF (\d+)%[^S]*SPD (\d+)%/.exec(strip((/<dt>Battle base<\/dt><dd>([\s\S]*?)<\/dd>/.exec(h) || [])[1] || ''));
     const pet = { id: +a[1], en, ko: KO_PET[en] || en, ok: KO_PET_OK.has(en) ? 1 : 0, role: ROLE[role] || role, base: bm ? [+bm[1], +bm[2], +bm[3], +bm[4]] : [90, 100, 90, 100], skills: [] };
+    const fx = PFX[en] || {};
+    if (!PFX[en]) log(`PET ${en}: no entry in tools/pets_fx.mjs`);
     for (const p of h.matchAll(/<div class="phase">([\s\S]*?)(?=<div class="phase">|$)/g)) {
       const title = strip((/<h4>([\s\S]*?)<\/h4>/.exec(p[1]) || [])[1] || '');
       for (const s of p[1].matchAll(/<div class="petskill"([^>]*)>([\s\S]*?)(?=<div class="petskill"|$)/g)) {
@@ -185,7 +188,7 @@ if (fs.existsSync(petsPath)) {
           const sup = { en: name || txt.split(' ').slice(0, 2).join(' '), el: elOf(descHtml), g };
           if (tiers('SkillAttack1')) { sup.c = tiers('SkillAttack1'); sup.fm = +lm('SkillFixedAttack1').toFixed(5); }
           if (tiers('SkillCureByHp')) { sup.hv = tiers('SkillCureByHp'); sup.hfm = +lm('SkillFixedCure').toFixed(5); }
-          for (const k of ['ST:ShieldByDefence', 'ST:StatusDmgAddPer', 'ST:StatusDmgReducePer', 'ST:BlockPercent', 'ST:AttackScale', 'ST:SpeedScale', 'ST:DefenceScale', 'ST:CritRatePercent']) if (tiers(k)) (sup.v = sup.v || {})[k.replace('ST:', '')] = tiers(k);
+          for (const k of Object.keys(v1)) if (k.startsWith('ST:')) (sup.v = sup.v || {})[k.replace('ST:', '')] = tiers(k);
           let m;
           if (/damaging Technique[\s\S]*?(?:on|at) enem/.test(desc) || /assists .* attacks/.test(desc)) { sup.k = 'proc'; sup.ar = (m = /all enemies (?:within )?(\d+) grids? (?:around|of)/.exec(desc)) ? +m[1] : 0; sup.lim = /once per turn/.test(desc) ? 1 : /twice every 2 turns|2 times every 2 turns/.test(desc) ? 1 : 0; if (/dispels 1 buff/.test(desc)) sup.dispelBuff = 1; if ((m = /reduce their (ATK|DEF) by (\d+)%/.exec(desc))) sup.eff = [{ k: m[1] === 'ATK' ? 'weak' : 'abreak', v: +m[2] / 100, p: 0.5, t: 1 }]; if (/DEF Reduction/.test(desc)) sup.eff = [{ k: 'abreak', v: 0.1, p: 1, t: 2 }]; if (sup.hv) sup.healOwner = 1; }
           else if (/cumulatively loses 15%/.test(desc)) sup.k = 'shieldLoss';
@@ -196,23 +199,37 @@ if (fs.existsSync(petsPath)) {
           else if (/reduces the CD of all Techniques by 1 turn/.test(desc)) sup.k = 'inkBurst';
           else if (/reduces DMG taken for 3 turns/.test(desc)) sup.k = 'cloud';
           else sup.k = 'none';
+          if (fx.sup) Object.assign(sup, fx.sup); // hand-checked model + Korean text (tools/pets_fx.mjs)
           if (!pet.sup) pet.sup = sup;
         } else if (/Materialization|Manifestation/.test(txt.slice(0, 40))) {
           const cap = /Energy Cap: (\d+)/.exec(txt), ini = /Initial Energy: (\d+)/.exec(txt);
           pet.mat = { cap: cap ? +cap[1] : 1000, init: ini ? +ini[1] : 600, front: /in front of the caster/.test(txt) ? 1 : 0 };
-        } else if (!/passive|adult form's own copy/.test(txt.slice(0, 160))) {
+        } else if (/adult form's own copy/.test(txt.slice(0, 160))) {
+          // the adult's support skill can carry different numbers than the baby text shown in game
+          const m = /reduce their (ATK|DEF) by (\d+)%/.exec(desc);
+          if (m && pet.sup && pet.sup.eff) pet.sup.effAdult = pet.sup.eff.map((e) => ({ ...e, v: +m[2] / 100 }));
+        } else if (/passive/.test(txt.slice(0, 160))) {
+          const pv = { en: name, el: elOf(descHtml), ...((fx.pv || {})[name] || { k: 'none' }) };
+          if (tiers('SkillAttack1')) pv.c = tiers('SkillAttack1');
+          if (tiers('SkillCureByHp')) pv.hv = tiers('SkillCureByHp');
+          for (const k of Object.keys(v1)) if (k.startsWith('ST:')) (pv.v = pv.v || {})[k] = tiers(k);
+          (pet.pv = pet.pv || []).push(pv);
+        } else {
+          const o = (fx.sk || {})[name] || {}, { bvKey, kind, ...rest } = o;
           const pt = parseText(desc), sk = { en: name || txt.split(' ').slice(0, 2).join(' '), el: elOf(descHtml), ...pt };
           if (v1.CD > 0) sk.cd = v1.CD;
-          if (tiers('SkillAttack1') && pt.tg) { sk.kind = 'dmg'; sk.c = tiers('SkillAttack1'); }
+          if (kind === 'shield' || kind === 'buff') { sk.kind = kind; sk.bv = tiers(bvKey); delete sk.tg; sk.el = 'none'; }
+          else if (tiers('SkillAttack1') && pt.tg) { sk.kind = 'dmg'; sk.c = tiers('SkillAttack1'); }
           else if (tiers('SkillCureByHp')) { sk.kind = 'heal'; sk.hv = tiers('SkillCureByHp'); sk.tg = { t: 'allyLow', r: 4 }; }
-          else continue;
+          else { log(`PET ${en}: skill not modelled: ${name}`); continue; }
+          Object.assign(sk, rest);
           pet.skills.push(sk);
         }
       }
     }
     if (!pet.sup) pet.sup = { en: '-', k: 'none', el: 'none' };
     PETS.push(pet);
-    log(`PET ${pet.id} ${en} base=${pet.base} sup=${pet.sup.en}/${pet.sup.k}/ar${pet.sup.ar || 0} mat=${JSON.stringify(pet.mat || null)} skills=${pet.skills.map((s) => s.en + ':' + s.kind + ':' + JSON.stringify(s.tg) + (s.cd ? ':cd' + s.cd : '')).join(' ; ')}`);
+    log(`PET ${pet.id} ${en} base=${pet.base} sup=${pet.sup.en}/${pet.sup.k}/ar${pet.sup.ar || 0} mat=${JSON.stringify(pet.mat || null)} skills=${pet.skills.map((s) => s.en + ':' + s.kind + ':' + JSON.stringify(s.tg) + (s.cd ? ':cd' + s.cd : '') + (s.eff ? ':' + JSON.stringify(s.eff) : '') + (s.sp ? ':' + JSON.stringify(s.sp) : '')).join(' ; ')} pv=${(pet.pv || []).map((p) => p.en + ':' + p.k).join(',')} supEff=${JSON.stringify(pet.sup.eff || null)} adult=${JSON.stringify(pet.sup.effAdult || null)}`);
   }
 }
 
