@@ -4,8 +4,20 @@
 import * as THREE from 'three';
 
 /* ── shared look ── */
-const RAMP = (() => { const t = new THREE.DataTexture(new Uint8Array([88, 88, 88, 255, 170, 170, 170, 255, 255, 255, 255, 255]), 3, 1, THREE.RGBAFormat); t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; return t; })();
+const ramp = (v) => { const d = new Uint8Array(v.length * 4); v.forEach((x, i) => d.set([x, x, x, 255], i * 4)); const t = new THREE.DataTexture(d, v.length, 1, THREE.RGBAFormat); t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; return t; };
+const RAMP = ramp([88, 170, 255]);           // scenery: classic 3-step cel
+const RAMP_CHAR = ramp([118, 186, 232, 255]); // characters: softer, brighter anime shading
 export const toonMat = (color, o = {}) => new THREE.MeshToonMaterial({ color, gradientMap: RAMP, ...o });
+/** character material: anime cel ramp + a crisp rim light on the silhouette */
+export const charMat = (color, o = {}) => {
+  const m = new THREE.MeshToonMaterial({ color, gradientMap: RAMP_CHAR, ...o });
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>',
+      'float rimF = 1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);\n outgoingLight += vec3(1.0, 0.95, 0.88) * smoothstep(0.6, 0.76, rimF) * 0.3;\n#include <opaque_fragment>');
+  };
+  m.customProgramCacheKey = () => 'sxsToonRim';
+  return m;
+};
 /** ink outline: back faces pushed out along the direction from the part centre (no gaps at box corners), constant-ish pixel width */
 export const OUTLINE = new THREE.ShaderMaterial({
   uniforms: { color: { value: new THREE.Color(0x2a1b14) }, width: { value: 0.0024 } },
@@ -78,17 +90,26 @@ function drawFace(c, eyes, mood, blink) {
   else if (mood === 'hit' || mood === 'panic') {
     ex.forEach((x, i) => { c.strokeStyle = lash; c.lineWidth = 7; const d = i ? -1 : 1; c.beginPath(); c.moveTo(x - 16, ey - 14); c.lineTo(x + 6 * d, ey); c.lineTo(x - 16, ey + 14); if (i) { c.beginPath(); c.moveTo(x + 16, ey - 14); c.lineTo(x - 6, ey); c.lineTo(x + 16, ey + 14); } c.stroke(); });
   } else {
-    // open anime eyes: tall iris, dark upper lash, two highlights
-    const rx = 17, ry = mood === 'focus' || mood === 'angry' ? 20 : 25;
+    // open anime eyes: big tall iris with a dark top, sparkle highlights, thick upper lash with a flick, thin lower lash, brows
+    const rx = 19, ry = mood === 'focus' || mood === 'angry' ? 21 : 27;
     ex.forEach((x, i) => {
-      c.fillStyle = '#ffffff'; c.beginPath(); c.ellipse(x, ey + 2, rx + 3, ry + 2, 0, 0, Math.PI * 2); c.fill();
-      const g = c.createLinearGradient(0, ey - ry, 0, ey + ry); g.addColorStop(0, '#1d1530'); g.addColorStop(0.45, iris); g.addColorStop(1, '#ffffff');
-      c.fillStyle = g; c.beginPath(); c.ellipse(x, ey + 4, rx, ry, 0, 0, Math.PI * 2); c.fill();
-      c.fillStyle = '#1a1320'; c.beginPath(); c.ellipse(x, ey + 6, rx * 0.45, ry * 0.5, 0, 0, Math.PI * 2); c.fill();
-      c.fillStyle = '#ffffff'; c.beginPath(); c.ellipse(x - 6, ey - 8, 6, 8, 0, 0, Math.PI * 2); c.fill(); c.beginPath(); c.arc(x + 7, ey + 12, 3.5, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = lash; c.lineWidth = 7; c.beginPath();
-      if (mood === 'angry' || mood === 'focus') { const d = i ? -1 : 1; c.moveTo(x - 22 * d, ey - ry + 2 - 8); c.lineTo(x + 20 * d, ey - ry + 2 + 2); }
-      else c.ellipse(x, ey + 2, rx + 4, ry + 3, 0, Math.PI * 1.08, Math.PI * 1.92);
+      const side = i ? 1 : -1; // outer corner direction
+      c.fillStyle = '#ffffff'; c.beginPath(); c.ellipse(x, ey + 3, rx + 3, ry + 1, 0, 0, Math.PI * 2); c.fill();
+      const g = c.createLinearGradient(0, ey - ry, 0, ey + ry); g.addColorStop(0, '#140f22'); g.addColorStop(0.35, iris); g.addColorStop(0.85, iris); g.addColorStop(1, '#f4f2ff');
+      c.fillStyle = g; c.beginPath(); c.ellipse(x, ey + 5, rx, ry, 0, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = 'rgba(20,15,34,.55)'; c.lineWidth = 2; c.stroke();
+      c.fillStyle = '#16101f'; c.beginPath(); c.ellipse(x, ey + 7, rx * 0.42, ry * 0.46, 0, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#ffffff'; c.beginPath(); c.ellipse(x - 7, ey - 7, 7, 9, -0.3, 0, Math.PI * 2); c.fill(); c.beginPath(); c.arc(x + 8, ey + 14, 3.8, 0, Math.PI * 2); c.fill();
+      c.fillStyle = 'rgba(255,255,255,.55)'; c.beginPath(); c.arc(x + 9, ey - 4, 2.5, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = lash; c.lineWidth = 8; c.beginPath();
+      if (mood === 'angry' || mood === 'focus') { c.moveTo(x + 24 * side, ey - ry - 6); c.lineTo(x - 20 * side, ey - ry + 4); }
+      else { c.ellipse(x, ey + 3, rx + 4, ry + 3, 0, Math.PI * 1.06, Math.PI * 1.94); }
+      c.stroke();
+      if (mood !== 'angry' && mood !== 'focus') { c.lineWidth = 5; c.beginPath(); c.moveTo(x + (rx + 2) * side, ey - ry * 0.55); c.lineTo(x + (rx + 9) * side, ey - ry * 0.85); c.stroke(); }
+      c.strokeStyle = 'rgba(42,27,20,.6)'; c.lineWidth = 2.5; c.beginPath(); c.ellipse(x, ey + 4, rx + 1, ry + 2, 0, Math.PI * 0.25, Math.PI * 0.75); c.stroke();
+      c.strokeStyle = 'rgba(42,27,20,.75)'; c.lineWidth = 4; c.beginPath();
+      if (mood === 'angry' || mood === 'focus') { c.moveTo(x + 18 * side, ey - ry - 18); c.lineTo(x - 14 * side, ey - ry - 8); }
+      else c.ellipse(x, ey - ry - 2, 16, 7, 0, Math.PI * 1.15, Math.PI * 1.85);
       c.stroke();
     });
   }
@@ -125,7 +146,7 @@ export function buildModel(spec, opts = {}) {
   const matFor = (c, glow, ds) => {
     const col = colorOf(c), key = col + (glow ? 'g' : '') + (ds ? 'd' : '');
     const M = glow ? glowMats : mats; let m = M.get(key);
-    if (!m) { m = glow ? new THREE.MeshBasicMaterial({ color: col, toneMapped: false }) : toonMat(col, ds ? { side: THREE.DoubleSide } : {}); M.set(key, m); }
+    if (!m) { m = glow ? new THREE.MeshBasicMaterial({ color: col, toneMapped: false }) : charMat(col, ds ? { side: THREE.DoubleSide } : {}); M.set(key, m); }
     return m;
   };
   let face = null;
@@ -141,8 +162,11 @@ export function buildModel(spec, opts = {}) {
     mesh.scale.fromArray(sc);
     mesh.castShadow = !p.glow;
     bone.add(mesh);
-    const small = Math.min(...sc.map(Math.abs)) < 0.025 && p.shape !== 'cyl' && p.shape !== 'capsule' && p.shape !== 'torus';
-    if (p.outline !== false && !p.glow && !small) { const o = new THREE.Mesh(g, OUTLINE); mesh.add(o); }
+    // ink only on parts big enough to read: tiny studs, gems and thin trims would turn into black blots
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    const size = g.boundingSphere.radius * Math.max(...sc.map(Math.abs));
+    const thin = ['cyl', 'capsule', 'torus', 'cape'].includes(p.shape) ? false : Math.min(...sc.map(Math.abs)) < 0.02;
+    if (p.outline !== false && !p.glow && !thin && size >= 0.05) { const o = new THREE.Mesh(g, OUTLINE); mesh.add(o); }
     if (p.face && !face) {
       const cv = document.createElement('canvas'); cv.width = 256; cv.height = 160;
       const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;

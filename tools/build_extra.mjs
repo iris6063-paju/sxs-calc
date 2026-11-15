@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PV } from './passives.mjs';
 import { PFX } from './pets_fx.mjs';
+import { moveAndSize } from './skilltext.mjs';
 
 const [, , DL, DL2, OUT] = process.argv;
 const J = (f) => JSON.parse(fs.readFileSync(path.join(DL, f), 'utf8'));
@@ -47,6 +48,7 @@ function parseText(d) {
   const re = /(\d+)% (?:base )?chance to inflict (?:(\d+) stacks? of )?([A-Z][a-z]+(?: [A-Z][a-z]+)?(?: \d)?)(?: for (\d+) turns?)?/g;
   while ((m = re.exec(d))) { const s = STATUS[m[3]]; if (!s) continue; const e = { k: s[0], p: +m[1] / 100, t: m[4] ? +m[4] : s[0] === 'dot' ? 3 : s[0] === 'blind' ? 2 : 1 }; if (s[1]) e.v = s[1]; if (s[0] === 'dot') e.el = 'dark'; o.eff.push(e); }
   if ((m = /(\d+)% (?:base )?chance to reduce their (DEF|ATK|SPD|DMG)(?: by (\d+)%)? for (\d+) turns?/.exec(d))) o.eff.push({ k: { DEF: 'abreak', ATK: 'weak', SPD: 'slow', DMG: 'weak' }[m[2]], v: (+m[3] || 15) / 100, p: +m[1] / 100, t: +m[4] });
+  moveAndSize(d, o);
   if (!o.eff.length) delete o.eff;
   return o;
 }
@@ -186,6 +188,7 @@ if (fs.existsSync(petsPath)) {
         const g = data ? +Object.values(data.lgroup || {})[0] || 11 : 11;
         if (/^Support skill/.test(title)) {
           const sup = { en: name || txt.split(' ').slice(0, 2).join(' '), el: elOf(descHtml), g };
+          if (/Large targets may take multiple hits/.test(desc)) sup.multi = 1;
           if (tiers('SkillAttack1')) { sup.c = tiers('SkillAttack1'); sup.fm = +lm('SkillFixedAttack1').toFixed(5); }
           if (tiers('SkillCureByHp')) { sup.hv = tiers('SkillCureByHp'); sup.hfm = +lm('SkillFixedCure').toFixed(5); }
           for (const k of Object.keys(v1)) if (k.startsWith('ST:')) (sup.v = sup.v || {})[k.replace('ST:', '')] = tiers(k);

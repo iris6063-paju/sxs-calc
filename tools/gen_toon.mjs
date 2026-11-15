@@ -121,10 +121,54 @@ function validate(j, kind) {
   return null;
 }
 
+/* ── refine pass: GPT looks at a render of its own model (and the SD reference for heroes) and improves it ──
+   node tools/gen_toon.mjs --refine [--only id,id] [--url http://localhost:5174]   (needs the local server for the viewer) */
+const REFINE = !!arg('refine', false), BASEURL = arg('url', 'http://localhost:5174');
+const EDGE = ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'].find((p) => fs.existsSync(p));
+function renderShot(id, slot) {
+  return new Promise((res) => {
+    const out = path.join(OUT, '_raw', id + '_shot.png'), boss = id.startsWith('boss_');
+    try { fs.unlinkSync(out); } catch (e) { /* none yet */ }
+    const url = `${BASEURL}/tools/toon_viewer.html?ids=${id}&shot=1&dist=${boss ? 9.5 : id.startsWith('mob_') ? 6.8 : 6.2}&gap=${boss ? 3.8 : 2.5}&ty=${boss ? 1.3 : 0.95}`;
+    const ch = spawn(EDGE, ['--headless=new', '--use-angle=d3d11', '--ignore-gpu-blocklist', '--hide-scrollbars', `--user-data-dir=${path.join(os.tmpdir(), 'sxs-edge-' + slot)}`, '--window-size=900,700', '--virtual-time-budget=6000', `--screenshot=${out}`, url], { stdio: 'ignore' });
+    const t = setTimeout(() => ch.kill(), 90000);
+    ch.on('close', () => { clearTimeout(t); res(fs.existsSync(out) ? out : null); });
+  });
+}
+const REFINE_PROMPT = (job, cur) => {
+  const hero = job.kind === 'hero';
+  return `You designed this cel-shaded 3D ${hero ? 'chibi hero' : 'monster'} for a cute tactics game as a primitive part list for a three.js toon renderer.
+${hero ? 'IMAGE 1 is the official SD reference design. IMAGE 2' : 'The attached image'} is a render of YOUR CURRENT MODEL (left: front 3/4 view, right: back 3/4 view). The renderer adds the toon shading, black outlines${hero ? ' and the big anime eyes on the face part' : ''}.
+Critique the render${hero ? ' against the reference' : ''} and return an IMPROVED, more polished model:
+- fix parts that float, poke through badly, leave gaps or look misplaced; keep everything attached to the right bone
+- ${hero ? 'keep chibi proportions (big head, small body, short legs); make the HAIR read like the reference: volume, soft bangs framing the face from above (the face front below head-local y 0.5 must stay clear for the eyes), side locks, and the back silhouette (ponytail / braids / long hair) clearly visible from behind' : 'make the silhouette instantly readable and charming (chunky toy look), feet / lowest point on y = 0 unless it hovers, readable eyes, a clear head and body hierarchy'}
+- ${hero ? 'layer the outfit like the reference (armour plates, skirt / coat tails, trims, belts, ribbons) with its colours; capes should hang from the back of the shoulders down to about knee height and be wide enough to read from behind' : 'add 4–10 tasteful detail parts (horns, spikes, plates, markings, claws, tufts) that fit the description'}
+- ${hero ? 'weapons at a believable size: a sword blade about 0.55–0.7 long, a staff about 1.2–1.4 long held upright, a shield about 0.4 tall; items held in a hand point along +Z from the hand' : 'keep its bone names stable for the animation; update "anim" if you change bones'}
+- NEVER remove or shrink signature features (weapons, wings, tails, crests, horns, held items); ${job.id.startsWith('boss_') ? 'this is a BOSS: keep or enlarge its dramatic silhouette (full wingspan, big weapons, long necks / tails) and make it more imposing and detailed, not more compact' : 'keep the overall size and footprint'}
+- prefer smooth rounded forms; stay within ${hero ? 70 : 80} parts
+${!hero && /"MAIN"/.test(JSON.stringify(cur.palette || {})) ? 'Keep the "MAIN" / "LIGHT" / "DARK" palette keys for the main body colours (the game recolours them).' : ''}
+CURRENT MODEL JSON: ${JSON.stringify(cur)}
+RULES (unchanged): ${hero ? HERO_RIG : CREATURE_RULES(job.id.startsWith('boss_'))}
+${SHAPES}
+OUTPUT: ONLY the full improved JSON object (same "id", "kind"${hero ? ', "style"' : ''}, same format), no markdown, no comments.`;
+};
+
 /* ── runner ── */
 fs.mkdirSync(path.join(OUT, '_raw'), { recursive: true });
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sxs-toon-'));
-const todo = jobs.filter((j) => (!ONLY || ONLY.includes(j.id)) && (FORCE || !fs.existsSync(path.join(OUT, j.id + '.json'))));
+const todo = jobs.filter((j) => (!ONLY || ONLY.includes(j.id)) && (REFINE ? fs.existsSync(path.join(OUT, j.id + '.json')) : FORCE || !fs.existsSync(path.join(OUT, j.id + '.json'))));
+if (REFINE) {
+  // renders first (4 Edge windows at a time), then the prompts carry the current JSON
+  let r = 0;
+  await Promise.all(Array.from({ length: 4 }, async (_, slot) => { while (r < todo.length) { const j = todo[r++]; j.shot = await renderShot(j.id, slot); } }));
+  for (const j of todo) {
+    const cur = JSON.parse(fs.readFileSync(path.join(OUT, j.id + '.json'), 'utf8'));
+    const keep = path.join(OUT, '_raw', j.id + '.v1.json'); if (!fs.existsSync(keep)) fs.writeFileSync(keep, JSON.stringify(cur));
+    j.images = j.kind === 'hero' ? [...j.images, j.shot].filter(Boolean) : [j.shot].filter(Boolean);
+    j.prompt = REFINE_PROMPT(j, cur);
+  }
+  console.log(`rendered ${todo.filter((j) => j.shot).length}/${todo.length} review shots`);
+}
 function runOne(job, attempt = 1, fix = '') {
   return new Promise((resolve) => {
     const raw = path.join(OUT, '_raw', job.id + '.txt'), t0 = Date.now();

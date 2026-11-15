@@ -182,7 +182,9 @@ function buildPet(d, owner) {
 function buildMob(key, level, opts, sr, fix, uws) {
   const mob = MOB.get(key), st = Array.isArray(fix) && fix.length === 14 ? stFrom(fix, level) : mobStats(key, level, sr);
   if (!st) throw new Error(`${mob.ko}: 이 레벨·랭크의 능력치 자료가 없습니다`);
-  const u = { kind: 'mob', name: mob.ko, key, level, move: 4, big: mob.ty === 2, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null, uws: !!uws };
+  // body size (assumption, no public data): bosses stand on 2×2 cells, Hieromon (신수 시련) on 3×3
+  const sz = mob.ty === 2 ? (String(key).endsWith('|3') ? 3 : 2) : 1;
+  const u = { kind: 'mob', name: mob.ko, key, level, move: 4, sz, big: sz > 1, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null, uws: !!uws };
   u.atk = st.atk; u.def = st.def; u.hpMax = st.hp; u.spd = st.spd;
   for (const k of PCT) u[k] = (st[k] || 0) / 100;
   for (const k of RAW) u[k] = 0;
@@ -212,6 +214,9 @@ function compileMobPassives(u, mob, mc, est) {
   if (Object.keys(mp).length) u.mp = mp;
   u.mc = mc;
 }
+/** footprint offsets from the anchor cell: 1×1, 2×2 (anchor = low corner) and 3×3 (anchor = centre) */
+const FP = { 1: [[0, 0]], 2: [[0, 0], [1, 0], [0, 1], [1, 1]], 3: [[-1, -1], [0, -1], [1, -1], [-1, 0], [0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] };
+export const fpOf = (u) => FP[u.sz] || FP[1];
 /** where a unit may be placed before the fight (inside the drawn board): x columns, y rows per team */
 export const CELL_BOX = { x: [4, 16], y: [[3, 9], [11, 17]] };
 const okCell = (c, ti) => Array.isArray(c) && Number.isInteger(c[0]) && Number.isInteger(c[1]) && c[0] >= CELL_BOX.x[0] && c[0] <= CELL_BOX.x[1] && c[1] >= CELL_BOX.y[ti][0] && c[1] <= CELL_BOX.y[ti][1];
@@ -227,18 +232,27 @@ export function prepare(setup) {
   });
   const units = [];
   teams.forEach((list, ti) => {
-    // chosen starting cells first (inside the team's box), then melee units to the front row, ranged behind; rows fill centre-out
+    // chosen starting cells first (inside the team's box), large monsters next (front, centre-out),
+    // then melee units to the front row, ranged behind; rows fill centre-out
     const taken = new Set();
-    for (const u of list) if (okCell(u.cellReq, ti) && !taken.has(u.cellReq[1] * W + u.cellReq[0])) { u.fixedCell = 1; taken.add(u.cellReq[1] * W + u.cellReq[0]); }
+    const cellsAt = (u, x, y) => fpOf(u).map(([dx, dy]) => [x + dx, y + dy]);
+    const onSide = (y) => (ti === 0 ? y <= 9 : y >= 11);
+    const canPut = (u, x, y) => cellsAt(u, x, y).every(([cx, cy]) => cx >= 0 && cy >= 0 && cx < W && cy < H && onSide(cy) && !taken.has(cy * W + cx));
+    const put = (u, x, y) => { u.x = x; u.y = y; for (const [cx, cy] of cellsAt(u, x, y)) taken.add(cy * W + cx); };
+    for (const u of list) if (okCell(u.cellReq, ti) && canPut(u, u.cellReq[0], u.cellReq[1])) { u.fixedCell = 1; put(u, u.cellReq[0], u.cellReq[1]); }
     const withReach = list.map((u) => ({ u, reach: Math.max(0, ...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => skillReach(k.s))) || 1 }));
     withReach.sort((a, b) => a.reach - b.reach);
+    for (const { u } of withReach) if (!u.fixedCell && u.sz > 1) {
+      // anchor: 2×2 covers x..x+1 / y..y+1, 3×3 is centred
+      const front = ti === 0 ? (u.sz === 2 ? 8 : 8) : (u.sz === 2 ? 11 : 12);
+      outer: for (let row = 0; row < 7; row++) for (const col of [10, 7, 13, 4, 16]) { const y = ti === 0 ? front - row : front + row; if (canPut(u, col, y)) { put(u, col, y); u.fixedCell = 1; break outer; } }
+    }
     const cols = [10, 9, 11, 8, 12, 7, 13, 6, 14];
     const perRow = list.length > 20 ? 9 : list.length > 15 ? 7 : 5;
     let slot = 0;
     withReach.forEach(({ u, reach }) => {
       u.team = ti; u.reach = reach;
-      if (u.fixedCell) { u.x = u.cellReq[0]; u.y = u.cellReq[1]; }
-      else { let x, y; do { const row = Math.floor(slot / perRow); x = cols[slot % perRow]; y = ti === 0 ? 9 - row : 11 + row; slot++; } while (taken.has(y * W + x) && slot < 400); taken.add(y * W + x); u.x = x; u.y = y; }
+      if (!u.fixedCell) { let x, y; do { const row = Math.floor(slot / perRow); x = cols[slot % perRow]; y = ti === 0 ? 9 - row : 11 + row; slot++; } while (taken.has(y * W + x) && slot < 400); put(u, x, y); }
       delete u.cellReq; delete u.fixedCell;
       units.push(u);
     });
@@ -259,6 +273,7 @@ const dist = (ax, ay, bx, by) => Math.abs(ax - bx) + Math.abs(ay - by);
 export function simulate(P, seed, log) {
   const rnd = rngFrom(seed);
   const occ = new Int16Array(W * H).fill(-1);
+  const setOcc = (u, v) => { for (const [dx, dy] of fpOf(u)) { const x = u.x + dx, y = u.y + dy; if (x >= 0 && y >= 0 && x < W && y < H) occ[y * W + x] = v; } };
   const ev = log ? [] : null;
   const U = P.units.map((t) => ({
     ...t, hp: t.hpMax, alive: !t.out, st: [], turnNo: 0, next: 0, pool: 0,
@@ -268,7 +283,7 @@ export function simulate(P, seed, log) {
     casts: 0, eye: 0, stone: 0, marks: 0, lossAcc: 0, supTurn: -1, supN: 0, petStk: 0, undyingUsed: false, above50: true, voidUsed: false, energy: 0, reactCast: -1,
   }));
   const B = { U, pvp: P.pvp, round: 1, pvpScale: 1, healScale: 1, castId: 0, over: false, winner: -1, now: 0 };
-  for (const u of U) if (!u.out) occ[u.y * W + u.x] = u.id;
+  for (const u of U) if (!u.out) setOcc(u, u.id);
   const aliveCount = [0, 0];
   for (const u of U) if (!u.pet) aliveCount[u.team]++;
   // monster passive stat multipliers: Cloud Veil stacks (ATK), Mettle of Trial stacks (ATK & DEF)
@@ -278,6 +293,11 @@ export function simulate(P, seed, log) {
   const eSpd = (u) => Math.max(1, u.spd * u.mSpd + u.aSpd);
   const interval = (u) => 100000 / Math.sqrt(eSpd(u) * rankScale(u.level));
   const free = (x, y) => x >= 0 && y >= 0 && x < W && y < H && occ[y * W + x] < 0;
+  /* unit footprints: large monsters stand on 2×2 or 3×3 cells */
+  const fits = (u, x, y) => { for (const [dx, dy] of fpOf(u)) { const cx = x + dx, cy = y + dy; if (cx < 0 || cy < 0 || cx >= W || cy >= H) return false; const o = occ[cy * W + cx]; if (o >= 0 && o !== u.id) return false; } return true; };
+  /** grid steps from a cell to the nearest cell of a unit's footprint */
+  const dU = (f, x, y) => { if (!(f.sz > 1)) return Math.abs(f.x - x) + Math.abs(f.y - y); let m = 99; for (const [dx, dy] of fpOf(f)) { const d = Math.abs(f.x + dx - x) + Math.abs(f.y + dy - y); if (d < m) m = d; } return m; };
+  const dUU = (a, b) => { if (!(a.sz > 1)) return dU(b, a.x, a.y); if (!(b.sz > 1)) return dU(a, b.x, b.y); let m = 99; for (const [dx, dy] of fpOf(a)) m = Math.min(m, dU(b, a.x + dx, a.y + dy)); return m; };
   const setBalance = () => {
     if (!P.balance) return;
     B.pvpScale = B.round < 12 ? 0.2 : 0.2 + 0.1 * Math.min(99, B.round - 11);
@@ -334,7 +354,7 @@ export function simulate(P, seed, log) {
     if (ev) ev.push({ e: 'st', t: u.id, k: s.k, on: 0 });
   }
   function kill(t, by) {
-    t.alive = false; t.hp = 0; occ[t.y * W + t.x] = -1;
+    t.alive = false; t.hp = 0; setOcc(t, -1);
     if (by) by.kills++;
     if (ev) ev.push({ e: 'die', u: t.id });
     if (t.pet) { petGone(t); return; }
@@ -343,7 +363,7 @@ export function simulate(P, seed, log) {
     if (by && by.alive && by.ch) {
       const c = by.ch;
       if (c.spdKill) { const s = has(by, 'spdStk'); if (s) { s.n = Math.min(4, s.n + 1); recalc(by); stEv(by, s, true); } else addStatus(by, { k: 'spdStk', v: by.spd * c.spdKill, n: 1, exp: 1e9, buff: true }); }
-      if (c.killSplash) { const k = c.killSplash, cx = t.x, cy = t.y; for (const f of U) if (f.alive && f.team !== by.team && dist(f.x, f.y, cx, cy) <= k.ar) hit(by, f, k.coef, k.flat, k.el, { noProc: 1, noReact: 1 }); }
+      if (c.killSplash) { const k = c.killSplash, cx = t.x, cy = t.y; for (const f of U) if (f.alive && f.team !== by.team && dU(f, cx, cy) <= k.ar) hit(by, f, k.coef, k.flat, k.el, { noProc: 1, noReact: 1 }); }
     }
   }
   function heal(a, t, v) {
@@ -416,7 +436,7 @@ export function simulate(P, seed, log) {
     return hpDmg;
   }
   /* ── monster passives (비전) ── */
-  const foesOfT = (u, cx, cy, r) => U.filter((f) => f.alive && f.team !== u.team && dist(f.x, f.y, cx, cy) <= r);
+  const foesOfT = (u, cx, cy, r) => U.filter((f) => f.alive && f.team !== u.team && dU(f, cx, cy) <= r);
   function pvAoe(u, r, el, hits = 1, cx = u.x, cy = u.y) {
     for (let h = 0; h < hits && !B.over && u.alive; h++) for (const f of foesOfT(u, cx, cy, r)) hit(u, f, (u.mc || 1) / hits, 0, el, { noProc: 1, noReact: 1 });
   }
@@ -498,7 +518,7 @@ export function simulate(P, seed, log) {
     for (const p of c.procs) {
       if ((p.on === 'crit' && kind !== 1) || (p.opt.cond && p.opt.cond !== el) || rnd() >= p.p) continue;
       const tx = t.x, ty = t.y;
-      const list = p.ar ? U.filter((f) => f.alive && f.team !== a.team && dist(f.x, f.y, tx, ty) <= p.ar) : t.alive ? [t] : [];
+      const list = p.ar ? U.filter((f) => f.alive && f.team !== a.team && dU(f, tx, ty) <= p.ar) : t.alive ? [t] : [];
       for (const f of list) { hit(a, f, p.coef, p.flat, p.el, { noProc: 1, noReact: 1 }); if (p.opt.eff && f.alive) for (const e of p.opt.eff) tryStatus(a, f, e); }
     }
     if (t.alive) for (const i of c.inflicts) if ((!i.cond || i.cond === el) && rnd() < i.p) tryStatus(a, t, { ...i.e, p: 1 });
@@ -512,10 +532,10 @@ export function simulate(P, seed, log) {
     if (t.reactCast === B.castId) return;
     let fired = false;
     for (const r of kind === 2 ? c.block.concat(c.hurt) : c.hurt) {
-      if (!a.alive || !t.alive || dist(a.x, a.y, t.x, t.y) > r.range || rnd() >= r.p) continue;
+      if (!a.alive || !t.alive || dUU(a, t) > r.range || rnd() >= r.p) continue;
       fired = true;
       if (r.inflict) tryStatus(t, a, r.inflict);
-      else if (r.aoe) { for (const f of U.filter((x) => x.alive && x.team !== t.team && dist(x.x, x.y, t.x, t.y) <= r.aoe)) hit(t, f, r.coef, r.flat, r.el, { noProc: 1, noReact: 1 }); }
+      else if (r.aoe) { for (const f of U.filter((x) => x.alive && x.team !== t.team && dUU(x, t) <= r.aoe)) hit(t, f, r.coef, r.flat, r.el, { noProc: 1, noReact: 1 }); }
       else hit(t, a, r.coef, r.flat, r.el, { base: (r.by === 'def' ? eDef(t) : eAtk(t)) * r.coef + r.flat, noProc: 1, noReact: 1 });
     }
     if (c.reflect && t.shield > 0 && a.alive) { fired = true; applyDamage(t, a, Math.max(1, Math.floor(d * c.reflect)), { el: 'light', kind: 4 }); }
@@ -562,7 +582,7 @@ export function simulate(P, seed, log) {
       if (sw && sw.cast !== B.castId) {
         sw.cast = B.castId; sw.n--;
         const cx = a.x, cy = a.y;
-        for (const f of U) if (f.alive && f.team !== t.team && dist(f.x, f.y, cx, cy) <= 1) hit(t, f, sw.coef, sw.flat, 'light', { noReact: 1 });
+        for (const f of U) if (f.alive && f.team !== t.team && dU(f, cx, cy) <= 1) hit(t, f, sw.coef, sw.flat, 'light', { noReact: 1 });
         if (sw.n <= 0) { const i = t.st.indexOf(sw); if (i >= 0) removeStatus(t, i); recalc(t); }
       }
     }
@@ -583,6 +603,7 @@ export function simulate(P, seed, log) {
     }
     if (rnd() >= p) return;
     if (k === 'delay') { t.next += v * interval(t); return; } // pushes the target's next action back
+    if (k === 'kb') { knockback(a, t, e.n || 1, e.side); return; } // forced move, rolled like a status
     const turns = e.t || 1;
     if (CONTROL[k]) { t.ailStreak = t.turnNo - t.lastAil <= 1 ? t.ailStreak + 1 : 1; t.lastAil = t.turnNo; }
     if (k === 'cold' || k === 'riven') {
@@ -615,8 +636,9 @@ export function simulate(P, seed, log) {
   /* ── targeting ── */
   const foesOf = (u) => { const tn = has(u, 'taunt'); if (tn && U[tn.src] && U[tn.src].alive) return [U[tn.src]]; const o = []; for (const f of U) if (f.alive && f.team !== u.team) o.push(f); return o; };
   const alliesOf = (u) => { const o = []; for (const f of U) if (f.alive && f.team === u.team) o.push(f); return o; };
-  function inShape(tg, cx, cy, aim, f) {
-    const dx = f.x - cx, dy = f.y - cy;
+  /** does one cell lie in a caster-anchored area (A / Q / F) */
+  function cellIn(tg, cx, cy, aim, x, y) {
+    const dx = x - cx, dy = y - cy;
     switch (tg.t) {
       case 'A': return Math.abs(dx) + Math.abs(dy) <= tg.r && (dx || dy);
       case 'Q': return Math.max(Math.abs(dx), Math.abs(dy)) <= tg.r && (dx || dy);
@@ -624,12 +646,15 @@ export function simulate(P, seed, log) {
       default: return false;
     }
   }
-  const inAim = (tg, ax, ay, f) => (tg.t === 'TQ' ? Math.max(Math.abs(f.x - ax), Math.abs(f.y - ay)) <= tg.ar : dist(f.x, f.y, ax, ay) <= tg.ar);
+  /** how many cells of a unit's footprint the area covers (0 = not hit) */
+  function inShape(tg, cx, cy, aim, f) { let n = 0; for (const [dx, dy] of fpOf(f)) if (cellIn(tg, cx, cy, aim, f.x + dx, f.y + dy)) n++; return n; }
+  const cellAim = (tg, ax, ay, x, y) => (tg.t === 'TQ' ? Math.max(Math.abs(x - ax), Math.abs(y - ay)) <= tg.ar : dist(x, y, ax, ay) <= tg.ar);
+  function inAim(tg, ax, ay, f) { let n = 0; for (const [dx, dy] of fpOf(f)) if (cellAim(tg, ax, ay, f.x + dx, f.y + dy)) n++; return n; }
   function standCell(u, reach, pred) {
     for (const [dx, dy, d] of DIAMOND) {
       if (d > reach) break;
       const x = u.x + dx, y = u.y + dy;
-      if (d === 0 ? pred(x, y) : free(x, y) && pred(x, y)) return [x, y, d];
+      if (d === 0 ? pred(x, y) : fits(u, x, y) && pred(x, y)) return [x, y, d];
     }
     return null;
   }
@@ -637,14 +662,15 @@ export function simulate(P, seed, log) {
   function plan(u, s, pool, foes) {
     const tg = s.tg, leap = s.leap || 0, reach = pool + leap;
     if (!foes.length) return null;
+    const bigF = s.bigFirst ? 1 : 0; // "Prioritizes large targets" / "...the skill range that contains large targets"
     if (tg.t === 'S') {
       const min = tg.min || 1;
       const c = [];
-      for (const f of foes) { const d = dist(u.x, u.y, f.x, f.y); const need = d > tg.r ? d - tg.r : d < min ? min - d : 0; if (need <= reach) c.push([need, f.hp / f.hpMax, f]); }
-      c.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      for (const f of foes) { const d = dU(f, u.x, u.y); const need = d > tg.r ? d - tg.r : d < min ? min - d : 0; if (need <= reach) c.push([need, f.hp / f.hpMax, f]); }
+      c.sort((a, b) => bigF * ((b[2].sz || 1) - (a[2].sz || 1)) || a[0] - b[0] || a[1] - b[1]);
       for (const [, , f] of c) {
-        const cell = standCell(u, reach, (x, y) => { const d = dist(x, y, f.x, f.y); return d >= min && d <= tg.r; });
-        if (cell) return { x: cell[0], y: cell[1], walk: Math.max(0, cell[2] - leap), targets: [f], ax: f.x, ay: f.y };
+        const cell = standCell(u, reach, (x, y) => { const d = dU(f, x, y); return d >= min && d <= tg.r; });
+        if (cell) return { x: cell[0], y: cell[1], walk: Math.max(0, cell[2] - leap), targets: [f], cnt: new Map([[f.id, 1]]), ax: f.x, ay: f.y };
       }
       return null;
     }
@@ -653,19 +679,19 @@ export function simulate(P, seed, log) {
       const seen = new Set();
       for (const f of foes) {
         const cand = tg.ar > 0 ? [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] : [[0, 0]];
-        for (const [ox, oy] of cand) {
-          const ax = f.x + ox, ay = f.y + oy; if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
+        for (const [fx, fy] of fpOf(f)) for (const [ox, oy] of cand) {
+          const ax = f.x + fx + ox, ay = f.y + fy + oy; if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
           const key = ay * W + ax; if (seen.has(key)) continue; seen.add(key);
           const need = Math.max(0, dist(u.x, u.y, ax, ay) - tg.r); if (need > reach) continue;
-          let n = 0; for (const g of foes) if (inAim(tg, ax, ay, g)) n++;
-          if (n) aims.push([n, need, ax, ay]);
+          let n = 0, big = 0; for (const g of foes) if (inAim(tg, ax, ay, g)) { n++; if (g.sz > 1) big = 1; }
+          if (n) aims.push([n, need, ax, ay, big]);
         }
       }
-      aims.sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+      aims.sort((a, b) => bigF * (b[4] - a[4]) || b[0] - a[0] || a[1] - b[1]);
       for (let i = 0; i < aims.length && i < 6; i++) {
         const [, , ax, ay] = aims[i];
         const cell = standCell(u, reach, (x, y) => dist(x, y, ax, ay) <= tg.r);
-        if (cell) return { x: cell[0], y: cell[1], walk: Math.max(0, cell[2] - leap), targets: foes.filter((g) => inAim(tg, ax, ay, g)), ax, ay };
+        if (cell) { const cnt = new Map(); const targets = foes.filter((g) => { const k = inAim(tg, ax, ay, g); if (k) cnt.set(g.id, k); return k > 0; }); return { x: cell[0], y: cell[1], walk: Math.max(0, cell[2] - leap), targets, cnt, ax, ay }; }
       }
       return null;
     }
@@ -675,25 +701,60 @@ export function simulate(P, seed, log) {
     for (const [dx, dy, d] of DIAMOND) {
       if (d > reach) break;
       const x = u.x + dx, y = u.y + dy;
-      if (d && !free(x, y)) continue;
+      if (d && !fits(u, x, y)) continue;
       for (let k = 0; k < dirs; k++) {
-        let n = 0;
-        for (const f of foes) if (inShape(tg, x, y, k, f)) n++;
-        if (n > bestN) { bestN = n; best = [x, y, d, k]; }
+        let n = 0, big = 0;
+        for (const f of foes) if (inShape(tg, x, y, k, f)) { n++; if (f.sz > 1) big = 1; }
+        const score = n + (bigF && big ? 100 : 0);
+        if (score > bestN) { bestN = score; best = [x, y, d, k]; }
       }
-      if (bestN >= foes.length) break;
+      if (bestN >= foes.length && !bigF) break;
     }
     if (!best) return null;
-    const [x, y, d, k] = best;
-    return { x, y, walk: Math.max(0, d - leap), targets: foes.filter((f) => inShape(tg, x, y, k, f)), ax: x, ay: y, dir: k };
+    const [x, y, d, k] = best, cnt = new Map();
+    const targets = foes.filter((f) => { const c = inShape(tg, x, y, k, f); if (c) cnt.set(f.id, c); return c > 0; });
+    return { x, y, walk: Math.max(0, d - leap), targets, cnt, ax: x, ay: y, dir: k };
   }
+  /** kind: 1 leap, 'dash' | 'kb' | 'retreat' for skill movement (shown differently in the replay) */
   function moveTo(u, x, y, leap) {
     if (x === u.x && y === u.y) return;
-    occ[u.y * W + u.x] = -1; u.x = x; u.y = y; occ[y * W + x] = u.id;
-    if (ev) ev.push({ e: 'move', u: u.id, x, y, leap: leap ? 1 : 0 });
+    setOcc(u, -1); u.x = x; u.y = y; setOcc(u, u.id);
+    if (ev) ev.push({ e: 'move', u: u.id, x, y, leap: leap === 1 || leap === true ? 1 : 0, ...(typeof leap === 'string' ? { [leap]: 1 } : {}) });
+  }
+  /** DIRS index that points from the unit toward a target */
+  const aimDir = (u, t) => { if (!t) return u.team ? 2 : 0; const dx = t.x - u.x, dy = t.y - u.y; return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : dy >= 0 ? 0 : 2; };
+  /** dash: along the aim up to n cells, ending on the farthest free cell; no passing through units bigger than 4 cells */
+  function dashMove(u, dir, n) {
+    const d = DIRS[dir]; if (!d) return;
+    let best = null;
+    for (let i = 1; i <= n; i++) {
+      const x = u.x + d[0] * i, y = u.y + d[1] * i;
+      if (x < 0 || y < 0 || x >= W || y >= H) break;
+      const o = occ[y * W + x]; if (o >= 0 && o !== u.id && (U[o].sz || 1) >= 3) break;
+      if (fits(u, x, y)) best = [x, y];
+    }
+    if (best) moveTo(u, best[0], best[1], 'dash');
+  }
+  /** knockback: the target slides away from the attacker (or to a side) cell by cell until blocked; large units stand firm */
+  function knockback(a, t, n, side) {
+    if (!t.alive || (t.sz || 1) > 1 || has(t, 'freeze') || has(t, 'immob')) return;
+    let dx = t.x - a.x, dy = t.y - a.y, sx = 0, sy = 0;
+    if (Math.abs(dx) >= Math.abs(dy)) { sx = Math.sign(dx) || (t.team ? 1 : -1); } else sy = Math.sign(dy);
+    if (side) { const r = rnd() < 0.5 ? 1 : -1; [sx, sy] = [sy * r || 0, sx * r || 0]; if (!sx && !sy) sy = r; }
+    let x = t.x, y = t.y;
+    for (let i = 0; i < n; i++) { if (!free(x + sx, y + sy)) break; x += sx; y += sy; }
+    if (x !== t.x || y !== t.y) moveTo(t, x, y, 'kb');
+  }
+  /** retreat: step up to n cells to the free cell farthest from the nearest enemy */
+  function retreatMove(u, n) {
+    const foes = foesOf(u); if (!foes.length) return;
+    const far = (x, y) => Math.min(...foes.map((f) => dU(f, x, y)));
+    let best = null, bd = far(u.x, u.y);
+    for (const [dx, dy, d] of DIAMOND) { if (d > n) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue; const v = far(x, y); if (v > bd) { bd = v; best = [x, y]; } }
+    if (best) moveTo(u, best[0], best[1], 'retreat');
   }
   function pullTo(t, px, py) {
-    if (!t.alive || has(t, 'freeze') || has(t, 'immob')) return;
+    if (!t.alive || (t.sz || 1) > 1 || has(t, 'freeze') || has(t, 'immob')) return;
     for (const [dx, dy, d] of DIAMOND) {
       if (d > 3) break;
       const x = px + dx, y = py + dy;
@@ -712,7 +773,8 @@ export function simulate(P, seed, log) {
       if (mp.pierce && u.casts % mp.pierce[0].n === 0) u.pierceUntil = u.turnNo + mp.pierce[0].t;
     }
     if (pl.x !== u.x || pl.y !== u.y) moveTo(u, pl.x, pl.y, s.leap);
-    if (ev) ev.push({ e: 'cast', u: u.id, n: s.ko || s.en, el: s.el, tg: pl.targets.map((t) => t.id), ax: pl.ax, ay: pl.ay, sh: s.tg.t, ar: s.tg.ar || s.tg.r || 0 });
+    const ce = ev ? { e: 'cast', u: u.id, n: s.ko || s.en, el: s.el, tg: pl.targets.map((t) => t.id), ax: pl.ax, ay: pl.ay, sh: s.tg.t, ar: s.tg.ar || s.tg.r || 0 } : null;
+    if (ce) ev.push(ce);
     let targets = pl.targets;
     if (s.pull) { const px = s.pull === 'c' ? u.x : pl.ax, py = s.pull === 'c' ? u.y : pl.ay; for (const t of targets) pullTo(t, px, py); }
     const o = { doom: s.doom, ls: s.ls || 0, blind: u.blind, acc: 0, boost: 0, single: (s.hits || 1) + (s.h2 || 0) === 1 && !s.sp };
@@ -721,6 +783,10 @@ export function simulate(P, seed, log) {
     if (nd) { o.doom = 1; o.boost += nd.v; }
     const sp = s.sp || {};
     let dealt = 0;
+    // large targets: a "may take multiple hits" skill lands once per covered cell; repeats on one target can decay
+    const reps = (t) => (s.multi && pl.cnt ? Math.max(1, pl.cnt.get(t.id) || 1) : 1);
+    const hitN = new Map();
+    const decay = (t) => { const i = hitN.get(t.id) || 0; hitN.set(t.id, i + 1); return s.rep && i >= s.rep.from ? Math.pow(1 - s.rep.d, i - s.rep.from + 1) : 1; };
     const one = (t, coef, flat, mult) => { o.mult = mult || 1; if (s.big && t.big) o.mult *= 1 + s.big; if (sp.k === 'lucky' && rnd() < sp.p) o.mult *= sp.m; if (sp.k === 'execute') o.mult *= 1 + Math.min(sp.max, Math.floor((1 - t.hp / t.hpMax) / 0.05) * sp.step); const d = hit(u, t, coef, flat, s.el, o); dealt += d; return d; };
     const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
     if (sp.k === 'shieldBurst') {
@@ -732,12 +798,14 @@ export function simulate(P, seed, log) {
       for (let w = 0; w < sp.n && !B.over; w++) {
         const pool = targets.filter((t) => t.alive); if (!pool.length) break;
         const c = pool[Math.floor(rnd() * pool.length)];
-        for (const f of foesOf(u)) if (dist(f.x, f.y, c.x, c.y) <= 1) { const h = seen.get(f.id) || 0; one(f, n.coef, n.flat, Math.pow(1 - sp.decay, h)); seen.set(f.id, h + 1); }
+        for (const f of foesOf(u)) if (dU(f, c.x, c.y) <= 1) { const h = seen.get(f.id) || 0; one(f, n.coef, n.flat, Math.pow(1 - sp.decay, h)); seen.set(f.id, h + 1); }
       }
       for (const id of seen.keys()) afterHit(U[id]);
     } else if (sp.k === 'rand') {
       const main = targets[0], cells = 2 * sp.r * sp.r + 2 * sp.r + 1, seen = new Map();
-      const near = foesOf(u).filter((f) => dist(f.x, f.y, main.x, main.y) <= sp.r);
+      // random strikes pick cells: a large unit is listed once per cell it covers in the area
+      const near = [];
+      for (const f of foesOf(u)) for (const [dx, dy] of fpOf(f)) if (dist(f.x + dx, f.y + dy, main.x, main.y) <= sp.r) near.push(f);
       let landed = 0;
       const strike = (f) => { const h = seen.get(f.id) || 0; one(f, n.coef, n.flat, Math.pow(1 - sp.decay, h)); seen.set(f.id, h + 1); landed++; };
       for (let i = 0; i < sp.n && !B.over; i++) { const r = Math.floor(rnd() * cells); if (r < near.length && near[r].alive) strike(near[r]); }
@@ -747,17 +815,21 @@ export function simulate(P, seed, log) {
       const total = (s.hits || 1) + (s.h2 || 0);
       for (let h = 0; h < total && !B.over; h++) {
         const second = h >= (s.hits || 1);
-        for (const t of targets) if (t.alive) one(t, second ? n.coef2 : n.coef, second ? n.flat2 : n.flat);
+        for (const t of targets) for (let r = 0; r < reps(t) && t.alive && !B.over; r++) { if (ce && r) ce.mh = (ce.mh || 0) + 1; one(t, second ? n.coef2 : n.coef, second ? n.flat2 : n.flat, decay(t)); }
       }
       for (const t of targets) afterHit(t);
       if (sp.k === 'chain' || sp.k === 'bounce') {
         const seen = new Set([targets[0].id]); let last = targets[0];
         for (let i = 0; i < sp.n && !B.over; i++) {
-          let c = foesOf(u).filter((f) => !seen.has(f.id) && dist(f.x, f.y, last.x, last.y) <= sp.r);
-          if (!c.length && sp.k === 'bounce') c = foesOf(u).filter((f) => f !== last && dist(f.x, f.y, last.x, last.y) <= sp.r);
+          let c = foesOf(u).filter((f) => !seen.has(f.id) && dUU(f, last) <= sp.r);
+          // a large target's other cells count as places to bounce to ("Large targets may take multiple hits")
+          if (s.multi && last.alive && last.sz > 1) for (let k = 1; k < fpOf(last).length; k++) c.push(last);
+          if (!c.length && sp.k === 'bounce') c = foesOf(u).filter((f) => f !== last && dUU(f, last) <= sp.r);
           if (!c.length) break;
-          last = c[Math.floor(rnd() * c.length)]; seen.add(last.id);
-          one(last, n.coef, n.flat); afterHit(last);
+          const nx = c[Math.floor(rnd() * c.length)];
+          if (ce && s.multi && nx === last) ce.mh = (ce.mh || 0) + 1;
+          last = nx; seen.add(last.id);
+          one(last, n.coef, n.flat, decay(last)); afterHit(last);
         }
       } else if (sp.k === 'recast') {
         const t = targets[0];
@@ -777,6 +849,9 @@ export function simulate(P, seed, log) {
         for (let h = 0; h < sp.hits; h++) for (const t of t2) if (t.alive) one(t, n.coef, n.flat);
       } else if (sp.k === 'dmgShield' && dealt > 0 && u.alive) addShield(u, u, Math.min(dealt * sp.v, u.hpMax * sp.cap) / (B.healScale || 1), sp.t);
     }
+    // the caster's own skill movement after the strike: dash through the line, or step back
+    if (s.dash && u.alive && !B.over && !has(u, 'immob')) dashMove(u, pl.dir != null ? pl.dir : aimDir(u, targets[0]), s.dash);
+    if (s.retreat && u.alive && !B.over && !has(u, 'immob') && (!s.retreat.within || (targets[0] && dUU(u, targets[0]) <= s.retreat.within))) retreatMove(u, s.retreat.n);
     // consume single-use modifiers
     for (const key of ['nextAcc', 'nextDoom', 'blind']) { const i = u.st.findIndex((x) => x.k === key); if (i >= 0) removeStatus(u, i); }
     for (const t of targets) { const i = t.st.findIndex((x) => x.k === 'sigil' && x.cast !== B.castId); if (i >= 0 && t.alive) { removeStatus(t, i); recalc(t); } }
@@ -784,7 +859,7 @@ export function simulate(P, seed, log) {
     u.eye = 0;
     if (u.ch && u.ch.critStack && s.el === u.ch.critStack.el) { const st = has(u, 'critStk'); if (st) { st.n = Math.min(8, st.n + 1); st.exp = u.turnNo + 2; recalc(u); stEv(u, st, true); } else addStatus(u, { k: 'critStk', v: u.ch.critStack.v, n: 1, exp: u.turnNo + 2, buff: true }); }
     // enemy Thunder Judgment reacts to this cast
-    for (const f of U) if (f.alive && u.alive && !B.over && f.team !== u.team && f.ch && f.ch.thunder && dist(f.x, f.y, u.x, u.y) <= 5 && rnd() < f.ch.thunder.p) hit(f, u, f.ch.thunder.coef, f.ch.thunder.flat, 'light', { noProc: 1, noReact: 1 });
+    for (const f of U) if (f.alive && u.alive && !B.over && f.team !== u.team && f.ch && f.ch.thunder && dUU(f, u) <= 5 && rnd() < f.ch.thunder.p) hit(f, u, f.ch.thunder.coef, f.ch.thunder.flat, 'light', { noProc: 1, noReact: 1 });
     petProc(u, targets);
   }
   /** Fantomon support skill that follows the owner's damaging technique */
@@ -795,10 +870,12 @@ export function simulate(P, seed, log) {
     const live = targets.filter((t) => t.alive && t.team !== u.team); if (!live.length) return;
     u.supTurn = u.turnNo;
     const t = live[Math.floor(rnd() * live.length)], tx = t.x, ty = t.y;
-    const list = sp.ar ? U.filter((f) => f.alive && f.team !== u.team && dist(f.x, f.y, tx, ty) <= sp.ar) : [t];
+    const list = sp.ar ? U.filter((f) => f.alive && f.team !== u.team && dU(f, tx, ty) <= sp.ar) : [t];
     if (ev) ev.push({ e: 'cast', u: u.id, n: `${p.name} 지원`, el: sp.el, tg: list.map((f) => f.id), ax: tx, ay: ty, sh: 'T', ar: sp.ar, pet: 1 });
     for (const f of list) {
-      hit(p, f, sp.coef, sp.flat, sp.el, { noProc: 1, noReact: 1, mult: sp.big && f.big ? 1 + sp.big : 1 });
+      // "Large targets may take multiple hits": one hit per covered cell of a large unit
+      const reps = sp.multi && f.sz > 1 ? fpOf(f).filter(([dx, dy]) => dist(f.x + dx, f.y + dy, tx, ty) <= (sp.ar || 0)).length || 1 : 1;
+      for (let r = 0; r < reps && f.alive && !B.over; r++) hit(p, f, sp.coef, sp.flat, sp.el, { noProc: 1, noReact: 1, mult: sp.big && f.big ? 1 + sp.big : 1 });
       if (f.alive && sp.eff) for (const e of sp.eff) tryStatus(p, f, e);
       if (f.alive && sp.dispelBuff) { const bi = f.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(f, bi[Math.floor(rnd() * bi.length)]); recalc(f); } }
     }
@@ -819,7 +896,7 @@ export function simulate(P, seed, log) {
   function petGone(p) {
     if (p.phantom && !B.over) {
       const ph = p.phantom; pvLabel(p, ph.name);
-      for (const f of U) if (f.alive && f.team !== p.team && dist(f.x, f.y, p.x, p.y) <= ph.r) { hit(p, f, ph.coef, 0, ph.el, { noProc: 1, noReact: 1 }); for (const e of ph.eff) if (f.alive) tryStatus(p, f, e); if (B.over) break; }
+      for (const f of U) if (f.alive && f.team !== p.team && dU(f, p.x, p.y) <= ph.r) { hit(p, f, ph.coef, 0, ph.el, { noProc: 1, noReact: 1 }); for (const e of ph.eff) if (f.alive) tryStatus(p, f, e); if (B.over) break; }
     }
     p.out = true;
   }
@@ -901,11 +978,11 @@ export function simulate(P, seed, log) {
   }
   function approach(u) {
     const foes = foesOf(u); if (!foes.length || u.pool <= 0) return;
-    const near = (x, y) => { let m = 1e9; for (const f of foes) { const d = dist(x, y, f.x, f.y); if (d < m) m = d; } return m; };
+    const near = (x, y) => { let m = 1e9; for (const f of foes) { const d = dU(f, x, y); if (d < m) m = d; } return m; };
     const want = Math.max(1, Math.min(...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => (k.s.tg.t === 'S' ? k.s.tg.r : 1)), 99));
     let best = null, bd = near(u.x, u.y);
     if (bd <= want) return;
-    for (const [dx, dy, d] of DIAMOND) { if (d > u.pool) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!free(x, y)) continue; const nd = near(x, y); if (nd < bd && nd >= 1) { bd = nd; best = [x, y]; } }
+    for (const [dx, dy, d] of DIAMOND) { if (d > u.pool) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue; const nd = near(x, y); if (nd < bd && nd >= 1) { bd = nd; best = [x, y]; } }
     if (best) moveTo(u, best[0], best[1]);
   }
   function takeTurn(u) {
@@ -921,7 +998,7 @@ export function simulate(P, seed, log) {
     u.stone = 0;
     if (u.alive && !B.over && u.ch) {
       if (u.ch.regen) heal(u, u, u.hpMax * u.ch.regen.healPct + u.ch.regen.healFlat);
-      if (u.ch.omen) for (const f of U) if (f.alive && f.team !== u.team && dist(f.x, f.y, u.x, u.y) <= 5) tryStatus(u, f, { k: 'vuln', v: 0.25, p: 0.5, t: 1 });
+      if (u.ch.omen) for (const f of U) if (f.alive && f.team !== u.team && dU(f, u.x, u.y) <= 5) tryStatus(u, f, { k: 'vuln', v: 0.25, p: 0.5, t: 1 });
     }
     // monster passives at the start of the monster's turn
     if (u.alive && !B.over && u.mp) {
@@ -954,11 +1031,11 @@ export function simulate(P, seed, log) {
     }
     // end of turn: enemy auras, Fantomon end-of-turn support
     if (u.alive && !B.over) {
-      for (const f of U) if (f.alive && f.team !== u.team && f.ch && f.ch.aura && dist(f.x, f.y, u.x, u.y) <= 2) { hit(f, u, f.ch.aura.coef, f.ch.aura.flat, 'water', { noProc: 1, noReact: 1 }); if (!u.alive || B.over) break; tryStatus(f, u, { k: 'cold', p: 0.5, t: 2 }); }
+      for (const f of U) if (f.alive && f.team !== u.team && f.ch && f.ch.aura && dUU(f, u) <= 2) { hit(f, u, f.ch.aura.coef, f.ch.aura.flat, 'water', { noProc: 1, noReact: 1 }); if (!u.alive || B.over) break; tryStatus(f, u, { k: 'cold', p: 0.5, t: 2 }); }
       if (u.alive && !B.over && u.petI != null) {
         const p = U[u.petI], sp = p.sup;
         if (sp.k === 'endTurn') {
-          let best = null, bd = 9; for (const f of U) if (f.alive && f.team !== u.team) { const d = dist(f.x, f.y, u.x, u.y); if (d < bd) { bd = d; best = f; } }
+          let best = null, bd = 9; for (const f of U) if (f.alive && f.team !== u.team) { const d = dU(f, u.x, u.y); if (d < bd) { bd = d; best = f; } }
           if (best) { if (ev) ev.push({ e: 'cast', u: u.id, n: `${p.name} 지원`, el: sp.el, tg: [best.id], ax: best.x, ay: best.y, sh: 'S', ar: 0, pet: 1 }); hit(p, best, sp.coef, sp.flat, sp.el, { noProc: 1, noReact: 1 }); }
           u.petStk++; if (u.petStk === 4 && sp.v.StatusDmgAddPer) addStatus(u, { k: 'dmgUp', v: sp.v.StatusDmgAddPer, exp: 1e9, buff: true });
         } else if (sp.k === 'shield3') {
@@ -1089,7 +1166,7 @@ export function monteCarlo(setup, n, seed0 = 12345, onProgress) {
   }
   return { ...agg, meta: metaOf(P) };
 }
-function metaOf(P) { return P.units.map((u) => ({ id: u.id, team: u.team, name: u.name, kind: u.kind, ref: u.ref, nth: u.nth || 0, key: u.key, cls: u.cls, level: u.level, x: u.x, y: u.y, hpMax: u.hpMax, big: !!u.big, pet: !!u.pet, out: !!u.out, petId: u.petId, owner: u.owner })); }
+function metaOf(P) { return P.units.map((u) => ({ id: u.id, team: u.team, name: u.name, kind: u.kind, ref: u.ref, nth: u.nth || 0, key: u.key, cls: u.cls, level: u.level, x: u.x, y: u.y, sz: u.sz || 1, hpMax: u.hpMax, big: !!u.big, pet: !!u.pet, out: !!u.out, petId: u.petId, owner: u.owner })); }
 /** deployment preview (names, cells, max HP) without running a fight */
 export function roster(setup) { return metaOf(prepare(setup)); }
 /** one logged fight for the replay */

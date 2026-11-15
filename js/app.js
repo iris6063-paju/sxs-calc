@@ -20,8 +20,8 @@ const TYPE_KO = ['일반', '정예', '보스'];
 const ADV = [['critRate', '치명타율 %'], ['critDmg', '치명타 대미지 %'], ['critRes', '치명타 저항 %'], ['blockRate', '막기율 %'], ['blockEff', '막기 대미지 저항 %'], ['acc', '명중 %'],
   ['dmgBoost', '대미지 보너스 %'], ['dmgRes', '대미지 저항 %'], ['dodge', '회피 %'], ['effHit', '효과 적중 %'], ['effRes', '효과 저항 %'], ['mastery', '원소 마스터리'],
   ['phyMastery', '물리 마스터리'], ['aff', '원소 친화력'], ['res', '원소 저항'], ['phyRes', '물리 저항'], ['aegis', '원소 가호']];
-const EFF_KO = { abreak: '방어력 감소', weak: '약화', slow: '감속', stun: '스턴', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명', cold: '냉기', wet: '습윤', dot: '침식', riven: '막기율 감소', sigil: '낙인', vuln: '취약', randDebuff: '랜덤 디버프' };
-const effName = (e) => (e.k === 'dot' && e.el && e.el !== 'dark' ? (e.el === 'fire' ? '작열' : '지속 대미지') : EFF_KO[e.k] || e.k) + (e.v && ['abreak', 'weak', 'slow'].includes(e.k) ? ` ${e.v >= 0.3 ? 2 : 1}` : '');
+const EFF_KO = { abreak: '방어력 감소', weak: '약화', slow: '감속', stun: '스턴', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명', cold: '냉기', wet: '습윤', dot: '침식', riven: '막기율 감소', sigil: '낙인', vuln: '취약', randDebuff: '랜덤 디버프', kb: '넉백' };
+const effName = (e) => (e.k === 'kb' ? `넉백 ${e.n || 1}칸${e.side ? '(옆으로)' : ''}` : (e.k === 'dot' && e.el && e.el !== 'dark' ? (e.el === 'fire' ? '작열' : '지속 대미지') : EFF_KO[e.k] || e.k) + (e.v && ['abreak', 'weak', 'slow'].includes(e.k) ? ` ${e.v >= 0.3 ? 2 : 1}` : ''));
 const MODE_KO = { fantasia: '환상계단', dungeon: '일일 던전', conquest: '길드 토벌 (길드 보스 460층)', crucible: '신수 시련' };
 
 /* ───────── official skill icons (optional, user-supplied): assets/skills/skill_<id>.webp|png ───────── */
@@ -167,6 +167,11 @@ function skillTags(s, n, order) {
     if (s.pull) t.push(tag('끌어당김'));
     if (s.doom) t.push(tag('파멸 대미지(실드 2배)'));
     if (s.ls) t.push(tag(`생명 흡수 ${Math.round(s.ls * 100)}%`));
+    if (s.dash) t.push(tag(`직선 ${s.dash}칸 돌진`));
+    if (s.retreat) t.push(tag(`${s.retreat.within ? s.retreat.within + '칸 안이면 ' : ''}${s.retreat.n}칸 후퇴`));
+    if (s.multi) t.push(tag('대형 대상 칸마다 다단 히트'));
+    if (s.bigFirst) t.push(tag('대형 대상 우선'));
+    if (s.rep) t.push(tag(`같은 대상 ${s.rep.from > 1 ? s.rep.from + 1 + '번째 타격부터' : '반복 타격'} −${Math.round(s.rep.d * 100)}%`));
     for (const e of s.eff || []) t.push(tag(`${effName(e)} · ${Math.round((e.p == null ? 1 : e.p) * 100)}%`));
     if (s.sp && s.sp.k === 'chain') t.push(tag(`최대 ${s.sp.n}회 연쇄`));
     if (s.sp && s.sp.k === 'bounce') t.push(tag(`최대 ${s.sp.n}회 튕김`));
@@ -669,13 +674,13 @@ function buildActs(r) {
   const acts = [], evToAct = new Int32Array(r.events.length + 1).fill(-1), M = r.meta;
   let a = null;
   r.events.forEach((e, i) => {
-    if (e.e === 'turn') { a = { i, u: e.u, r: e.r, casts: [], dmg: 0, taken: 0, heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0 }; acts.push(a); }
+    if (e.e === 'turn') { a = { i, u: e.u, r: e.r, casts: [], dmg: 0, taken: 0, heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0, kbs: [], dash: 0, retreat: 0, pulls: 0, mh: 0 }; acts.push(a); }
     else if (a) {
       switch (e.e) {
-        case 'cast': a.casts.push(e); break;
+        case 'cast': a.casts.push(e); a.mh += e.mh || 0; break;
         case 'hit': if (e.k === 3 || e.k === 5) a.miss++; else if (M[e.a].team === M[a.u].team) { a.dmg += e.d; if (e.k === 1) a.crit++; if (e.k === 2) a.block++; } else a.taken += e.d; break;
         case 'heal': a.heal += e.v; break;
-        case 'move': if (e.u === a.u && !e.pull) a.move++; break;
+        case 'move': if (e.kb && e.u !== a.u) a.kbs.push(e.u); else if (e.pull && e.u !== a.u) a.pulls++; else if (e.u === a.u) { if (e.dash) a.dash = 1; else if (e.retreat) a.retreat = 1; else a.move++; } break;
         case 'die': a.falls.push(e.u); break;
         case 'spawn': a.spawn = e.u; break;
         case 'skip': a.skip = 1; break;
@@ -694,6 +699,11 @@ function actLine(a, nm, M) {
   const what = names.length ? names.join(' · ') : a.skip ? '행동 불가' : a.spawn >= 0 ? '' : '사용 가능한 전투 스킬 없음';
   const sub = [];
   if (a.move) sub.push(`이동`);
+  if (a.dash) sub.push(`돌진`);
+  if (a.retreat) sub.push(`후퇴`);
+  if (a.kbs.length) sub.push(`넉백: ${[...new Set(a.kbs)].map((k) => esc(nm[k])).join(', ')}`);
+  if (a.pulls) sub.push(`끌어당김 ${a.pulls}`);
+  if (a.mh) sub.push(`대형 다단 +${a.mh}회`);
   if (a.crit || a.block || a.miss) sub.push([a.crit && `치명타 ${a.crit}`, a.block && `막기 ${a.block}`, a.miss && `빗나감 ${a.miss}`].filter(Boolean).join(' · '));
   if (a.heal) sub.push(`<span class="hl">치유 +${fmt(a.heal)}</span>`);
   if (a.taken) sub.push(`반격·반사 −${fmt(a.taken)}`);
@@ -818,7 +828,9 @@ function drawMini() {
   const L = stage.live();
   L.forEach((u, i) => {
     if (u.hidden || u.x == null || u.x < 0) return;
-    const [px, py] = drag && drag.i === i ? [drag.px, drag.py] : toPx(u.x, u.y), r = u.m.big ? 8 : 6.5;
+    const off = u.m.sz === 2 ? 0.5 : 0, sz = u.m.sz || 1;
+    const [px, py] = drag && drag.i === i ? [drag.px, drag.py] : toPx(u.x + off, u.y + off), r = sz === 3 ? 21 : sz === 2 ? 14 : 6.5;
+    if (sz > 1) { c.globalAlpha = u.alive ? 0.35 : 0.15; c.fillStyle = u.m.team ? '#ff6b5e' : '#5aa2ff'; c.fillRect(px - (sz * MM.c) / 2 + 1, py - (sz * MM.c) / 2 + 1, sz * MM.c - 2, sz * MM.c - 2); }
     c.globalAlpha = u.alive ? 1 : 0.35;
     c.fillStyle = u.m.team ? '#ff6b5e' : '#5aa2ff'; c.beginPath(); c.arc(px, py, r, 0, 7); c.fill();
     if (u.alive) { c.strokeStyle = '#fff'; c.lineWidth = 1.6; c.beginPath(); c.arc(px, py, r + 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, u.hp / u.m.hpMax)); c.stroke(); }

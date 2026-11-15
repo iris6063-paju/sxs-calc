@@ -3,6 +3,7 @@
 // The downloaded pages are treated purely as data; nothing from them is executed.
 import fs from 'node:fs';
 import path from 'node:path';
+import { moveAndSize } from './skilltext.mjs';
 
 const [, , DL, OUT] = process.argv;
 if (!DL || !OUT) { console.error('usage: node build_data.mjs <dl-dir> <out-file>'); process.exit(1); }
@@ -152,6 +153,7 @@ function parseText(d) {
   if ((m = /(\d+)% (?:base )?chance to reduce their DEF for (\d+) turns?/.exec(d))) o.eff.push({ k: 'abreak', v: 0.15, p: +m[1] / 100, t: +m[2] });
   if ((m = /(\d+)% (?:base )?chance to reduce their ATK for (\d+) turns?/.exec(d))) o.eff.push({ k: 'weak', v: 0.15, p: +m[1] / 100, t: +m[2] });
   if ((m = /(\d+)% (?:base )?chance to reduce their SPD for (\d+) turns?/.exec(d))) o.eff.push({ k: 'slow', v: 0.15, p: +m[1] / 100, t: +m[2] });
+  moveAndSize(d, o);
   if (!o.eff.length) delete o.eff;
   return o;
 }
@@ -239,7 +241,7 @@ const OV = {
   10110: { ko: '파쇄의 춤' },
   10111: { ko: '태양 폭풍', sp: { k: 'then', tg: { t: 'A', r: 2 }, hits: 1 } },
   10112: { ko: '빙하의 노래' },
-  10113: { ko: '그림자 종말', tg: { t: 'S', r: 5 }, sp: { k: 'killRecast', max: 4 } },
+  10113: { ko: '그림자 종말', tg: { t: 'S', r: 1 }, sp: { k: 'killRecast', max: 4 } }, // teleports next to an enemy within 5 (leap 5)
   10094: { ko: '폭발 정령', kind: 'none', note: '설치형 정령은 시뮬레이션에 반영되지 않습니다.' },
   10114: { ko: '서리 가시' }, 10115: { ko: '진홍 소용돌이' }, 10116: { ko: '폭풍 광시곡' },
   10117: { ko: '빛의 폭발', sp: { k: 'chain', n: 6, r: 4 } },

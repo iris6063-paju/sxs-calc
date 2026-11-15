@@ -31,6 +31,9 @@ export const GROUND_LIST = Object.entries(GROUNDS).map(([k, g]) => [k, g.ko]);
 const T = 1.2;                       // world size of one grid cell
 const wx = (gy) => (gy - 10) * T;    // grid row  → world x (team A on the left)
 const wz = (gx) => (gx - 10) * T;    // grid col  → world z
+// a unit's world position: 2×2 monsters are anchored on their low corner, so their centre is half a cell over
+const ux = (u, gy) => wx(gy + (u.m.sz === 2 ? 0.5 : 0));
+const uz = (u, gx) => wz(gx + (u.m.sz === 2 ? 0.5 : 0));
 const TEAM = [0x4d8dff, 0xff5d5d];
 const MONO = '"JetBrains Mono","D2Coding",Consolas,"Malgun Gothic",monospace';
 const SANS = '"Pretendard","Malgun Gothic","Apple SD Gothic Neo",sans-serif';
@@ -276,7 +279,7 @@ export function createStage(canvas) {
       if (spec) {
         const uniq = id.startsWith('boss_');
         if (!uniq) { const p = pet ? petPalette(pet) : mobPalette(md); recolor = { MAIN: p[0], LIGHT: p[1], DARK: p[2] }; }
-        tscale = pet ? 0.62 : uniq ? 1.7 : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
+        tscale = pet ? 0.62 : uniq ? 2.0 : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
       }
     }
     if (spec) {
@@ -284,11 +287,13 @@ export function createStage(canvas) {
       u.toon.root.scale.setScalar(tscale); u.yaw = m.team ? -1.0 : 1.0; u.yawT = u.yaw;
       u.mat = new THREE.MeshBasicMaterial(); u.card = new THREE.Mesh(new THREE.BufferGeometry(), u.mat); u.tex = null; u.h = Math.max(1, u.toon.h * tscale);
       u.an = { st: 'idle', t0: 0 }; u.lastHit = -9;
-      const big = mob && mob.ty === 2 ? 1.8 : 1;
+      const big = m.sz === 3 ? 3.2 : m.sz === 2 ? 2.2 : 1; // the team disc covers the footprint
       const base = new THREE.Mesh(baseGeo, toonMat(TEAM[m.team])); base.position.y = 0.06; base.scale.set(big, 0.6, big); base.receiveShadow = true; base.add(new THREE.Mesh(baseGeo, OUTLINE));
       u.barS = null; u.bar = textTexture(256, 76);
       u.barS = new THREE.Sprite(new THREE.SpriteMaterial({ map: u.bar.tex, transparent: true, depthTest: false, toneMapped: false })); u.barS.scale.set(2.1, 0.62, 1); u.barS.position.y = u.h + 0.4; u.barS.renderOrder = 5;
-      g.add(base, u.toon.root, u.barS); g.position.set(wx(m.y), 0, wz(m.x));
+      // soft contact shadow so the figure sits on the board
+      const blob = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity: 0.8 })); blob.rotation.x = -Math.PI / 2; blob.position.y = 0.13; blob.scale.setScalar(0.9 * big + 0.2);
+      g.add(blob, base, u.toon.root, u.barS); g.position.set(ux(u, m.y), 0, uz(u, m.x));
       if (m.out) { g.visible = false; u.alive = false; u.hidden = true; }
       drawBar(u); unitsG.add(g); return u;
     }
@@ -313,7 +318,7 @@ export function createStage(canvas) {
     const sh = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false })); sh.rotation.x = -Math.PI / 2; sh.position.y = 0.09; sh.scale.setScalar(mob && mob.ty === 2 ? 1.6 : 1.1);
     u.bar = textTexture(256, 76); // status chips (top) + HP/shield bar (bottom)
     u.barS = new THREE.Sprite(new THREE.SpriteMaterial({ map: u.bar.tex, transparent: true, depthTest: false, toneMapped: false })); u.barS.scale.set(2.1, 0.62, 1); u.barS.position.y = h + 0.55; u.barS.renderOrder = 5;
-    g.add(sh, base, u.card, u.barS); g.position.set(wx(m.y), 0, wz(m.x));
+    g.add(sh, base, u.card, u.barS); g.position.set(ux(u, m.y), 0, uz(u, m.x));
     if (m.out) { g.visible = false; u.alive = false; u.hidden = true; }
     drawBar(u); unitsG.add(g); return u;
   }
@@ -435,13 +440,13 @@ export function createStage(canvas) {
     switch (ev.e) {
       case 'turn': { flushCast(); const u = units[ev.u]; u.tn++; ring.visible = true; ring.position.x = u.g.position.x; ring.position.z = u.g.position.z; ring.material.color.set(u.m.team ? 0xffb3a8 : 0xa8ccff); if (ev.r !== p.round) { p.round = ev.r; p.hooks.onRound && p.hooks.onRound(ev.r); } return 0.07; }
       case 'move': {
-        const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.tw = { x0: u.g.position.x, z0: u.g.position.z, x1: wx(ev.y), z1: wz(ev.x), k: 0, d: ev.pull ? 0.2 : 0.26, hop: ev.leap ? 1.5 : ev.pull ? 0.15 : 0.45 };
+        const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.tw = { x0: u.g.position.x, z0: u.g.position.z, x1: ux(u, ev.y), z1: uz(u, ev.x), k: 0, d: ev.dash ? 0.17 : ev.kb ? 0.15 : ev.pull ? 0.2 : ev.retreat ? 0.22 : 0.26, hop: ev.leap ? 1.5 : ev.dash || ev.kb ? 0.08 : ev.pull ? 0.15 : ev.retreat ? 0.3 : 0.45 };
         if (!ev.pull) {
           setAnim(u, 'move');
           if (u.toon) u.yawT = Math.atan2(u.tw.x1 - u.tw.x0, u.tw.z1 - u.tw.z0);
           // leaping skills: the class dash effect along the path (돌진 / 질주 베기 / 방패 돌진)
           const fd = fxDesign(u), U = FXU[fd] || {};
-          if (fd && ev.leap && U.dash != null) spawnFx(fd, U.dash, new THREE.Vector3((u.tw.x0 + u.tw.x1) / 2, 0.9, (u.tw.z0 + u.tw.z1) / 2), 1.3, { flip: u.tw.x1 < u.tw.x0, dur: 0.4 });
+          if (fd && (ev.leap || ev.dash) && U.dash != null) spawnFx(fd, U.dash, new THREE.Vector3((u.tw.x0 + u.tw.x1) / 2, 0.9, (u.tw.z0 + u.tw.z1) / 2), 1.3, { flip: u.tw.x1 < u.tw.x0, dur: 0.4 });
         }
         return ev.pull ? 0.08 : 0.24;
       }
@@ -509,7 +514,7 @@ export function createStage(canvas) {
       case 'heal': { const t = units[ev.t]; t.hp = ev.hp; drawBar(t); popNum('+' + fmt(ev.v), '#7dff9a', head(t)); p.hooks.onHp && p.hooks.onHp(); return 0.06; }
       case 'shield': { const t = units[ev.t]; t.sh = ev.sh; drawBar(t); popNum('실드 +' + fmt(ev.v), '#bfe6ff', head(t)); return 0.06; }
       case 'st': { const t = units[ev.t]; applySt(t, ev); drawBar(t); return 0; }
-      case 'spawn': { const u = units[ev.u]; u.g.position.set(wx(ev.y), 0, wz(ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1); u.barS.visible = true; drawBar(u); popRing(u.g.position.x, u.g.position.z, 1.6, '#ffe9a8'); popLabel(`${u.m.name} 실체화!`, '#ffe9a8', new THREE.Vector3(u.g.position.x, u.h + 0.9, u.g.position.z)); term.line(`  ✦ ${u.m.name} 실체화`, '#ffd24a'); return 0.3; }
+      case 'spawn': { const u = units[ev.u]; u.g.position.set(ux(u, ev.y), 0, uz(u, ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1); u.barS.visible = true; drawBar(u); popRing(u.g.position.x, u.g.position.z, 1.6, '#ffe9a8'); popLabel(`${u.m.name} 실체화!`, '#ffe9a8', new THREE.Vector3(u.g.position.x, u.h + 0.9, u.g.position.z)); term.line(`  ✦ ${u.m.name} 실체화`, '#ffd24a'); return 0.3; }
       case 'die': {
         const u = units[ev.u]; u.alive = false; u.fall = 0.001; u.barS.visible = false; term.line(`  ✝ ${uname(u.m)} 쓰러짐`, '#8f8b80');
         // finishing blow by an SD-sheet hero: its finisher effect on the fallen unit
@@ -548,7 +553,7 @@ export function createStage(canvas) {
   function resetUnits() {
     for (const u of units) {
       const m = u.m;
-      u.g.position.set(wx(m.y), 0, wz(m.x)); u.gx = m.x; u.gy = m.y;
+      u.g.position.set(ux(u, m.y), 0, uz(u, m.x)); u.gx = m.x; u.gy = m.y;
       u.hp = m.hpMax; u.sh = 0; u.alive = !m.out; u.hidden = !!m.out; u.g.visible = !m.out;
       u.fall = 0; u.atk = -1; u.hit = 0; u.tw = null; u.lunge = null; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1);
       u.barS.visible = true; u.sts.clear(); u.tn = 0;
@@ -558,12 +563,12 @@ export function createStage(canvas) {
   function applySilent(ev, p) {
     switch (ev.e) {
       case 'turn': { const u = units[ev.u]; u.tn++; p.round = ev.r; ring.visible = true; ring.position.x = u.g.position.x; ring.position.z = u.g.position.z; ring.material.color.set(u.m.team ? 0xffb3a8 : 0xa8ccff); break; }
-      case 'move': { const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.g.position.set(wx(ev.y), 0, wz(ev.x)); break; }
+      case 'move': { const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.g.position.set(ux(u, ev.y), 0, uz(u, ev.x)); break; }
       case 'hit': { const t = units[ev.t]; t.hp = ev.hp; t.sh = ev.sh; break; }
       case 'heal': units[ev.t].hp = ev.hp; break;
       case 'shield': units[ev.t].sh = ev.sh; break;
       case 'st': applySt(units[ev.t], ev); break;
-      case 'spawn': { const u = units[ev.u]; u.g.position.set(wx(ev.y), 0, wz(ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.barS.visible = true; break; }
+      case 'spawn': { const u = units[ev.u]; u.g.position.set(ux(u, ev.y), 0, uz(u, ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.barS.visible = true; break; }
       case 'die': { const u = units[ev.u]; u.alive = false; u.fall = 1; u.barS.visible = false; break; }
       case 'end': ring.visible = false; break;
     }

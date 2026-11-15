@@ -16,14 +16,17 @@ const cam = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 200);
 const ctl = new OrbitControls(cam, cv); ctl.target.set(0, 1.4, 0);
 S.add(new THREE.HemisphereLight(0xe6f6ff, 0x6f9050, 1.1)); const sun = new THREE.DirectionalLight(0xfff1d6, 2.2); sun.position.set(6, 12, 8); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16 }); S.add(sun);
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshToonMaterial({ color: 0x9bcf6f })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; S.add(ground);
-const q = new URLSearchParams(location.search), ids = (q.get('ids') || 'knight').split(',');
+const q = new URLSearchParams(location.search), shot = q.has('shot');
+// shot mode (for GPT review renders): one model twice — front 3/4 and back 3/4 — on a plain background, no UI
+let ids = (q.get('ids') || 'knight').split(',');
+if (shot) { ids = [ids[0], ids[0]]; document.getElementById('ui').style.display = 'none'; S.background = new THREE.Color(0xf3f1ec); ground.material.color.set(0xd9d5cc); const d = +(q.get('dist') || 6); cam.position.set(0, d * 0.28, d); ctl.target.set(0, +(q.get('ty') || 0.95), 0); }
 const models = [];
 const N = ids.length, cols = Math.min(N, +(q.get('cols') || 6)), gap = +(q.get('gap') || 2.6);
 await Promise.all(ids.map(async (id, i) => {
   const spec = await (await fetch(`../assets/toon/${id}.json?` + Date.now())).json();
   const m = buildModel(spec, {}); const sc = +(q.get('scale') || 1) * (spec.kind === 'hero' ? 1 : (spec.viewScale || 1));
   m.root.scale.setScalar(sc);
-  const holder = new THREE.Group(); holder.add(m.root); holder.position.set(((i % cols) - (cols - 1) / 2) * gap, 0, -Math.floor(i / cols) * gap * 1.2); holder.rotation.y = +(q.get('yaw') || 0.5); S.add(holder);
+  const holder = new THREE.Group(); holder.add(m.root); holder.position.set(((i % cols) - (cols - 1) / 2) * gap, 0, -Math.floor(i / cols) * gap * 1.2); holder.rotation.y = shot ? (i ? Math.PI + 0.6 : 0.6) : +(q.get('yaw') || 0.5); S.add(holder);
   m.style = spec.style; models.push(m);
 }));
 let st = 'idle', t0 = performance.now() / 1000, mood = 'base';
