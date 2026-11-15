@@ -2,11 +2,13 @@
 // Pure module: runs in the page, in a Web Worker and in Node.
 import { LV, FLAT, RANK_Q, RANK_R, SKILLS, MOBS, CURVES, MAPS, MAXLV, CLASSES } from './gamedata.js';
 
-import { KO_SKILL, KO_CLASS, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC } from './gamedata2.js';
+import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC } from './gamedata2.js';
 
-// Korean client names + extra tables
-for (const s of SKILLS) if (KO_SKILL[s.id]) s.ko = KO_SKILL[s.id];
-for (const c of CLASSES) if (KO_CLASS[c.key]) c.ko = KO_CLASS[c.key];
+// official Korean client names / descriptions + extra tables
+for (const s of SKILLS) { if (KO_SKILL[s.id]) s.ko = KO_SKILL[s.id]; if (KO_DESC[s.id]) s.desc = KO_DESC[s.id]; }
+for (const c of CHARMS) { if (KO_SKILL[c.id]) c.ko = KO_SKILL[c.id]; if (KO_DESC[c.id]) c.desc = KO_DESC[c.id]; }
+const ROLE_KO = { WT: '방어형 · 막기/실드/도발', WD: '공격형 · 근접 대미지', MD: '공격형 · 광역 원소 대미지', MS: '지원형 · 치유/소환/디버프' };
+for (const c of CLASSES) { if (KO_CLASS[c.key]) c.ko = KO_CLASS[c.key]; c.role = c.tier === 1 ? (c.line === 'W' ? '근접 물리 · 기본 직업' : '원거리 원소 · 기본 직업') : `${ROLE_KO[c.line]} · ${c.tier}차 전직`; }
 Object.assign(FLAT, FLAT2); Object.assign(CURVES, CURVES2);
 export const ALL_MOBS = [...MOBS, ...MOBS2];
 export const CHARM = new Map(CHARMS.map((c) => [c.id, c]));
@@ -23,7 +25,7 @@ const CURE_BASE = 16.667;   // SkillFixedCure / SkillFixedShield base ≈ 16.67 
 const STAT_BASE = 0.8333;   // StatusFixedAdd base ≈ 0.833 × SkillFixedAttack base
 const DOT_COEF = 0.25;      // assumed: damage-over-time tick = 25% ATK (not published)
 const CONTROL = { stun: 1, freeze: 1, immob: 1, frenzy: 1 };
-const EL_KO = { phy: '물리', wind: '바람', water: '물', fire: '불', light: '빛', dark: '암흑' };
+const EL_KO = { phy: '물리', wind: '바람', water: '물', fire: '불', light: '빛', dark: '어둠' };
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lvi = (l) => clamp(Math.floor(l), 1, MAXLV);
 

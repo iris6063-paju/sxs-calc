@@ -21,7 +21,9 @@
 
 - **GPT 6.1 sol 생성 SVG** — `assets/gpt/` 의 영웅 18종(직업별)과 몹 42종은 `tools/gen_art.mjs` 의 지시문으로 OpenAI GPT 6.1 sol(Codex CLI)이 새로 그린 그림입니다.
   게임의 공식 일러스트를 따라 그린 것이 아니며, 계산기에서 레이어(back/body/head/weapon) 분리 · 재채색 · 스티커 테두리 · 애니메이션을 더해 사용합니다.
-- **공식 스킬 아이콘은 포함하지 않았습니다.** 게임사 저작물이므로 `assets/skills/` 에 사용 권한이 있는 파일을 직접 넣도록 해 두었습니다.
+- **전투 스킬 · 비법 아이콘(`assets/skills/`)과 한국어 스킬 이름 · 설명**은 게임사 저작물로 권리는 각 권리자에게 있습니다.
+  [소드X스태프허브 스킬 도감](https://metahub.wiki/swordxstaff/ko/database/)에 공개된 한국판 리소스를 스킬 ID 기준으로 가져와, 비영리 팬 계산기에서 식별용으로만 씁니다.
+  권리자의 요청이 있으면 즉시 내리겠습니다.
 - **game-icons.net** — https://game-icons.net — CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
   Lorc, Delapouite, Skoll, Carl Olsen 외 기여자의 실루엣 아이콘을 [Iconify](https://iconify.design) `game-icons` 묶음에서 가져와
   재채색 · 외곽선 · 스티커 테두리 · 합성 · 애니메이션을 더해 **몹 스탠디**와 **영웅의 무기 · 장식 부품**으로 재구성했습니다(`js/icons.js`, `js/sprites.js`).

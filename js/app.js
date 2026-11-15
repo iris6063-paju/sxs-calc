@@ -13,11 +13,13 @@ const uid = () => 'u' + Math.random().toString(36).slice(2, 9);
 const KEY = 'sxs-calc-v2';
 const MAX_UNITS = 24;
 const TYPE_KO = ['일반', '정예', '보스'];
-const ADV = [['critRate', '치명타 확률 %'], ['critDmg', '치명타 피해 %'], ['critRes', '치명타 저항 %'], ['blockRate', '막기 확률 %'], ['blockEff', '막기 효율 %'], ['acc', '명중 %'],
-  ['dmgBoost', '피해 증가 %'], ['dmgRes', '피해 감소 %'], ['dodge', '회피 %'], ['effHit', '효과 명중 %'], ['effRes', '효과 저항 %'], ['mastery', '원소 숙련'],
-  ['phyMastery', '물리 숙련'], ['aff', '속성 친화'], ['res', '원소 저항'], ['phyRes', '물리 저항'], ['aegis', '속성 가호']];
-const EFF_KO = { abreak: '방어 감소', weak: '공격 감소', slow: '감속', stun: '기절', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명', cold: '냉기', wet: '젖음', dot: '지속 피해', riven: '막기 감소', sigil: '인장', vuln: '취약', randDebuff: '무작위 약화' };
-const MODE_KO = { fantasia: '판타지아 등반', dungeon: '일일 던전', conquest: '길드 정복 (길드 보스)', crucible: '신수의 시련 (히에로몬)' };
+// stat / status names follow the Korean client's wording (skill descriptions, KR resources)
+const ADV = [['critRate', '치명타율 %'], ['critDmg', '치명타 대미지 %'], ['critRes', '치명타 저항 %'], ['blockRate', '막기율 %'], ['blockEff', '막기 대미지 저항 %'], ['acc', '명중 %'],
+  ['dmgBoost', '대미지 보너스 %'], ['dmgRes', '대미지 저항 %'], ['dodge', '회피 %'], ['effHit', '효과 적중 %'], ['effRes', '효과 저항 %'], ['mastery', '원소 마스터리'],
+  ['phyMastery', '물리 마스터리'], ['aff', '원소 친화력'], ['res', '원소 저항'], ['phyRes', '물리 저항'], ['aegis', '원소 가호']];
+const EFF_KO = { abreak: '방어력 감소', weak: '약화', slow: '감속', stun: '스턴', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명', cold: '냉기', wet: '습윤', dot: '침식', riven: '막기율 감소', sigil: '낙인', vuln: '취약', randDebuff: '랜덤 디버프' };
+const effName = (e) => (e.k === 'dot' && e.el && e.el !== 'dark' ? (e.el === 'fire' ? '작열' : '지속 대미지') : EFF_KO[e.k] || e.k) + (e.v && ['abreak', 'weak', 'slow'].includes(e.k) ? ` ${e.v >= 0.3 ? 2 : 1}` : '');
+const MODE_KO = { fantasia: '판타지아 등반', dungeon: '일일 던전', conquest: '길드 토벌 (길드 보스)', crucible: '신수의 시련 (히에로몬)' };
 
 /* ───────── official skill icons (optional, user-supplied): assets/skills/skill_<id>.webp|png ───────── */
 // assets/skills/icons.json → { "ext": "webp" | "png" | "" }  (empty = no icon files supplied, built-in tiles are used)
@@ -25,8 +27,9 @@ let ICON_EXT = null;
 fetch('assets/skills/icons.json').then((r) => (r.ok ? r.json() : {})).then((j) => { ICON_EXT = j && j.ext ? String(j.ext).replace(/[^a-z0-9]/gi, '') : null; if (ICON_EXT) { renderTeam(0); renderTeam(1); } }).catch(() => {});
 function glyphOf(s) { if (!s) return '＋'; if (s.kind === 'none') return '⚠'; if (s.kind === 'heal') return '✚'; if (s.kind === 'shield') return '⛨'; if (s.kind === 'buff') return '▲'; const t = s.tg && s.tg.t; return t === 'S' ? '⚔' : t === 'F' ? '➤' : t === 'T' || t === 'TQ' ? '◎' : '✸'; }
 function iconHtml(id, el, glyph) {
-  const img = ICON_EXT && id ? `<img src="assets/skills/skill_${id}.${ICON_EXT}" alt="" loading="lazy" onerror="this.remove()">` : '';
-  return `<span class="ico" style="--c:${(EL[el] || EL.none).c}"><em>${glyph}</em>${img}</span>`;
+  const img = ICON_EXT && id ? `<img src="assets/skills/skill_${id}.${ICON_EXT}" alt="" loading="lazy" onerror="this.parentNode.classList.remove('has-img');this.remove()">` : '';
+  const dot = img && el && el !== 'none' ? `<b class="eldot" title="${(EL[el] || EL.none).ko}"></b>` : '';
+  return `<span class="ico${img ? ' has-img' : ''}" style="--c:${(EL[el] || EL.none).c}"><em>${glyph}</em>${img}${dot}</span>`;
 }
 
 /* ───────── encounters ───────── */
@@ -114,18 +117,18 @@ function hud() { const h = stage.teamHp(); $('#hpA').style.width = (h[0][1] ? (h
 function shapeKo(tg) {
   if (!tg) return '';
   switch (tg.t) {
-    case 'S': return tg.min ? `단일 · ${tg.min}~${tg.r}칸` : `단일 · ${tg.r}칸`;
-    case 'A': return `자신 주변 ${tg.r}칸 광역`;
-    case 'Q': return `자신 주변 사각 ${tg.r}칸`;
-    case 'F': return `전방 ${tg.w}×${tg.h} 범위`;
-    case 'T': return `${tg.r}칸 내 지정 · 반경 ${tg.ar}`;
-    case 'TQ': return `${tg.r}칸 내 지정 · 사각 ${tg.ar}`;
-    case 'allies': return `아군 ${tg.r}칸`;
-    case 'allyLow': return `체력 낮은 아군 ${tg.r}칸`;
+    case 'S': return tg.min ? `${tg.min}~${tg.r}칸 · 적 1명` : `${tg.r}칸 · 적 1명`;
+    case 'A': return `${tg.r}칸 범위 · 모든 적`;
+    case 'Q': return `주변 ${tg.r}칸 정사각형`;
+    case 'F': return `전방 ${tg.w}x${tg.h}칸`;
+    case 'T': return `${tg.r}칸 내 위치 선택 · 주변 ${tg.ar}칸`;
+    case 'TQ': return `${tg.r}칸 내 위치 선택 · 주변 ${tg.ar}칸 정사각형`;
+    case 'allies': return `${tg.r}칸 범위 · 모든 아군`;
+    case 'allyLow': return `${tg.r}칸 · 생명 비율 낮은 아군`;
     default: return '자신';
   }
 }
-const BUFF_KO = { blockUp: '막기 확률', critUp: '치명타 확률', dmgUp: '피해 증가', dmgRed: '받는 피해 감소', atkUp: '공격력(시전자 기준)', spdUp: '속도(시전자 기준)', hpUp: '최대 생명(시전자 기준)', nextAcc: '다음 스킬 명중', nextDoom: '다음 스킬 피해', hot: '지속 치유', swords: '반격 검', flame: '화염 오라' };
+const BUFF_KO = { blockUp: '막기율', critUp: '치명타율', dmgUp: '대미지 보너스', dmgRed: '받는 대미지 감소', atkUp: '공격력(시전자 공격력 기준)', spdUp: '속도(시전자 속도 기준)', hpUp: '최대 생명력(시전자 기준)', nextAcc: '다음 전투 스킬 명중', nextDoom: '다음 전투 스킬 대미지', hot: '턴 시작 시 치유', swords: '광검 반격', flame: '열화' };
 const tag = (t, cls = '') => `<span class="tag ${cls}">${t}</span>`;
 function skillTags(s, n, order) {
   const el = EL[s.el] || EL.none, t = [];
@@ -136,36 +139,36 @@ function skillTags(s, n, order) {
     const hits = (s.hits || 1) + (s.h2 || 0);
     if (hits > 1 || s.sp) t.push(tag(s.sp && s.sp.k === 'waves' ? s.sp.n + '파동' : s.sp && s.sp.k === 'rand' ? '무작위 ' + s.sp.n + '회' : hits + '타'));
     if (n && n.coef != null) t.push(tag(`${(n.coef * 100).toFixed(1)}%${n.flat ? ' + ' + fmt(n.flat) : ''}${n.coef2 ? ` / 막타 ${(n.coef2 * 100).toFixed(1)}%` : ''}`));
-    if (s.leap) t.push(tag(`도약 ${s.leap}칸`));
+    if (s.leap) t.push(tag(`${s.leap}칸 내 빈 곳으로 이동`));
     if (s.pull) t.push(tag('끌어당김'));
-    if (s.doom) t.push(tag('파멸(보호막 2배)'));
-    if (s.ls) t.push(tag(`흡혈 ${Math.round(s.ls * 100)}%`));
-    for (const e of s.eff || []) t.push(tag(`${EFF_KO[e.k] || e.k}${e.v && e.k !== 'sigil' ? ' ' + Math.round(e.v * 100) + '%' : ''} · ${Math.round((e.p == null ? 1 : e.p) * 100)}%`));
-    if (s.sp && s.sp.k === 'chain') t.push(tag(`연쇄 ${s.sp.n}회`));
-    if (s.sp && s.sp.k === 'bounce') t.push(tag(`튕김 ${s.sp.n}회`));
-    if (s.sp && s.sp.k === 'recast') t.push(tag(`${Math.round(s.sp.p * 100)}% 재시전`));
-    if (s.sp && s.sp.k === 'killRecast') t.push(tag('처치 시 재시전'));
-    if (s.sp && s.sp.k === 'execute') t.push(tag('잃은 체력 비례 +50%'));
+    if (s.doom) t.push(tag('파멸 대미지(실드 2배)'));
+    if (s.ls) t.push(tag(`생명 흡수 ${Math.round(s.ls * 100)}%`));
+    for (const e of s.eff || []) t.push(tag(`${effName(e)} · ${Math.round((e.p == null ? 1 : e.p) * 100)}%`));
+    if (s.sp && s.sp.k === 'chain') t.push(tag(`최대 ${s.sp.n}회 연쇄`));
+    if (s.sp && s.sp.k === 'bounce') t.push(tag(`최대 ${s.sp.n}회 튕김`));
+    if (s.sp && s.sp.k === 'recast') t.push(tag(`${Math.round(s.sp.p * 100)}% 확률 재사용`));
+    if (s.sp && s.sp.k === 'killRecast') t.push(tag('처치 시 재사용'));
+    if (s.sp && s.sp.k === 'execute') t.push(tag('잃은 생명 비례 최대 +50%'));
   } else if (s.kind === 'heal') {
     t.push(tag(shapeKo(s.tg)));
-    if (n && n.healPct != null) t.push(tag(`치유 최대생명 ${(n.healPct * 100).toFixed(2)}%${n.healFlat ? ' + ' + fmt(n.healFlat) : ''}`));
+    if (n && n.healPct != null) t.push(tag(`치유 · 최대 생명력 ${(n.healPct * 100).toFixed(2)}%${n.healFlat ? ' + ' + fmt(n.healFlat) : ''}`));
   } else if (s.kind === 'shield') {
     t.push(tag(shapeKo(s.tg)));
-    if (n) t.push(tag(`보호막 방어의 ${(n.bv * 100).toFixed(1)}% + ${fmt((n.bflat || 0) * 16.667)} · ${s.shT}턴`));
+    if (n) t.push(tag(`실드 · 방어력 ${(n.bv * 100).toFixed(1)}% + ${fmt((n.bflat || 0) * 16.667)} · ${s.shT}턴`));
   } else if (s.buff) {
     const b = s.buff;
-    t.push(tag(b.to === 'self' ? '자신' : b.to === 'allies' ? `아군 ${b.r}칸` : '체력 낮은 아군'));
+    t.push(tag(b.to === 'self' ? '자신' : b.to === 'allies' ? `${b.r}칸 범위 · 아군` : '생명 비율 낮은 아군'));
     t.push(tag(`${BUFF_KO[b.st] || b.st}${n && n.bv ? ' +' + (n.bv * 100).toFixed(1) + '%' : ''}${b.t < 90 ? ' · ' + b.t + '턴' : ''}`));
   }
   // cast timing: slot order + cooldown
-  if (order != null) t.push(tag(s.pre ? `전투 전 1회 · 이후 ${s.cd + 1}턴마다` : s.cd ? `${order}번째 · ${s.zi ? '1턴부터' : s.cd + 1 + '턴부터'} ${s.cd + 1}턴마다` : `${order}번째 · 매 턴`, 'time'));
-  else if (s.cd) t.push(tag(`쿨 ${s.cd}턴`));
+  if (order != null) t.push(tag(s.pre ? `전투 시작 전 1회 · 이후 ${s.cd + 1}턴마다` : s.cd ? `${order}번째 · ${s.zi ? '1턴부터' : s.cd + 1 + '턴부터'} ${s.cd + 1}턴마다` : `${order}번째 · 매 턴`, 'time'));
+  else if (s.cd) t.push(tag(`쿨다운 ${s.cd}턴`));
   return t.join('');
 }
-const STAT_KO = { critRate: '치명타 확률', blockRate: '막기 확률', critDmg: '치명타 피해', blockEff: '막기 효율', healUp: '치유량' };
-const FLAT_KO = { atk: '공격', def: '방어', hp: '생명', spd: '속도', mastery: '원소 숙련', phyMastery: '물리 숙련', res: '원소 저항', effHit: '효과 명중' };
-const UP_KO = { perDebuff3: '대상 약화 1종당(최대 3)', vsDebuffed: '약화된 대상에게', perLost15: '잃은 생명 15%당(최대 5)', tgtLost15: '대상이 잃은 생명 15%당(최대 5)', tgtAbove70: '생명 70% 초과 대상에게', singleHit: '단타 스킬', fewFoes: '주변 적 3명 이하일 때', turn3: '3턴째부터 턴마다(최대 3)', perCast4: '스킬 4회 사용마다(최대 3)', eye: '피격 1회당(최대 10) 다음 스킬' };
-const RED_KO = { perLost15: '잃은 생명 15%당(최대 5)', manyFoes: '주변 적 4명 이상일 때', always: '항상', attackerDebuffed: '공격자가 약화 상태면', stone: '피격 1회당(최대 9, 1턴)', vsTaunted: '도발된 적에게서' };
+const STAT_KO = { critRate: '치명타율', blockRate: '막기율', critDmg: '치명타 대미지', blockEff: '막기 대미지 저항', healUp: '치유 효과' };
+const FLAT_KO = { atk: '공격력', def: '방어력', hp: '생명력', spd: '속도', mastery: '원소 마스터리', phyMastery: '물리 마스터리', res: '원소 저항', effHit: '효과 적중' };
+const UP_KO = { perDebuff3: '대상 디버프 1종당(최대 3)', vsDebuffed: '이상 상태·디버프 대상에게', perLost15: '잃은 생명 15%당(최대 5)', tgtLost15: '대상이 잃은 생명 15%당(최대 5)', tgtAbove70: '생명 70% 초과 대상에게', singleHit: '단일 대미지 전투 스킬', fewFoes: '2칸 내 적 3명 이하일 때', turn3: '3번째 턴부터 턴마다(최대 3)', perCast4: '전투 스킬 4회마다(최대 3)', eye: '피격 1회당(최대 10) 다음 공격' };
+const RED_KO = { perLost15: '잃은 생명 15%당(최대 5)', manyFoes: '2칸 내 적 4명 이상일 때', always: '항상', attackerDebuffed: '공격자가 이상 상태·디버프면', stone: '피격 1회당(최대 9, 1턴)', vsTaunted: '도발된 적에게서' };
 function charmTags(c, rank) {
   if (!c.fx) return tag('⚠ 시뮬 미반영', 'warn');
   const q = [0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4][Math.min(22, rank - 1)] ?? 5, t = [];
@@ -174,45 +177,45 @@ function charmTags(c, rank) {
     switch (f[0]) {
       case 'stat': t.push(tag(`${STAT_KO[f[1]]} +${pc(f[2])}`)); break;
       case 'flat': t.push(tag(`${FLAT_KO[f[1]]} 증가`)); break;
-      case 'aff': t.push(tag(`${EL[f[1]].ko} 친화 증가`)); break;
-      case 'harmony': t.push(tag('장착 원소 종류당 원소 숙련')); break;
-      case 'proc': t.push(tag(`${f[1] === 'crit' ? '치명타 시' : Math.round(f[2] * 100) + '% 확률'} 추가 ${EL[f[3]].ko} 피해 ${c.c ? c.c[q] + '%' : ''}${f[4] ? ' · 주변 ' + f[4] + '칸' : ''}`)); break;
-      case 'inflict': t.push(tag(`${EL[f[3]] ? EL[f[3]].ko + ' 피해 시 ' : ''}${Math.round(f[1] * 100)}% ${EFF_KO[f[2].k]}`)); break;
-      case 'react': t.push(tag(`${f[1] === 'block' ? '막기 시' : '피격 시 ' + Math.round(f[2] * 100) + '%'} 반격 ${c.c ? c.c[q] + '%' : ''}${f[4] === 'def' ? '(방어 기준)' : ''}`)); break;
-      case 'reactInflict': t.push(tag(`${f[1] === 'block' ? '막기 시' : '피격 시'} 공격자에게 ${EFF_KO[f[2].k]}`)); break;
-      case 'ls': t.push(tag(`흡혈 ${pc(f[1])}`)); break;
-      case 'dmgUp': t.push(tag(`${UP_KO[f[1]]} 피해 +${pc(f[2])}`)); break;
-      case 'dmgRed': t.push(tag(`${RED_KO[f[1]]} 받는 피해 −${pc(f[2])}`)); break;
-      case 'shield': t.push(tag(`${f[1] === 'pre' ? '전투 시작 시' : '생명 50% 미만 시'} 보호막 (${f[2] === 'hp' ? '최대 생명' : '방어'}의 ${pc(f[3])})`)); break;
-      case 'soulProt': t.push(tag('현재 생명 50%를 보호막으로 전환')); break;
-      case 'soulfire': t.push(tag(`생명 50% 소모 · 받는 피해 −${pc(f[1])}`)); break;
-      case 'undying': t.push(tag('치명 피해 1회 버팀 + 회복')); break;
-      case 'regen': t.push(tag(`턴 시작 시 회복 ${c.hv ? c.hv[q] + '%' : ''}`)); break;
-      case 'critHeal': t.push(tag('치명타 시 회복')); break;
-      case 'atkUpShielded': t.push(tag(`보호막 보유 중 공격 +${pc(f[1])}`)); break;
+      case 'aff': t.push(tag(`${EL[f[1]].ko} 원소 친화력 증가`)); break;
+      case 'harmony': t.push(tag('장착 전투 스킬 원소 1종당 원소 마스터리')); break;
+      case 'proc': t.push(tag(`${f[1] === 'crit' ? '치명타 시' : Math.round(f[2] * 100) + '% 확률'} 추가 ${EL[f[3]].ko} 대미지 ${c.c ? c.c[q] + '%' : ''}${f[4] ? ' · 주변 ' + f[4] + '칸' : ''}`)); break;
+      case 'inflict': t.push(tag(`${EL[f[3]] ? EL[f[3]].ko + ' 대미지 시 ' : ''}${Math.round(f[1] * 100)}% ${effName(f[2])}`)); break;
+      case 'react': t.push(tag(`${f[1] === 'block' ? '막기 시' : '피격 시 ' + Math.round(f[2] * 100) + '%'} 반격 ${c.c ? c.c[q] + '%' : ''}${f[4] === 'def' ? '(방어력 기반)' : ''}`)); break;
+      case 'reactInflict': t.push(tag(`${f[1] === 'block' ? '막기 시' : '피격 시'} 공격자에게 ${effName(f[2])}`)); break;
+      case 'ls': t.push(tag(`생명 흡수 ${pc(f[1])}`)); break;
+      case 'dmgUp': t.push(tag(`${UP_KO[f[1]]} 대미지 +${pc(f[2])}`)); break;
+      case 'dmgRed': t.push(tag(`${RED_KO[f[1]]} 받는 대미지 −${pc(f[2])}`)); break;
+      case 'shield': t.push(tag(`${f[1] === 'pre' ? '전투 시작 전' : '생명 50% 미만 시'} 실드 (${f[2] === 'hp' ? '최대 생명력' : '방어력'}의 ${pc(f[3])})`)); break;
+      case 'soulProt': t.push(tag('현재 생명력 50%를 실드로 전환')); break;
+      case 'soulfire': t.push(tag(`현재 생명력 50% 소모 · 받는 대미지 −${pc(f[1])}`)); break;
+      case 'undying': t.push(tag('치명적인 대미지 1회 생명 1로 생존 + 치유')); break;
+      case 'regen': t.push(tag(`턴 시작 시 치유 ${c.hv ? c.hv[q] + '%' : ''}`)); break;
+      case 'critHeal': t.push(tag('치명타 대미지 시 치유')); break;
+      case 'atkUpShielded': t.push(tag(`실드 보유 시 공격력 +${pc(f[1])}`)); break;
       case 'spdKill': t.push(tag(`처치마다 속도 +${pc(f[1])} (최대 4)`)); break;
-      case 'critStack': t.push(tag(`${EL[f[1]].ko} 스킬 사용마다 치명 +${pc(f[2])} (최대 8)`)); break;
-      case 'defIgnore': t.push(tag(`방어 무시 ${pc(f[1])}`)); break;
-      case 'rapidCast': t.push(tag('전투 시작 시 쿨다운 −1')); break;
-      case 'ironFort': t.push(tag(`전투 시작 시 아군 방어 +${pc(f[1])}(내 방어 기준)`)); break;
-      case 'aura': t.push(tag('주변 2칸에서 턴을 마친 적에게 물 피해')); break;
-      case 'killSplash': t.push(tag(`처치 시 주변 ${EL[f[1]].ko} 피해`)); break;
-      case 'omen': t.push(tag('턴 시작 시 주변 적 50% 취약')); break;
-      case 'thunder': t.push(tag('적이 스킬 사용 시 50% 낙뢰')); break;
-      case 'mark10': t.push(tag('10회 타격마다 추가 물리 피해')); break;
-      case 'reflect': t.push(tag('보호막 중 받은 피해 반사')); break;
+      case 'critStack': t.push(tag(`${EL[f[1]].ko} 원소 전투 스킬마다 치명타율 +${pc(f[2])} (최대 8)`)); break;
+      case 'defIgnore': t.push(tag(`방어력 무시 ${pc(f[1])}`)); break;
+      case 'rapidCast': t.push(tag('전투 시작 전 쿨다운 1턴 감소')); break;
+      case 'ironFort': t.push(tag(`전투 시작 전 아군 방어력 +${pc(f[1])}(내 방어력 기준)`)); break;
+      case 'aura': t.push(tag('2칸 내에서 턴을 마친 적에게 물 원소 대미지')); break;
+      case 'killSplash': t.push(tag(`처치 시 주변 ${EL[f[1]].ko} 대미지`)); break;
+      case 'omen': t.push(tag('턴 시작 시 5칸 내 적 50% 취약')); break;
+      case 'thunder': t.push(tag('적이 전투 스킬 사용 시 50% 낙뢰')); break;
+      case 'mark10': t.push(tag('10회 타격마다 추가 물리 대미지')); break;
+      case 'reflect': t.push(tag('실드 보유 중 받은 대미지 반사')); break;
     }
   }
   return t.join('');
 }
-const SUP_KO = { proc: '피해 스킬 사용 시 추가 공격', shieldLoss: '생명 15% 잃을 때마다 보호막(최대 5회)', shield3: '3턴마다 보호막', healLow: '턴 시작 시 생명 80% 미만이면 회복', endTurn: '턴 종료 시 가까운 적 공격', atkSpd: '공격·속도 증가', inkBurst: '전투 시작 시 쿨다운 −1 · 피해 증가', cloud: '시작 3턴 받는 피해 감소 · 막기 증가', none: '⚠ 지원 스킬 시뮬 미반영' };
+const SUP_KO = { proc: '대미지 전투 스킬 사용 시 추가 공격', shieldLoss: '생명 15% 잃을 때마다 실드(최대 5회)', shield3: '3턴마다 실드', healLow: '턴 시작 시 생명 80% 미만이면 치유', endTurn: '턴 종료 시 가장 가까운 적 공격', atkSpd: '공격력·속도 증가', inkBurst: '전투 시작 전 쿨다운 1턴 감소 · 대미지 보너스', cloud: '시작 3턴 받는 대미지 감소 · 막기율 증가', none: '⚠ 지원 스킬 시뮬 미반영' };
 
 /* ───────── team rendering ───────── */
 const RANK_OPTS = RANKS.map((r, i) => `<option value="${i + 1}">${r}</option>`).join('');
 const CLS_OPTS = [1, 2, 3, 4, 5].map((t) => `<optgroup label="${t === 1 ? '기본 직업' : t + '차 전직'}">` + CLASSES.filter((c) => c.tier === t).map((c) => `<option value="${c.key}">${c.ko} (${c.en})</option>`).join('') + '</optgroup>').join('');
 const mobOpt = (x) => `<option value="${x.k}">${x.ty ? '[' + TYPE_KO[x.ty] + '] ' : ''}${x.ko} · ${x.en}</option>`;
 const MOB_OPTS = MAPS.map((m) => `<optgroup label="등반 · ${m.ko}">` + ALL_MOBS.filter((x) => x.map === m.id).map(mobOpt).join('') + '</optgroup>').join('')
-  + [['1', '일일 던전'], ['2', '길드 정복 (길드 보스)'], ['3', '신수 (히에로몬)']].map(([v, ko]) => `<optgroup label="${ko}">` + ALL_MOBS.filter((x) => !x.map && x.k.endsWith('|' + v)).map(mobOpt).join('') + '</optgroup>').join('');
+  + [['1', '일일 던전'], ['2', '길드 토벌 (길드 보스)'], ['3', '신수 (히에로몬)']].map(([v, ko]) => `<optgroup label="${ko}">` + ALL_MOBS.filter((x) => !x.map && x.k.endsWith('|' + v)).map(mobOpt).join('') + '</optgroup>').join('');
 const PET_OPTS = '<option value="">없음</option>' + PETS.map((p) => `<option value="${p.id}">${p.ko} · ${p.en} (${p.role})</option>`).join('');
 const fld = (label, f, val, extra = '', cls = '') => `<label class="f ${cls}"><span>${label}</span><input type="number" data-f="${f}" value="${val}" ${extra}></label>`;
 const heroMini = (u) => `<span>공 ${fmt(u.atk)}</span><span>방 ${fmt(u.def)}</span><span>생 ${fmt(u.hp)}</span><span>속 ${fmt(u.spd)}</span>`;
@@ -221,43 +224,43 @@ function skillBlock(u, i) {
   const sl = u.skills[i]; let body = '', btn;
   if (sl && sl.custom) {
     const c = sl.custom;
-    btn = `${iconHtml(0, c.el, '✎')}<span class="nm"><b>직접 입력 스킬</b><small>계수·쿨다운을 직접 지정</small></span>`;
+    btn = `${iconHtml(0, c.el, '✎')}<span class="nm"><b>직접 입력 전투 스킬</b><small>계수·쿨다운을 직접 지정</small></span>`;
     body = `<div class="custom">
       <label class="f"><span>속성</span><select data-cf="el" data-i="${i}">${Object.entries(EL).filter(([k]) => k !== 'none').map(([k, v]) => `<option value="${k}" ${c.el === k ? 'selected' : ''}>${v.ko}</option>`).join('')}</select></label>
       <label class="f"><span>계수 %</span><input type="number" data-cf="coef" data-i="${i}" value="${c.coef}"></label>
-      <label class="f"><span>고정 피해</span><input type="number" data-cf="flat" data-i="${i}" value="${c.flat}"></label>
+      <label class="f"><span>고정 대미지</span><input type="number" data-cf="flat" data-i="${i}" value="${c.flat}"></label>
       <label class="f"><span>타수</span><input type="number" data-cf="hits" data-i="${i}" value="${c.hits}" min="1"></label>
       <label class="f"><span>쿨다운(턴)</span><input type="number" data-cf="cd" data-i="${i}" value="${c.cd}" min="0"></label>
-      <label class="f"><span>사거리</span><input type="number" data-cf="range" data-i="${i}" value="${c.range}" min="1"></label>
-      <label class="f"><span>대상</span><select data-cf="targets" data-i="${i}"><option value="1" ${c.targets == 1 ? 'selected' : ''}>단일</option><option value="3" ${c.targets == 3 ? 'selected' : ''}>광역(반경 1)</option><option value="6" ${c.targets == 6 ? 'selected' : ''}>광역(반경 2)</option></select></label>
+      <label class="f"><span>범위(칸)</span><input type="number" data-cf="range" data-i="${i}" value="${c.range}" min="1"></label>
+      <label class="f"><span>대상</span><select data-cf="targets" data-i="${i}"><option value="1" ${c.targets == 1 ? 'selected' : ''}>적 1명</option><option value="3" ${c.targets == 3 ? 'selected' : ''}>주변 1칸 모든 적</option><option value="6" ${c.targets == 6 ? 'selected' : ''}>주변 2칸 모든 적</option></select></label>
     </div>`;
   } else if (sl) {
     const s = SK.get(sl.id), n = skillNumbers(sl.id, sl.rank, u.level);
-    btn = `${iconHtml(s.id, s.el, glyphOf(s))}<span class="nm"><b>${esc(s.ko)}</b><small>${esc(s.en)} · ${CLS.get(s.cls).ko}</small></span>`;
-    body = `<div class="sum">${skillTags(s, n, i + 1)}</div>${s.note ? `<div class="note">※ ${esc(s.note)}</div>` : ''}`;
-  } else btn = `${iconHtml(0, 'none', '＋')}<span class="nm"><b style="color:var(--muted)">비어 있음</b><small>눌러서 전투스킬 선택</small></span>`;
+    btn = `${iconHtml(s.id, s.el, glyphOf(s))}<span class="nm"><b>${esc(s.ko)}</b><small>${CLS.get(s.cls).ko} · ${esc(s.en)}</small></span>`;
+    body = `<div class="sum">${skillTags(s, n, i + 1)}</div>${s.desc ? `<div class="desc">${esc(s.desc)}</div>` : ''}${s.note ? `<div class="note">※ ${esc(s.note)}</div>` : ''}`;
+  } else btn = `${iconHtml(0, 'none', '＋')}<span class="nm"><b style="color:var(--muted)">비어 있음</b><small>눌러서 전투 스킬 선택</small></span>`;
   return `<div class="skill"><div class="slot-row">
     <div class="ord"><button class="mv" data-act="up" data-i="${i}" title="위로" ${i === 0 ? 'disabled' : ''}>▲</button><i>${i + 1}</i><button class="mv" data-act="down" data-i="${i}" title="아래로" ${i === 3 ? 'disabled' : ''}>▼</button></div>
     <button class="pick" data-act="pick" data-kind="sk" data-i="${i}">${btn}</button>
-    <select data-rk="${i}" data-val="${sl && !sl.custom ? sl.rank : 3}" ${!sl || sl.custom ? 'disabled' : ''} title="스킬 등급">${RANK_OPTS}</select></div>${body}</div>`;
+    <select data-rk="${i}" data-val="${sl && !sl.custom ? sl.rank : 3}" ${!sl || sl.custom ? 'disabled' : ''} title="스킬 품질">${RANK_OPTS}</select></div>${body}</div>`;
 }
 function charmBlock(u, i) {
   const sl = u.charms[i], c = sl ? CHARM.get(sl.id) : null;
-  const btn = c ? `${iconHtml(c.id, 'none', '◈')}<span class="nm"><b>${esc(c.ko)}</b><small>${esc(c.en)} · ${CLS.get(c.cls).ko}</small></span>` : `${iconHtml(0, 'none', '＋')}<span class="nm"><b style="color:var(--muted)">비어 있음</b><small>눌러서 보주 선택</small></span>`;
+  const btn = c ? `${iconHtml(c.id, 'none', '◈')}<span class="nm"><b>${esc(c.ko)}</b><small>${CLS.get(c.cls).ko} · ${esc(c.en)}</small></span>` : `${iconHtml(0, 'none', '＋')}<span class="nm"><b style="color:var(--muted)">비어 있음</b><small>눌러서 비법 선택</small></span>`;
   return `<div class="skill"><div class="slot-row charm">
     <button class="pick" data-act="pick" data-kind="ch" data-i="${i}">${btn}</button>
-    <select data-crk="${i}" data-val="${sl ? sl.rank : 3}" ${sl ? '' : 'disabled'} title="보주 등급">${RANK_OPTS}</select></div>${c ? `<div class="sum">${charmTags(c, sl.rank)}</div>` : ''}</div>`;
+    <select data-crk="${i}" data-val="${sl ? sl.rank : 3}" ${sl ? '' : 'disabled'} title="비법 품질">${RANK_OPTS}</select></div>${c ? `<div class="sum">${charmTags(c, sl.rank)}</div>${c.desc ? `<div class="desc">${esc(c.desc)}</div>` : ''}` : ''}</div>`;
 }
 function petBlock(u) {
   const pt = u.pet, p = pt ? PET.get(pt.id) : null;
   let body = '';
   if (p) {
     const sp = p.sup, q = Math.min(5, [0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4][Math.min(22, pt.rank - 1)] ?? 5);
-    body = `<div class="grid2"><label class="f"><span>지원 스킬 등급</span><select data-pf="rank" data-val="${pt.rank}">${RANK_OPTS}</select></label>
-        <label class="f chk"><span>성체 (실체화해 함께 전투)</span><input type="checkbox" data-pf="adult" ${pt.adult ? 'checked' : ''} ${p.mat ? '' : 'disabled'}></label></div>
+    body = `<div class="grid2"><label class="f"><span>지원 스킬 품질</span><select data-pf="rank" data-val="${pt.rank}">${RANK_OPTS}</select></label>
+        <label class="f chk"><span>성년 (실체화해 함께 전투)</span><input type="checkbox" data-pf="adult" ${pt.adult ? 'checked' : ''} ${p.mat ? '' : 'disabled'}></label></div>
       <div class="grid4"><label class="f atk"><span>판타몬 공격</span><input type="number" data-pf="atk" value="${pt.atk}"></label><label class="f def"><span>방어</span><input type="number" data-pf="def" value="${pt.def}"></label><label class="f hp"><span>생명</span><input type="number" data-pf="hp" value="${pt.hp}"></label><label class="f spd"><span>속도</span><input type="number" data-pf="spd" value="${pt.spd}"></label></div>
       <div class="sum" style="margin-left:0"><b style="margin-right:4px">지원: ${esc(sp.en)}</b><span class="tag el" style="background:${(EL[sp.el] || EL.none).c}">${(EL[sp.el] || EL.none).ko}</span>${tag(SUP_KO[sp.k] || sp.k, sp.k === 'none' ? 'warn' : '')}${sp.c ? tag(`${sp.c[q]}%${sp.ar ? ' · 주변 ' + sp.ar + '칸' : ''}`) : ''}${sp.lim ? tag('턴당 1회') : ''}</div>
-      ${pt.adult && p.mat ? `<div class="note" style="margin-left:0">실체화: 에너지 ${p.mat.init}/${p.mat.cap}에서 시작, 턴당 +50 · 피격당 +6 → 가득 차면 등장해 아래 스킬을 순서대로 사용</div>` + p.skills.map((s, i) => `<div class="sum" style="margin-left:0"><b style="margin-right:4px">${i + 1}. ${esc(s.en)}</b>${skillTags({ ...s, cd: s.cd || 0 }, s.kind === 'heal' ? { healPct: s.hv[q] / 100, healFlat: 0 } : { coef: s.c[q] / 100, flat: 0 }, i + 1)}</div>`).join('') : ''}`;
+      ${pt.adult && p.mat ? `<div class="note" style="margin-left:0">실체화: 에너지 ${p.mat.init}/${p.mat.cap}에서 시작, 턴당 +50 · 피격당 +6 → 가득 차면 실체화해 아래 스킬을 순서대로 사용</div>` + p.skills.map((s, i) => `<div class="sum" style="margin-left:0"><b style="margin-right:4px">${i + 1}. ${esc(s.en)}</b>${skillTags({ ...s, cd: s.cd || 0 }, s.kind === 'heal' ? { healPct: s.hv[q] / 100, healFlat: 0 } : { coef: s.c[q] / 100, flat: 0 }, i + 1)}</div>`).join('') : ''}`;
   }
   return `<div class="petbox"><div class="pet-row">${p ? `<canvas class="ava mob" width="96" height="96" data-pet="${p.id}"></canvas>` : ''}<label class="f" style="flex:1"><span>판타몬</span><select data-pf="id" data-val="${pt ? pt.id : ''}">${PET_OPTS}</select></label>${p ? '<button class="btn" data-act="petBase" title="캐릭터 능력치 × 판타몬 기본 비율로 채웁니다">비율로 채우기</button>' : ''}</div>${body}</div>`;
 }
@@ -276,9 +279,9 @@ function heroHtml(u) {
       </div>
       <div class="lvrow" style="margin-top:8px">${fld('레벨', 'level', u.level, `min="1" max="${MAXLV}"`)}<button class="btn" data-act="base" title="해당 레벨의 장비 제외 기본 능력치로 채웁니다">레벨 기본값 채우기</button></div>
       <div class="grid4">${fld('공격', 'atk', u.atk, 'min="1"', 'big atk')}${fld('방어', 'def', u.def, 'min="0"', 'big def')}${fld('생명', 'hp', u.hp, 'min="1"', 'big hp')}${fld('속도', 'spd', u.spd, 'min="1"', 'big spd')}</div>
-      <div class="sec"><span>전투스킬 · 위에서부터 순서대로 시전</span><span class="hint">등급</span></div>
+      <div class="sec"><span>전투 스킬 · 위에서부터 순서대로 사용</span><span class="hint">품질</span></div>
       ${[0, 1, 2, 3].map((i) => skillBlock(u, i)).join('')}
-      <div class="sec"><span>보주 (비법 · 패시브 4칸)</span><span class="hint">등급</span></div>
+      <div class="sec"><span>비법 (패시브 4칸)</span><span class="hint">품질</span></div>
       ${[0, 1, 2, 3].map((i) => charmBlock(u, i)).join('')}
       <div class="sec"><span>판타몬</span></div>
       ${petBlock(u)}
@@ -290,7 +293,7 @@ function heroHtml(u) {
 function mobHtml(u) {
   const mob = MOB.get(u.key), st = mobStats(u.key, u.level, u.sr), open = openSet.has(u.uid);
   const sk = mob.sk.map((s) => `<div class="skill"><div class="sum" style="margin-left:0"><b style="margin-right:4px">${esc(s.en)}</b>${skillTags({ ...s, kind: 'dmg', cd: 0 }, null)}</div></div>`).join('');
-  const er = mob.er ? Object.entries(mob.er).map(([k, v]) => `${EL[k].ko} 피해 ${v > 0 ? '+' : ''}${Math.round(v * 100)}%`).join(' · ') : '';
+  const er = mob.er ? Object.entries(mob.er).map(([k, v]) => `받는 ${EL[k].ko} 대미지 ${v > 0 ? '+' : ''}${Math.round(v * 100)}%`).join(' · ') : '';
   return `<article class="unit mob ${open ? 'open' : ''}" data-uid="${u.uid}">
     <div class="unit-head" data-act="toggle">
       <canvas class="ava mob" width="128" height="128" data-ava="${u.uid}"></canvas>
@@ -300,14 +303,14 @@ function mobHtml(u) {
     <div class="unit-body">
       <label class="f" style="margin-top:8px"><span>몹 선택</span><select data-f="key" data-val="${u.key}">${MOB_OPTS}</select></label>
       <div class="grid2">${fld('레벨', 'level', u.level, `min="1" max="380" step="0.1"`)}${fld('수량', 'count', u.count, 'min="1" max="20"')}</div>
-      <div class="mobstats"><span>치명 피해 ${st.critDmg}%</span><span>막기 효율 ${st.blockEff}%</span>${st.critRate ? `<span>치명 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>피해 감소 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}</div>
+      <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}</div>
       <div class="sec"><span>스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)</span></div>${sk}
     </div></article>`;
 }
 function presetHtml() {
   const p = state.preset, mode = encMode(p.mode), grp = encGroup(mode, p.group), n = Math.max(1, Math.min(grp.n, p.n || 1));
   let fights = ''; for (let i = 1; i <= grp.n; i++) fights += `<option value="${i}" ${i === n ? 'selected' : ''}>${esc(grp.label(i))}</option>`;
-  return `<div class="preset"><b>전투 불러오기 · 등반 / 일일 던전 / 길드 보스 / 신수</b>
+  return `<div class="preset"><b>전투 불러오기 · 등반 / 일일 던전 / 길드 토벌 / 신수</b>
     <select id="pMode">${CATALOG.map((m) => `<option value="${m.id}" ${m.id === mode.id ? 'selected' : ''}>${MODE_KO[m.id]}</option>`).join('')}</select>
     <select id="pGroup">${mode.groups.map((g) => `<option value="${g.id}" ${g.id === grp.id ? 'selected' : ''}>${esc(g.ko)}</option>`).join('')}</select>
     <select id="pFight">${fights}</select>
@@ -336,7 +339,7 @@ window.addEventListener('sxs-art', () => drawAvatars());
 const picker = { uid: null, kind: 'sk', i: 0, cls: 'line', q: '' };
 function openPicker(u, kind, i) {
   Object.assign(picker, { uid: u.uid, kind, i, cls: 'line', q: '' });
-  $('#pkTitle').textContent = kind === 'sk' ? `전투스킬 선택 · ${i + 1}번 슬롯` : `보주(비법) 선택 · ${i + 1}번 칸`;
+  $('#pkTitle').textContent = kind === 'sk' ? `전투 스킬 선택 · ${i + 1}번 칸` : `비법 선택 · ${i + 1}번 칸`;
   $('#pkSearch').value = '';
   const chain = lineChain(u.cls).map((c) => c.key);
   $('#pkCls').innerHTML = `<button data-c="line" class="on">내 계열</button><button data-c="all">전체</button>` + CLASSES.map((c) => `<button data-c="${c.key}" class="${chain.includes(c.key) ? 'mine' : ''}">${c.ko}</button>`).join('');
@@ -347,13 +350,13 @@ function renderPicker() {
   const chain = lineChain(u.cls).map((c) => c.key), q = picker.q.trim().toLowerCase();
   const pool = (picker.kind === 'sk' ? SKILLS : CHARMS).filter((s) => (picker.cls === 'all' ? true : picker.cls === 'line' ? chain.includes(s.cls) : s.cls === picker.cls) && (!q || s.ko.toLowerCase().includes(q) || s.en.toLowerCase().includes(q)));
   const cur = picker.kind === 'sk' ? u.skills[picker.i] : u.charms[picker.i];
-  const tile = (id, icon, name, sub, tags, on, warn) => `<button class="tile ${on ? 'on' : ''} ${warn ? 'dim' : ''}" data-id="${id}">${icon}<span class="nm"><b>${name}</b><small>${sub}</small><span class="tl">${tags}</span></span></button>`;
+  const tile = (id, icon, name, sub, tags, on, warn, desc) => `<button class="tile ${on ? 'on' : ''} ${warn ? 'dim' : ''}" data-id="${id}"${desc ? ` title="${esc(desc)}"` : ''}>${icon}<span class="nm"><b>${name}</b><small>${sub}</small>${desc ? `<span class="tdesc">${esc(desc)}</span>` : ''}<span class="tl">${tags}</span></span></button>`;
   let h = tile('', iconHtml(0, 'none', '∅'), '비우기', '이 칸을 비웁니다', '', !cur, false);
-  if (picker.kind === 'sk') h += tile('custom', iconHtml(0, 'phy', '✎'), '직접 입력', '계수·고정 피해·쿨다운을 직접 지정', '', cur && cur.custom, false);
+  if (picker.kind === 'sk') h += tile('custom', iconHtml(0, 'phy', '✎'), '직접 입력', '계수·고정 대미지·쿨다운을 직접 지정', '', cur && cur.custom, false);
   for (const s of pool) {
     const c = CLS.get(s.cls);
-    if (picker.kind === 'sk') h += tile(s.id, iconHtml(s.id, s.el, glyphOf(s)), esc(s.ko), `${esc(s.en)} · ${c.ko}`, skillTags(s, skillNumbers(s.id, (cur && cur.rank) || 3, u.level)), cur && cur.id === s.id, s.kind === 'none');
-    else h += tile(s.id, iconHtml(s.id, 'none', '◈'), esc(s.ko), `${esc(s.en)} · ${c.ko}`, charmTags(s, (cur && cur.rank) || 3), cur && cur.id === s.id, !s.fx);
+    if (picker.kind === 'sk') h += tile(s.id, iconHtml(s.id, s.el, glyphOf(s)), esc(s.ko), `${c.ko} · ${esc(s.en)}`, skillTags(s, skillNumbers(s.id, (cur && cur.rank) || 3, u.level)), cur && cur.id === s.id, s.kind === 'none', s.desc);
+    else h += tile(s.id, iconHtml(s.id, 'none', '◈'), esc(s.ko), `${c.ko} · ${esc(s.en)}`, charmTags(s, (cur && cur.rank) || 3), cur && cur.id === s.id, !s.fx, s.desc);
   }
   $('#pkGrid').innerHTML = h + (pool.length ? '' : '<div class="empty" style="grid-column:1/-1">검색 결과가 없습니다.</div>');
 }
@@ -388,7 +391,7 @@ function onTeamClick(ti, e) {
     state.preset = { mode: mode.id, group: grp.id, n }; state.teams[1] = grp.units(n);
     if (state.mode !== 'pve') setMode('pve', true);
     toast(`${grp.ko} · ${grp.label(n)}`);
-    if (mode.id === 'conquest' || mode.id === 'crucible') setTimeout(() => toast('피해량 경쟁 전투입니다 — 결과의 「아군 평균 총 피해」를 보세요'), 2300);
+    if (mode.id === 'conquest' || mode.id === 'crucible') setTimeout(() => toast('대미지 경쟁 전투입니다 — 결과의 「아군 평균 총 대미지」를 보세요'), 2300);
   } else return;
   renderTeam(ti); syncSettings(); touch();
 }
@@ -531,13 +534,13 @@ function showResults(res) {
       <div class="kv">
         <div><b>${fmt(res.wins[0])} / ${fmt(res.wins[1])}${res.draws ? ' / ' + fmt(res.draws) : ''}</b><span>승 / 패${res.draws ? ' / 무' : ''} (${fmt(N)}회)</span></div>
         <div><b>${(res.rounds / N).toFixed(1)} R</b><span>평균 전투 길이</span></div>
-        <div><b>${fmt(dmgA)}</b><span>아군 평균 총 피해</span></div>
+        <div><b>${fmt(dmgA)}</b><span>아군 평균 총 대미지</span></div>
         <div><b>${((res.timeouts / N) * 100).toFixed(1)}%</b><span>라운드 제한 초과</span></div>
         <div><b>${(res.alive[0] / N).toFixed(2)} / ${tA}</b><span>아군 평균 생존</span></div>
         <div><b>${(res.alive[1] / N).toFixed(2)} / ${tB}</b><span>상대 평균 생존</span></div>
         <div><b>${((res.hpLeft[0] / N) * 100).toFixed(0)}%</b><span>아군 평균 잔여 생명</span></div>
       </div>
-      <div class="tblwrap"><table class="tbl"><thead><tr><th>유닛</th><th>평균 가한 피해</th><th>받은 피해</th><th>처치</th><th>생존율</th></tr></thead><tbody>
+      <div class="tblwrap"><table class="tbl"><thead><tr><th>유닛</th><th>평균 가한 대미지</th><th>받은 대미지</th><th>처치</th><th>생존율</th></tr></thead><tbody>
         ${rows.map((r) => `<tr class="${r.team ? 'b' : 'a'}"><td><span class="dot"></span>${esc(r.name)}${r.n > 1 ? ' ×' + r.n : ''}</td><td><span class="bar" style="width:${Math.round((r.dmg / maxD) * 90)}px"></span>${fmt(r.dmg)}</td><td>${fmt(r.taken)}</td><td>${r.kills.toFixed(2)}</td><td>${((r.alive / r.n) * 100).toFixed(0)}%</td></tr>`).join('')}
       </tbody></table></div>
     </div>`;

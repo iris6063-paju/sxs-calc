@@ -302,7 +302,7 @@ export function createStage(canvas) {
     const c = p.cur; p.cur = null;
     if (!c.sup && !c.n) { term.line(`  ⎿ 빗나감`, '#8f8b80'); return; }
     if (c.sup) return;
-    const bits = []; if (c.crit) bits.push(`치명 ${c.crit}`); if (c.block) bits.push(`막기 ${c.block}`); if (c.miss) bits.push(`빗나감 ${c.miss}`);
+    const bits = []; if (c.crit) bits.push(`치명타 ${c.crit}`); if (c.block) bits.push(`막기 ${c.block}`); if (c.miss) bits.push(`빗나감 ${c.miss}`);
     term.line(`  ⎿ −${fmt(c.dmg)}${c.n > 1 ? ` (${c.n}타)` : ''}${bits.length ? ' · ' + bits.join(' · ') : ''}`, c.team ? '#ff9c8f' : '#9cc4ff');
   }
   function doEvent(ev) {
@@ -339,7 +339,7 @@ export function createStage(canvas) {
         return p.burst > 10 ? 0.022 : 0.06;
       }
       case 'heal': { const t = units[ev.t]; t.hp = ev.hp; drawBar(t); popNum('+' + fmt(ev.v), '#7dff9a', head(t)); p.hooks.onHp && p.hooks.onHp(); return 0.06; }
-      case 'shield': { const t = units[ev.t]; t.sh = ev.sh; drawBar(t); popNum('보호막 +' + fmt(ev.v), '#bfe6ff', head(t)); return 0.06; }
+      case 'shield': { const t = units[ev.t]; t.sh = ev.sh; drawBar(t); popNum('실드 +' + fmt(ev.v), '#bfe6ff', head(t)); return 0.06; }
       case 'spawn': { const u = units[ev.u]; u.g.position.set(wx(ev.y), 0, wz(ev.x)); u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; drawBar(u); popRing(u.g.position.x, u.g.position.z, 1.6, '#ffe9a8'); popLabel(`${u.m.name} 실체화!`, '#ffe9a8', new THREE.Vector3(u.g.position.x, u.h + 0.9, u.g.position.z)); term.line(`  ✦ ${u.m.name} 실체화`, '#ffd24a'); return 0.3; }
       case 'die': { const u = units[ev.u]; u.alive = false; u.fall = 0.001; u.barS.visible = false; term.line(`  ✝ ${uname(u.m)} 쓰러짐`, '#8f8b80'); return 0.18; }
       case 'skip': { const u = units[ev.u]; popNum('행동 불가', '#9fd2ff', head(u)); return 0.2; }
