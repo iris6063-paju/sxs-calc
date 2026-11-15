@@ -1,7 +1,18 @@
 // 3D diorama: a floating forest island, a Claude-Code-style terminal monolith, and paper standees that replay a fight.
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
-import { HeroSprite, drawMob, drawPet, EL } from './sprites.js';
+import { HeroSprite, SheetSprite, sheetSpriteFor, sheetAnimLen, drawMob, drawPet, EL } from './sprites.js';
+import { sheet, sheetImg } from './sheets.js';
+
+/* class effects from the SD sheets (index into each sheet's 4 effect pictures) by how a skill is used */
+const FXU = {
+  warrior: { melee: 0, aoe: 2, dash: 1, finish: 3 },                         // 검격 · 돌진 · 타격 · 피니시
+  duelist: { melee: 1, aoe: 1, dash: 0, trail: 2, finish: 3 },               // 질주 베기 · 쌍검 연속 베기 · 가속 궤적 · 피니시 임팩트
+  knight: { melee: 3, aoe: 3, dash: 2, guard: 0, buff: 1, finish: 3 },       // 방패 가드 · 신성 장벽 · 방패 돌진 · 빛의 참격
+  mage: { proj: 0, circle: 1, chant: 2, aoe: 3, finish: 3 },                 // 마법 화살 · 마법진 · 별빛 시전 · 마법 폭발
+  sorcerer: { melee: 0, circle: 1, proj: 2, aoe: 3, finish: 3 },             // 화염 · 마법진 · 투사체 · 폭발
+  sage: { heal: 0, circle: 1, bless: 2, aoe: 3, melee: 3, finish: 3 },       // 치유의 빛 · 지원 진형 · 축복 · 회복의 파동
+};
 import { MOB, PET } from './engine.js';
 import { ST_SHORT, stOrder } from './status.js';
 
@@ -260,8 +271,15 @@ export function createStage(canvas) {
       if (!e) { const cv = document.createElement('canvas'); cv.width = cv.height = 256; e = { cv, tex: new THREE.CanvasTexture(cv), draw: () => { if (pet) drawPet(cv.getContext('2d'), 256, 256, pet); else drawMob(cv.getContext('2d'), 256, 256, mob); e.tex.needsUpdate = true; } }; e.tex.colorSpace = THREE.SRGBColorSpace; e.draw(); mobTex.set(tk, e); }
       tex = e.tex;
     }
-    else { u.sprite = new HeroSprite(m.cls, m.name, 256); u.sprite.draw(0, { flip: m.team === 1 }); tex = new THREE.CanvasTexture(u.sprite.canvas); tex.colorSpace = THREE.SRGBColorSpace; }
-    const geo = new THREE.PlaneGeometry(w, h); geo.translate(0, h / 2, 0);
+    else {
+      // heroes: frame animation from the SD class sheet when it is loaded, else the paper-doll rig
+      u.sprite = sheetSpriteFor(m.cls, 300) || new HeroSprite(m.cls, m.name, 256); u.sheet = u.sprite instanceof SheetSprite;
+      u.sprite.draw(0, { flip: flipOf(u) }); tex = new THREE.CanvasTexture(u.sprite.canvas); tex.colorSpace = THREE.SRGBColorSpace;
+    }
+    u.an = { st: 'idle', t0: 0 }; u.lastHit = -9;
+    // sheet sprites use a wide card (trails and circles fit); the character itself stays the same size
+    const ph = u.sheet ? 2.65 : h, pw = u.sheet ? ph * 1.5 : w;
+    const geo = new THREE.PlaneGeometry(pw, ph); geo.translate(0, u.sheet ? ph * 0.4 : h / 2, 0);
     u.mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, toneMapped: false });
     u.card = new THREE.Mesh(geo, u.mat); u.card.rotation.order = 'YXZ'; u.card.position.y = 0.1; u.tex = tex; u.h = h;
     const base = new THREE.Mesh(baseGeo, new THREE.MeshStandardMaterial({ color: TEAM[m.team], roughness: 0.5 })); base.position.y = 0.11; base.castShadow = true; base.scale.setScalar(mob && mob.ty === 2 ? 1.5 : 1);
@@ -272,7 +290,21 @@ export function createStage(canvas) {
     if (m.out) { g.visible = false; u.alive = false; u.hidden = true; }
     drawBar(u); unitsG.add(g); return u;
   }
-  window.addEventListener('sxs-art', () => { for (const e of mobTex.values()) e.draw(); });
+  window.addEventListener('sxs-art', () => { for (const e of mobTex.values()) e.draw(); fxTex.clear(); for (const u of units) if (u.sheet) { u.sprite.key = ''; } });
+  /** sheet frames face left: our team (left side) is mirrored to face the enemy */
+  function flipOf(u) { return u.sprite && u.sprite.facesLeft ? u.m.team === 0 : u.m.team === 1; }
+  function setAnim(u, st) { if (u.sheet) u.an = { st, t0: animT }; }
+  /** battle mood for the expression icons */
+  const CTRL = ['stun', 'freeze', 'immob', 'frenzy', 'taunt'];
+  function moodOf(u) {
+    if (!u.alive) return 'down';
+    if (CTRL.some((k) => u.sts.has(k))) return 'panic';
+    if (animT - (u.lastHit || -9) < 0.6) return u.bigHit ? 'panic' : 'hit';
+    if (u.an && u.an.st === 'skill') return 'cast';
+    if (u.an && u.an.st === 'attack') return 'focus';
+    if (u.hp / u.m.hpMax < 0.3) return 'angry';
+    return 'base';
+  }
   function drawBar(u) {
     const c = u.bar.ctx, f = Math.max(0, u.hp / u.m.hpMax), s = Math.min(1, u.sh / u.m.hpMax);
     c.clearRect(0, 0, 256, 76);
@@ -326,10 +358,38 @@ export function createStage(canvas) {
   const bolts = Array.from({ length: 14 }, () => { const m = new THREE.Mesh(boltGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })); const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDot('#ffffff'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })); halo.scale.set(1, 1, 1); m.add(halo); m.visible = false; fxG.add(m); return { m, halo, life: 0, a: new THREE.Vector3(), b: new THREE.Vector3() }; });
   let boltI = 0;
   function popBolt(a, b, color) { const n = bolts[boltI++ % bolts.length]; n.m.visible = true; n.life = 1; n.a.copy(a); n.b.copy(b); n.m.material.color.set(color); n.halo.material.color.set(color); }
+  /* SD-sheet effects: billboards (slashes, projectiles, bursts) and flat ground circles (마법진 / 지원 진형) */
+  const fxTex = new Map();
+  function fxOf(d, i) {
+    if (i == null) return null;
+    let L = fxTex.get(d);
+    if (!L) {
+      const m = sheet(d); if (!m) return null;
+      L = m.fx.map((f) => { const im = sheetImg(d, f.f); if (!im) return null; const t = new THREE.Texture(im); t.colorSpace = THREE.SRGBColorSpace; t.needsUpdate = true; const tf = t.clone(); tf.repeat.x = -1; tf.offset.x = 1; tf.needsUpdate = true; return { t, tf, ar: f.w / f.h }; });
+      if (L.some((x) => !x)) return null; // images not loaded yet
+      fxTex.set(d, L);
+    }
+    return L[i] || null;
+  }
+  const fxs = Array.from({ length: 14 }, () => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: false, toneMapped: false })); s.visible = false; s.renderOrder = 7; fxG.add(s); return { s, life: 0 }; });
+  const flats = Array.from({ length: 6 }, () => { const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide })); m.rotation.x = -Math.PI / 2; m.visible = false; m.renderOrder = 2; fxG.add(m); return { m, life: 0 }; });
+  let fxI = 0, flatI = 0;
+  /** size = world height; o: { flip, from (projectile start), dur, flat, onEnd } */
+  function spawnFx(d, i, pos, size, o = {}) {
+    const F = fxOf(d, i); if (!F) return;
+    if (o.flat) {
+      const n = flats[flatI++ % flats.length]; n.m.material.map = F.t; n.m.material.needsUpdate = true;
+      Object.assign(n, { life: 1, dur: o.dur || 1, size, ar: F.ar }); n.m.position.set(pos.x, 0.2, pos.z); n.m.visible = true; return;
+    }
+    const n = fxs[fxI++ % fxs.length];
+    n.s.material.map = o.flip ? F.tf : F.t; n.s.material.needsUpdate = true;
+    Object.assign(n, { life: 1, dur: o.dur || 0.55, size, ar: F.ar, proj: !!o.from, from: o.from ? o.from.clone() : null, to: pos.clone(), onEnd: o.onEnd || null });
+    n.s.position.copy(o.from || pos); n.s.scale.set(size * F.ar * 0.7, size * 0.7, 1); n.s.material.opacity = 1; n.s.visible = true;
+  }
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.05, 8, 36), new THREE.MeshBasicMaterial({ color: 0xffe9a8 })); ring.rotation.x = Math.PI / 2; ring.position.y = 0.2; ring.visible = false; scene.add(ring);
 
   /* replay */
-  let play = null, speed = 1, paused = false, topView = false;
+  let play = null, speed = 1, paused = false, topView = false, animT = 0; // animT: replay-time clock for sprite states
   const head = (u) => new THREE.Vector3(u.g.position.x, u.h * 0.72, u.g.position.z);
   const uname = (m) => (m.kind === 'mob' ? `${m.name}${m.nth != null && m.dup ? '#' + (m.nth + 1) : ''}` : m.name);
   function flushCast() {
@@ -344,7 +404,16 @@ export function createStage(canvas) {
     const p = play;
     switch (ev.e) {
       case 'turn': { flushCast(); const u = units[ev.u]; u.tn++; ring.visible = true; ring.position.x = u.g.position.x; ring.position.z = u.g.position.z; ring.material.color.set(u.m.team ? 0xffb3a8 : 0xa8ccff); if (ev.r !== p.round) { p.round = ev.r; p.hooks.onRound && p.hooks.onRound(ev.r); } return 0.07; }
-      case 'move': { const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.tw = { x0: u.g.position.x, z0: u.g.position.z, x1: wx(ev.y), z1: wz(ev.x), k: 0, d: ev.pull ? 0.2 : 0.26, hop: ev.leap ? 1.5 : ev.pull ? 0.15 : 0.45 }; return ev.pull ? 0.08 : 0.24; }
+      case 'move': {
+        const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.tw = { x0: u.g.position.x, z0: u.g.position.z, x1: wx(ev.y), z1: wz(ev.x), k: 0, d: ev.pull ? 0.2 : 0.26, hop: ev.leap ? 1.5 : ev.pull ? 0.15 : 0.45 };
+        if (u.sheet && !ev.pull) {
+          setAnim(u, 'move');
+          // leaping skills: the class dash effect along the path (돌진 / 질주 베기 / 방패 돌진)
+          const U = FXU[u.sprite.d] || {};
+          if (ev.leap && U.dash != null) spawnFx(u.sprite.d, U.dash, new THREE.Vector3((u.tw.x0 + u.tw.x1) / 2, 0.9, (u.tw.z0 + u.tw.z1) / 2), 1.3, { flip: u.tw.x1 < u.tw.x0, dur: 0.4 });
+        }
+        return ev.pull ? 0.08 : 0.24;
+      }
       case 'cast': {
         flushCast(); const u = units[ev.u]; u.atk = 0;
         const col = (EL[ev.el] || EL.none).c;
@@ -352,10 +421,38 @@ export function createStage(canvas) {
         p.cur = { dmg: 0, n: 0, crit: 0, block: 0, miss: 0, team: u.m.team, sup: ev.sup, el: ev.el, src: ev.u };
         const first = ev.tg.length ? units[ev.tg[0]] : null;
         term.line(`R${p.round} ${uname(u.m)} ▸ ${ev.n}${first ? ' → ' + uname(first.m) + (ev.tg.length > 1 ? ` 외 ${ev.tg.length - 1}` : '') : ''}`, '#e8e4d8');
+        const aoe = ev.sh !== 'S' || ev.tg.length > 1;
+        const cen = () => (ev.sh === 'T' || ev.sh === 'TQ' ? new THREE.Vector3(wx(ev.ay), 0, wz(ev.ax)) : new THREE.Vector3(ev.tg.reduce((s, i) => s + units[i].g.position.x, 0) / ev.tg.length, 0, ev.tg.reduce((s, i) => s + units[i].g.position.z, 0) / ev.tg.length));
+        if (u.sheet && !ev.pet) {
+          // SD sheet hero: attack frames for single strikes, skill frames for area / support skills, plus the class effects
+          setAnim(u, ev.sup || aoe ? 'skill' : 'attack');
+          const d = u.sprite.d, U = FXU[d] || {};
+          if (ev.sup) {
+            if (U.heal != null) for (const i of ev.tg.slice(0, 4)) spawnFx(d, U.heal, head(units[i]), 1.25, { dur: 0.7 });
+            if (U.circle != null) spawnFx(d, U.circle, u.g.position, 2.6, { flat: true, dur: 1.1 });
+            else if (U.buff != null) spawnFx(d, U.buff, new THREE.Vector3(u.g.position.x, 1.1, u.g.position.z), 2.1, { dur: 0.8 });
+            else if (U.guard != null) spawnFx(d, U.guard, head(u), 1.5, { dur: 0.7 });
+            if (U.bless != null) spawnFx(d, U.bless, new THREE.Vector3(u.g.position.x, u.h + 0.4, u.g.position.z), 1.5, { dur: 0.8 });
+            if (U.heal == null && U.circle == null && U.buff == null) popRing(u.g.position.x, u.g.position.z, 1.6, '#9dffb0');
+          } else if (first) {
+            const dx = first.g.position.x - u.g.position.x, dz = first.g.position.z - u.g.position.z, dist2 = Math.hypot(dx, dz) || 1, flip = dx < 0;
+            u.lunge = { x: dx / dist2, z: dz / dist2 };
+            if (!aoe && dist2 > T * 1.6 && U.proj != null) {
+              const tgt = head(first); spawnFx(d, U.proj, tgt, 0.95, { from: head(u), flip, dur: 0.3, onEnd: () => spawnFx(d, U.finish != null ? U.finish : U.aoe, tgt, 1.0, { dur: 0.35 }) });
+            } else if (!aoe) spawnFx(d, U.melee != null ? U.melee : U.aoe, head(first), 1.2, { flip, dur: 0.45 });
+            else {
+              const c = cen(), r = (ev.ar || 1) * T;
+              if (U.circle != null) spawnFx(d, U.circle, c, r * 2 + 1.2, { flat: true, dur: 1.0 });
+              if (U.chant != null) spawnFx(d, U.chant, head(u), 1.3, { flip, dur: 0.6 });
+              spawnFx(d, U.aoe, new THREE.Vector3(c.x, 1.0, c.z), Math.min(3.0, r * 1.0 + 1.2), { flip, dur: 0.6 });
+            }
+          }
+          return aoe || ev.sup ? 0.42 : 0.32;
+        }
         if (first && !ev.sup) {
           const dx = first.g.position.x - u.g.position.x, dz = first.g.position.z - u.g.position.z, d = Math.hypot(dx, dz) || 1;
           u.lunge = { x: dx / d, z: dz / d };
-          if (ev.sh !== 'S') popRing(ev.sh === 'T' || ev.sh === 'TQ' ? wx(ev.ay) : (ev.tg.reduce((s, i) => s + units[i].g.position.x, 0) / ev.tg.length), ev.sh === 'T' || ev.sh === 'TQ' ? wz(ev.ax) : (ev.tg.reduce((s, i) => s + units[i].g.position.z, 0) / ev.tg.length), (ev.ar || 1) * T + 0.6, col);
+          if (ev.sh !== 'S') { const c = cen(); popRing(c.x, c.z, (ev.ar || 1) * T + 0.6, col); }
           if (d > T * 1.6) for (const i of ev.tg.slice(0, 6)) popBolt(head(u), head(units[i]), col);
         } else if (ev.sup) popRing(u.g.position.x, u.g.position.z, 1.6, '#9dffb0');
         return 0.3;
@@ -366,7 +463,8 @@ export function createStage(canvas) {
         if (ev.k === 3) { popNum('빗나감', '#cfd3d8', head(t)); if (c) c.miss++; }
         else if (ev.k === 5) { popNum('면역', '#9fe7ff', head(t)); if (c) c.miss++; }
         else {
-          t.hit = 1;
+          t.hit = 1; t.lastHit = animT; t.bigHit = ev.d > t.m.hpMax * 0.12;
+          if (t.sheet && t.an.st !== 'attack' && t.an.st !== 'skill' && ev.d > 0) setAnim(t, 'hit');
           const col = ev.k === 1 ? '#ffd23f' : ev.k === 2 ? '#b9c4cf' : ev.k === 4 ? '#c59bff' : '#ffffff';
           popNum((ev.k === 2 ? '🛡' : '') + fmt(ev.d) + (ev.k === 1 ? '!' : ''), col, head(t), ev.k === 1);
           if (c) { c.dmg += ev.d; c.n++; if (ev.k === 1) c.crit++; if (ev.k === 2) c.block++; }
@@ -378,7 +476,13 @@ export function createStage(canvas) {
       case 'shield': { const t = units[ev.t]; t.sh = ev.sh; drawBar(t); popNum('실드 +' + fmt(ev.v), '#bfe6ff', head(t)); return 0.06; }
       case 'st': { const t = units[ev.t]; applySt(t, ev); drawBar(t); return 0; }
       case 'spawn': { const u = units[ev.u]; u.g.position.set(wx(ev.y), 0, wz(ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1); u.barS.visible = true; drawBar(u); popRing(u.g.position.x, u.g.position.z, 1.6, '#ffe9a8'); popLabel(`${u.m.name} 실체화!`, '#ffe9a8', new THREE.Vector3(u.g.position.x, u.h + 0.9, u.g.position.z)); term.line(`  ✦ ${u.m.name} 실체화`, '#ffd24a'); return 0.3; }
-      case 'die': { const u = units[ev.u]; u.alive = false; u.fall = 0.001; u.barS.visible = false; term.line(`  ✝ ${uname(u.m)} 쓰러짐`, '#8f8b80'); return 0.18; }
+      case 'die': {
+        const u = units[ev.u]; u.alive = false; u.fall = 0.001; u.barS.visible = false; term.line(`  ✝ ${uname(u.m)} 쓰러짐`, '#8f8b80');
+        // finishing blow by an SD-sheet hero: its finisher effect on the fallen unit
+        const src = p.cur && units[p.cur.src];
+        if (src && src.sheet && src.m.team !== u.m.team) { const U = FXU[src.sprite.d] || {}; if (U.finish != null) spawnFx(src.sprite.d, U.finish, head(u), 1.7, { dur: 0.6, flip: u.g.position.x < src.g.position.x }); }
+        return 0.18;
+      }
       case 'skip': { const u = units[ev.u]; popNum('행동 불가', '#9fd2ff', head(u)); return 0.2; }
       case 'end': { flushCast(); ring.visible = false; return 0.3; }
       default: return 0;
@@ -429,7 +533,7 @@ export function createStage(canvas) {
       case 'end': ring.visible = false; break;
     }
   }
-  function clearFx() { for (const n of nums) { n.life = 0; n.s.visible = false; } for (const n of labels) { n.life = 0; n.s.visible = false; } for (const n of rings) { n.life = 0; n.m.visible = false; } for (const n of bolts) { n.life = 0; n.m.visible = false; } }
+  function clearFx() { for (const n of fxs) { n.life = 0; n.onEnd = null; n.s.visible = false; } for (const n of flats) { n.life = 0; n.m.visible = false; } for (const u of units) u.an = { st: 'idle', t0: animT }; for (const n of nums) { n.life = 0; n.s.visible = false; } for (const n of labels) { n.life = 0; n.s.visible = false; } for (const n of rings) { n.life = 0; n.m.visible = false; } for (const n of bolts) { n.life = 0; n.m.visible = false; } }
   function seek(i) {
     const p = play; if (!p) return;
     i = Math.max(0, Math.min(p.ev.length, i | 0));
@@ -464,6 +568,7 @@ export function createStage(canvas) {
     const dt = Math.min(0.25, clock.getDelta()); tAll += dt; frame++;
     stepReplay(dt);
     const a = paused ? 0 : dt * speed;
+    animT += a;
     for (const u of units) {
       const g = u.g;
       if (u.tw) { const w = u.tw; w.k = Math.min(1, w.k + a / w.d); const k = w.k * w.k * (3 - 2 * w.k); g.position.x = w.x0 + (w.x1 - w.x0) * k; g.position.z = w.z0 + (w.z1 - w.z0) * k; g.position.y = Math.sin(Math.PI * w.k) * w.hop; if (w.k >= 1) { u.tw = null; g.position.y = 0; } }
@@ -480,10 +585,27 @@ export function createStage(canvas) {
       { const hd = Math.hypot(cdx, cdz) || 1, off = topView ? Math.sin(-lean) * u.h * 0.95 : 0; u.barS.position.set(-cdx / hd * off, topView ? Math.cos(-lean) * u.h + 0.4 : u.h + 0.55, -cdz / hd * off); }
       u.card.rotation.z = tilt + (u.alive && !u.sprite ? Math.sin(tAll * 1.9 + u.seed) * 0.03 : 0);
       if (!u.sprite && u.alive) { const s = 1 + Math.sin(tAll * 2.4 + u.seed) * 0.025; u.card.scale.set(2 - s, s, 1); }
-      if (u.sprite && (u.atk >= 0 || u.hit > 0 || (frame + u.frame) % 3 === 0 || u.fall > 0)) { u.sprite.draw(tAll, { atk: u.atk, hit: u.hit, flip: u.m.team === 1, dead: !u.alive }); u.tex.needsUpdate = true; }
+      if (u.sheet) {
+        // state machine: one-shot attack / skill / hit return to idle; move lasts while the unit walks
+        let st = u.an.st, el = animT - u.an.t0;
+        if ((st === 'attack' || st === 'skill' || st === 'hit') && el >= sheetAnimLen(u.sprite.d, st)) { u.an = { st: 'idle', t0: animT }; st = 'idle'; el = 0; }
+        if (st === 'move' && !u.tw && el > 0.2) { u.an = { st: 'idle', t0: animT }; st = 'idle'; el = 0; }
+        if (u.sprite.draw(tAll, { st, el, hit: u.hit, flip: flipOf(u), dead: !u.alive })) u.tex.needsUpdate = true;
+      } else if (u.sprite && (u.atk >= 0 || u.hit > 0 || (frame + u.frame) % 3 === 0 || u.fall > 0)) { u.sprite.draw(tAll, { atk: u.atk, hit: u.hit, flip: u.m.team === 1, dead: !u.alive }); u.tex.needsUpdate = true; }
     }
     for (const n of nums) if (n.life > 0) { n.life -= dt * 1.25 * Math.max(1, speed * 0.7); n.s.position.y += dt * 1.5; const k = 1 - n.life, pop = k < 0.15 ? 0.6 + k / 0.15 * 0.5 : 1.1 - Math.min(0.1, (k - 0.15)); n.s.scale.set(n.sc * pop, n.sc * pop * 0.375, 1); n.s.material.opacity = Math.min(1, n.life * 2.2); if (n.life <= 0) n.s.visible = false; }
     for (const n of labels) if (n.life > 0) { n.life -= dt * 1.15 * Math.max(1, speed * 0.6); n.s.material.opacity = Math.min(1, n.life * 3); n.s.position.y += dt * 0.25; if (n.life <= 0) n.s.visible = false; }
+    for (const n of fxs) if (n.life > 0) {
+      n.life -= a / n.dur; const k = 1 - Math.max(0, n.life);
+      if (n.proj) { n.s.position.lerpVectors(n.from, n.to, Math.min(1, k)); n.s.position.y += Math.sin(Math.PI * Math.min(1, k)) * 0.4; n.s.scale.set(n.size * n.ar, n.size, 1); }
+      else { const sc = n.size * (0.72 + 0.38 * Math.min(1, k * 3)); n.s.scale.set(sc * n.ar, sc, 1); n.s.material.opacity = k < 0.55 ? 1 : Math.max(0, (1 - k) / 0.45); }
+      if (n.life <= 0) { n.s.visible = false; if (n.onEnd) { const f = n.onEnd; n.onEnd = null; f(); } }
+    }
+    for (const n of flats) if (n.life > 0) {
+      n.life -= a / n.dur; const k = 1 - Math.max(0, n.life), sc = n.size * (0.55 + 0.45 * Math.min(1, k * 3));
+      n.m.scale.set(sc * n.ar, sc, 1); n.m.rotation.z += a * 0.8; n.m.material.opacity = k < 0.6 ? Math.min(1, k * 5) : Math.max(0, (1 - k) / 0.4);
+      if (n.life <= 0) n.m.visible = false;
+    }
     for (const n of rings) if (n.life > 0) { n.life -= dt * 2.4; const k = 1 - Math.max(0, n.life); n.m.scale.setScalar(n.r * (0.25 + 0.75 * k)); n.m.material.opacity = Math.max(0, n.life) * 0.85; if (n.life <= 0) n.m.visible = false; }
     for (const n of bolts) if (n.life > 0) { n.life -= dt * 5.2 * Math.max(1, speed * 0.6); const k = 1 - Math.max(0, n.life); n.m.position.lerpVectors(n.a, n.b, k); n.m.position.y += Math.sin(Math.PI * k) * 0.9; n.m.material.opacity = 0.95; if (n.life <= 0) n.m.visible = false; }
     // ambience
@@ -529,7 +651,7 @@ export function createStage(canvas) {
     seek, stepAction,
     pos: () => (play ? { i: play.i, n: play.ev.length, round: play.round, done: play.done } : null),
     /** live board state for the side panels: HP, shield, alive, cell, statuses with own turns left */
-    live: () => units.map((u) => ({ m: u.m, hp: u.hp, sh: u.sh, alive: u.alive, hidden: !!u.hidden, x: u.gx, y: u.gy, sts: [...u.sts].sort((a, b) => stOrder(a) - stOrder(b)).map(([k, e]) => ({ k, n: e.n, b: e.b, left: e.d ? Math.max(1, e.at + e.d - u.tn) : 0 })) })),
+    live: () => units.map((u) => ({ m: u.m, d: u.sheet ? u.sprite.d : null, mood: moodOf(u), hp: u.hp, sh: u.sh, alive: u.alive, hidden: !!u.hidden, x: u.gx, y: u.gy, sts: [...u.sts].sort((a, b) => stOrder(a) - stOrder(b)).map(([k, e]) => ({ k, n: e.n, b: e.b, left: e.d ? Math.max(1, e.at + e.d - u.tn) : 0 })) })),
     teamHp() { const o = [[0, 0], [0, 0]]; for (const u of units) { if (u.m.pet) continue; o[u.m.team][0] += Math.max(0, u.hp); o[u.m.team][1] += u.m.hpMax; } return o; },
     resetView() { setTopView(false); },
     zoom(f) { userMoved = true; const v = camera.position.clone().sub(controls.target); v.setLength(Math.max(controls.minDistance, Math.min(controls.maxDistance, v.length() * f))); camera.position.copy(controls.target).add(v); },

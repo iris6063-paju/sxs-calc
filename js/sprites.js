@@ -4,6 +4,7 @@
 import { ICONS } from './icons.js';
 import { CLASSES } from './gamedata.js';
 import { heroArt, mobArt, hasMobArt } from './art.js';
+import { designOf, sheet, sheetImg } from './sheets.js';
 
 export const EL = {
   phy: { ko: '물리', c: '#c9c2b2' }, wind: { ko: '바람', c: '#6fd9a8' }, water: { ko: '물', c: '#4aa8ff' },
@@ -261,11 +262,69 @@ export class HeroSprite {
     c.drawImage(this.buf, 0, 0, tw, th);
   }
 }
+/* ── SD sheet sprite: frame animation cut from the user's class sheets ── */
+const SHEET_FPS = { idle: 7, move: 12, attack: 13, skill: 12, hit: 14 };
+const AURA = { warrior: '#ff6b5e', mage: '#a78bfa', knight: '#ffd24a', duelist: '#ff5b5b', sorcerer: '#c084fc', sage: '#8fd3ff' };
+/** how long a one-shot state plays (seconds at ×1) */
+export const sheetAnimLen = (design, st) => { const m = sheet(design); return m && m.anim[st] ? m.anim[st].length / SHEET_FPS[st] : 0.4; };
+/** Wide canvas (effects and trails fit), feet at 90% height, idle character 62% of the height. Frames face left. */
+export class SheetSprite {
+  constructor(design, tier = 1, px = 300) {
+    this.d = design; this.m = sheet(design); this.tier = tier;
+    this.h = px; this.w = Math.round(px * 1.5); this.facesLeft = true; this.key = '';
+    this.canvas = document.createElement('canvas'); this.canvas.width = this.w; this.canvas.height = this.h;
+  }
+  /** a: { st: idle|move|attack|skill|hit, el: seconds in state, flip, dead, hit 0..1 }; returns true when the canvas changed */
+  draw(t, a = {}) {
+    const m = this.m, atlas = m && sheetImg(this.d, m.atlas.f); if (!atlas) return false;
+    let st = a.dead ? 'hit' : a.st && m.anim[a.st] ? a.st : 'idle';
+    const fr = m.anim[st], n = fr.length;
+    let k;
+    if (a.dead) k = n - 1;
+    else if (st === 'idle') k = Math.floor(t * SHEET_FPS.idle + this.tier * 1.7) % n;
+    else if (st === 'move') k = Math.floor((a.el || 0) * SHEET_FPS.move) % n;
+    else k = Math.min(n - 1, Math.floor((a.el || 0) * SHEET_FPS[st]));
+    const flash = a.hit > 0.05 && !a.dead ? Math.round(a.hit * 4) : 0;
+    const key = `${st}${k}${a.flip ? 1 : 0}${a.dead ? 1 : 0}${flash}`;
+    if (key === this.key) return false;
+    this.key = key;
+    const c = this.canvas.getContext('2d'), W = this.w, H = this.h, s = (H * 0.62) / m.charH;
+    const [x, y, w, h, ax, ay] = fr[k];
+    c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, W, H);
+    if (this.tier >= 3) { // promoted classes: a soft aura behind the feet
+      const g = c.createRadialGradient(W / 2, H * 0.62, 4, W / 2, H * 0.62, H * (0.3 + 0.04 * this.tier));
+      g.addColorStop(0, (AURA[this.d] || '#ffd24a') + '66'); g.addColorStop(1, (AURA[this.d] || '#ffd24a') + '00');
+      c.fillStyle = g; c.fillRect(0, 0, W, H);
+    }
+    if (a.flip) { c.translate(W, 0); c.scale(-1, 1); }
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(atlas, x, y, w, h, W / 2 - ax * s, H * 0.9 - ay * s, w * s, h * s);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    if (flash) { c.globalCompositeOperation = 'source-atop'; c.fillStyle = `rgba(255,255,255,${0.16 * flash})`; c.fillRect(0, 0, W, H); c.globalCompositeOperation = 'source-over'; }
+    if (a.dead) { c.globalCompositeOperation = 'source-atop'; c.fillStyle = 'rgba(70,72,90,.55)'; c.fillRect(0, 0, W, H); c.globalCompositeOperation = 'source-over'; }
+    return true;
+  }
+}
+const tierOf = (cls) => { const c = CLASSES.find((x) => x.key === cls); return c ? c.tier : 1; };
+export const sheetSpriteFor = (cls, px) => { const d = designOf(cls); return d && sheet(d) ? new SheetSprite(d, tierOf(cls), px) : null; };
+
 /** one-off avatar render used by UI cards */
 export function renderAvatar(canvas, unit, mob, t = 0) {
   const ctx = canvas.getContext('2d');
   if (unit.kind === 'pet') { if (mob) drawPet(ctx, canvas.width, canvas.height, mob); return; }
   if (unit.kind === 'mob') { if (mob) drawMob(ctx, canvas.width, canvas.height, mob); return; }
+  // heroes: the idle (대기) frames of the SD class sheet, mirrored to face right like the rest of the UI
+  const d = designOf(unit.cls), m = d && sheet(d), atlas = m && sheetImg(d, m.atlas.f);
+  if (atlas) {
+    const fr = m.anim.idle, [x, y, w, h, ax, ay] = fr[Math.floor(t * 7) % fr.length];
+    const W = canvas.width, H = canvas.height, wide = Math.max(...fr.map((f) => Math.max(f[4], f[2] - f[4]))) * 2;
+    const s = Math.min((H * 0.8) / m.charH, W / wide);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.imageSmoothingQuality = 'high';
+    ctx.translate(W, 0); ctx.scale(-1, 1);
+    ctx.drawImage(atlas, x, y, w, h, W / 2 - ax * s, H * 0.96 - ay * s, w * s, h * s);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return;
+  }
   const key = unit.cls + '|' + (unit.name || '');
   let sp = canvas._sprite;
   if (!sp || canvas._key !== key) { sp = new HeroSprite(unit.cls, unit.name || '', 200); canvas._sprite = sp; canvas._key = key; }

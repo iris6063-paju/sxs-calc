@@ -3,6 +3,7 @@ import { CLASSES, SKILLS, MAPS, RANKS, MAXLV } from './gamedata.js';
 import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH } from './engine.js';
 import { createStage, GROUND_LIST } from './scene.js';
 import { ST_KO } from './status.js';
+import { loadSheets, designOf, sheet, sheetURL, faceIndex } from './sheets.js';
 import { renderAvatar, EL } from './sprites.js';
 import { loadArt } from './art.js';
 
@@ -309,6 +310,19 @@ function petBlock(u) {
   }
   return `<div class="petbox"><div class="pet-row">${p ? `<canvas class="ava mob" width="96" height="96" data-pet="${p.id}"></canvas>` : ''}<label class="f" style="flex:1"><span>판타몬</span><select data-pf="id" data-val="${pt ? pt.id : ''}">${PET_OPTS}</select></label>${p ? '<button class="btn" data-act="petBase" title="캐릭터 능력치 × 판타몬 기본 비율로 채웁니다">비율로 채우기</button>' : ''}</div>${body}</div>`;
 }
+/* SD class sheet: turnaround strip in the hero card, expression icon in the battle panel */
+const DESIGN_KO = { warrior: '전사', mage: '마법사', knight: '기사', duelist: '투사', sorcerer: '주술사', sage: '현자' };
+// direction order as printed on each sheet (only 투사 puts 후측면 before 후면)
+const TURN_KO = (d) => (d === 'duelist' ? ['정면', '3/4', '측면', '후측면', '후면'] : ['정면', '3/4', '측면', '후면', '후측면']);
+function turnStrip(cls) {
+  const d = designOf(cls), m = d && sheet(d); if (!m) return '';
+  return `<div class="turn" title="SD 방향 시트 (${DESIGN_KO[d]} 계열)">${m.turn.map((t, i) => `<figure><img src="${sheetURL(d, t.f)}" alt="" loading="lazy"><figcaption>${TURN_KO(d)[i] || ''}</figcaption></figure>`).join('')}</div>`;
+}
+function faceHtml(d, mood, px = 34) {
+  const m = d && sheet(d); if (!m) return '';
+  const f = m.faces, i = faceIndex(d, mood), h = Math.round((px * f.ch) / f.cw);
+  return `<span class="face" title="${esc(f.labels[i] || '')}" style="width:${px}px;height:${h}px;background-image:url(${sheetURL(d, f.f)});background-size:${px * f.n}px ${h}px;background-position:-${i * px}px 0"></span>`;
+}
 function heroHtml(u) {
   const c = CLS.get(u.cls), open = openSet.has(u.uid), pet = u.pet ? PET.get(u.pet.id) : null;
   return `<article class="unit hero ${open ? 'open' : ''}" data-uid="${u.uid}">
@@ -322,6 +336,7 @@ function heroHtml(u) {
         <label class="f"><span>이름</span><input type="text" data-f="name" value="${esc(u.name)}" maxlength="20"></label>
         <label class="f"><span>직업</span><select data-f="cls" data-val="${u.cls}">${CLS_OPTS}</select></label>
       </div>
+      ${turnStrip(u.cls)}
       <div class="lvrow" style="margin-top:8px">${fld('레벨', 'level', u.level, `min="1" max="${MAXLV}"`)}<button class="btn" data-act="base" title="해당 레벨의 장비 제외 기본 능력치로 채웁니다">레벨 기본값 채우기</button></div>
       <div class="grid4">${fld('공격', 'atk', u.atk, 'min="1"', 'big atk')}${fld('방어', 'def', u.def, 'min="0"', 'big def')}${fld('생명', 'hp', u.hp, 'min="1"', 'big hp')}${fld('속도', 'spd', u.spd, 'min="1"', 'big spd')}</div>
       <div class="sec"><span>전투 스킬 · 위에서부터 순서대로 사용</span><span class="hint">품질</span></div>
@@ -772,11 +787,14 @@ let lateT = 0; function scheduleBattleLate() { clearTimeout(lateT); lateT = setT
 function drawLive() {
   const L = stage.live(); if (!L.length) { $('#liveList').innerHTML = ''; return; }
   const nm = cur ? cur.nm : unitNames(L.map((u) => u.m));
+  const pos = stage.pos(), end = cur && pos && pos.done ? cur.r.events[cur.r.events.length - 1] : null;
   $('#liveList').innerHTML = L.map((u, i) => {
+    const mood = end && u.alive ? (end.w === u.m.team ? 'joy' : 'sad') : u.mood;
+    const face = u.d ? faceHtml(u.d, mood) : '';
     if (u.hidden && !u.alive) return u.m.pet ? `<div class="lv pet off"><span class="nm">🐾 ${esc(nm[i])}</span><small>실체화 대기</small></div>` : '';
     const f = Math.max(0, u.hp / u.m.hpMax), s = Math.min(1 - f, u.sh / u.m.hpMax);
     const chips = !u.alive ? '' : u.sts.map((x) => `<i class="st ${x.k === 'shield' ? 'sh' : ST_CTRL.has(x.k) ? 'cc' : x.b ? 'bf' : 'db'}">${ST_KO[x.k] || x.k}${x.n > 1 ? ' ×' + x.n : ''}${x.left ? ` · ${x.left}턴` : ''}</i>`).join('');
-    return `<div class="lv t${u.m.team}${u.alive ? '' : ' dead'}"><span class="nm">${u.m.pet ? '🐾 ' : ''}${esc(nm[i])}</span><div class="hpb"><s style="width:${(f * 100).toFixed(1)}%"></s><u style="left:${(f * 100).toFixed(1)}%;width:${(s * 100).toFixed(1)}%"></u><em>${u.alive ? `${fmtK(u.hp)} / ${fmtK(u.m.hpMax)}${u.sh > 0 ? ' +' + fmtK(u.sh) : ''}` : '쓰러짐'}</em></div>${chips ? `<div class="sts">${chips}</div>` : ''}</div>`;
+    return `<div class="lv t${u.m.team}${u.alive ? '' : ' dead'}${face ? ' hasface' : ''}">${face}<span class="nm">${u.m.pet ? '🐾 ' : ''}${esc(nm[i])}</span><div class="hpb"><s style="width:${(f * 100).toFixed(1)}%"></s><u style="left:${(f * 100).toFixed(1)}%;width:${(s * 100).toFixed(1)}%"></u><em>${u.alive ? `${fmtK(u.hp)} / ${fmtK(u.m.hpMax)}${u.sh > 0 ? ' +' + fmtK(u.sh) : ''}` : '쓰러짐'}</em></div>${chips ? `<div class="sts">${chips}</div>` : ''}</div>`;
   }).join('');
 }
 const ST_CTRL = new Set(['stun', 'freeze', 'immob', 'taunt', 'frenzy']);
@@ -857,4 +875,6 @@ $$('#speedSeg button')[0].classList.add('on');
 renderAll();
 term.line('> 팀을 구성하고 「승률 계산」을 누르세요', '#9b978b');
 loadArt().then(() => { drawAvatars(); if (!running && !stage.isPlaying()) showRoster(); });
-if (state.teams[0].length && state.teams[1].length) setTimeout(run, 900);
+// SD class sheets (sprites, faces, effects): the first auto-run waits for them (at most 4 s)
+const sheetsP = loadSheets().then(() => { if (!running && !stage.isPlaying()) renderAll(); else drawAvatars(); });
+if (state.teams[0].length && state.teams[1].length) Promise.race([sheetsP, new Promise((r) => setTimeout(r, 4000))]).then(() => setTimeout(run, 300));

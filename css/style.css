@@ -105,6 +105,14 @@ select.chip { padding: 4px 8px; color: var(--text); }
 .lv.t1 { border-left-color: var(--red); }
 .lv.dead { opacity: .45; } .lv.off { opacity: .6; display: flex; justify-content: space-between; }
 .lv .nm { font-size: 12px; font-weight: 800; }
+.lv.hasface { position: relative; padding-left: 50px; min-height: 44px; }
+.lv .face { position: absolute; left: 7px; top: 6px; border-radius: 7px; background-repeat: no-repeat; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .12); }
+.lv.dead .face { filter: grayscale(.8); }
+/* SD turnaround strip in the hero card */
+.turn { display: flex; gap: 4px; justify-content: space-between; margin-top: 8px; padding: 6px; background: #f6efe4; border-radius: 10px; overflow-x: auto; }
+.turn figure { margin: 0; flex: 1 1 0; min-width: 44px; text-align: center; }
+.turn img { display: block; height: 74px; max-width: 100%; margin: 0 auto; object-fit: contain; }
+.turn figcaption { font-size: 10px; color: #6b5a48; font-weight: 700; margin-top: 2px; }
 .lv small { color: var(--muted); font-size: 11px; }
 .hpb { position: relative; height: 14px; background: #171614; border-radius: 7px; overflow: hidden; margin-top: 4px; }
 .hpb s { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #3d7ddb, var(--blue)); }
