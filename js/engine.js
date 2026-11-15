@@ -2,7 +2,8 @@
 // Pure module: runs in the page, in a Web Worker and in Node.
 import { LV, FLAT, RANK_Q, RANK_R, SKILLS, MOBS, CURVES, MAPS, MAXLV, CLASSES } from './gamedata.js';
 
-import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC } from './gamedata2.js';
+import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV } from './gamedata2.js';
+export { MOB_PV };
 
 // official Korean client names / descriptions + extra tables
 for (const s of SKILLS) { if (KO_SKILL[s.id]) s.ko = KO_SKILL[s.id]; if (KO_DESC[s.id]) s.desc = KO_DESC[s.id]; }
@@ -25,7 +26,7 @@ const CURE_BASE = 16.667;   // SkillFixedCure / SkillFixedShield base ≈ 16.67 
 const STAT_BASE = 0.8333;   // StatusFixedAdd base ≈ 0.833 × SkillFixedAttack base
 const DOT_COEF = 0.25;      // assumed: damage-over-time tick = 25% ATK (not published)
 const CONTROL = { stun: 1, freeze: 1, immob: 1, frenzy: 1 };
-const EL_KO = { phy: '물리', wind: '바람', water: '물', fire: '불', light: '빛', dark: '어둠' };
+const EL_KO = { phy: '물리', wind: '바람', water: '물', fire: '불', light: '빛', dark: '어둠', chaos: '혼돈' };
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lvi = (l) => clamp(Math.floor(l), 1, MAXLV);
 
@@ -173,11 +174,33 @@ function buildMob(key, level, opts, sr, fix, uws) {
   for (const k of RAW) u[k] = 0;
   const mc = opts.mobCoef != null ? opts.mobCoef : 1;
   u.skills = mob.sk.map((s, i) => ({ s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 }));
+  compileMobPassives(u, mob, mc, opts.pvEst !== false);
   return u;
+}
+/** monster passives (비전) → hook lists. Passive damage uses the mob-skill coefficient (mc). Estimated ones only when est is on. */
+function compileMobPassives(u, mob, mc, est) {
+  if (!mob.pv || !mob.pv.length) return;
+  const mp = {}, ch = { procs: [], inflicts: [], hurt: [], block: [], dmgUp: [], dmgRed: [], shields: [] };
+  let anyCh = false;
+  for (const id of mob.pv) {
+    const p = MOB_PV[id];
+    if (!p || p.k === 'none' || (p.est && !est)) continue;
+    switch (p.k) {
+      case 'er': u.er = { ...(u.er || {}), ...p.er }; break;
+      case 'counter': ch.hurt.push({ p: p.p, el: p.el, by: 'atk', range: p.r, coef: mc, flat: 0, aoe: p.aoe || 0 }); anyCh = true; break;
+      case 'venom': ch.procs.push({ on: 'hit', p: 1, el: p.el, ar: 0, opt: { eff: [{ k: 'dot', el: 'dark', p: p.p, t: p.t }] }, coef: mc, flat: 0 }); anyCh = true; break;
+      case 'dot': ch.inflicts.push({ p: p.p, e: { k: 'dot', el: p.el, t: p.t } }); anyCh = true; break;
+      case 'move': u.move = p.v; break;
+      default: (mp[p.k] = mp[p.k] || []).push({ ...p, name: p.ko });
+    }
+  }
+  if (anyCh) u.ch = ch;
+  if (Object.keys(mp).length) u.mp = mp;
+  u.mc = mc;
 }
 /** setup: { mode:'pve'|'pvp', teams:[[def...],[def...]], roundCap, pvpBalance, mobCoef } */
 export function prepare(setup) {
-  const opts = { mobCoef: setup.mobCoef };
+  const opts = { mobCoef: setup.mobCoef, pvEst: setup.pvEst };
   const teams = [[], []];
   setup.teams.forEach((defs, ti) => {
     for (const d of defs) {
@@ -226,8 +249,10 @@ export function simulate(P, seed, log) {
   for (const u of U) if (!u.out) occ[u.y * W + u.x] = u.id;
   const aliveCount = [0, 0];
   for (const u of U) if (!u.pet) aliveCount[u.team]++;
-  const eAtk = (u) => Math.max(1, (u.atk * u.mAtk + u.aAtk) * (u.ch && u.ch.atkSh && u.shield > 0 ? 1 + u.ch.atkSh : 1));
-  const eDef = (u) => Math.max(0, u.def * u.mDef + u.aDef);
+  // monster passive stat multipliers: Cloud Veil stacks (ATK), Mettle of Trial stacks (ATK & DEF)
+  const mettleF = (u) => { const m = u.mp && u.mp.mettle && u.mp.mettle[0]; return m ? 1 + m.v * Math.min(m.max, Math.floor((1 - u.hp / u.hpMax) / m.per + 1e-9)) : 1; };
+  const eAtk = (u) => Math.max(1, (u.atk * u.mAtk + u.aAtk) * (u.ch && u.ch.atkSh && u.shield > 0 ? 1 + u.ch.atkSh : 1) * (u.cloudN ? 1 + u.cloudN * u.cloudV : 1) * (u.mp ? mettleF(u) : 1));
+  const eDef = (u) => Math.max(0, (u.def * u.mDef + u.aDef) * (u.mp ? mettleF(u) : 1));
   const eSpd = (u) => Math.max(1, u.spd * u.mSpd + u.aSpd);
   const interval = (u) => 100000 / Math.sqrt(eSpd(u) * rankScale(u.level));
   const free = (x, y) => x >= 0 && y >= 0 && x < W && y < H && occ[y * W + x] < 0;
@@ -243,6 +268,7 @@ export function simulate(P, seed, log) {
     for (const s of u.st) {
       switch (s.k) {
         case 'defUp': aDef += s.v; break;
+        case 'wither': bDmg -= s.v * s.n; break;
         case 'dodgeUp': dodgeB = Math.max(dodgeB, s.v); break;
         case 'critStk': bCrit += s.v * s.n; break;
         case 'spdStk': aSpd += s.v * s.n; break;
@@ -350,6 +376,8 @@ export function simulate(P, seed, log) {
       }
     }
     t.above50 = !below;
+    if (t.mp && hpDmg > 0) mobPassiveHurt(t, hpDmg);
+    if (!t.alive) return hpDmg;
     // Fantomon energy / Boaro-style shield
     if (t.petI != null) {
       const p = U[t.petI];
@@ -357,6 +385,66 @@ export function simulate(P, seed, log) {
       if (p.sup.k === 'shieldLoss' && t.supN < 5) { t.lossAcc += hpDmg; if (t.lossAcc >= t.hpMax * 0.15) { t.lossAcc -= t.hpMax * 0.15; t.supN++; addShield(t, t, eDef(t) * (p.sup.v.ShieldByDefence || 0), 3); } }
     }
     return hpDmg;
+  }
+  /* ── monster passives (비전) ── */
+  const foesOfT = (u, cx, cy, r) => U.filter((f) => f.alive && f.team !== u.team && dist(f.x, f.y, cx, cy) <= r);
+  function pvAoe(u, r, el, hits = 1, cx = u.x, cy = u.y) {
+    for (let h = 0; h < hits && !B.over && u.alive; h++) for (const f of foesOfT(u, cx, cy, r)) hit(u, f, (u.mc || 1) / hits, 0, el, { noProc: 1, noReact: 1 });
+  }
+  function pvLabel(u, name) { if (ev) ev.push({ e: 'cast', u: u.id, n: name, el: 'none', tg: [], ax: u.x, ay: u.y, sh: 'B', sup: 1 }); }
+  function mobPassiveHurt(t, hpDmg) {
+    const mp = t.mp;
+    // rage / awakening (first time under a threshold)
+    if (mp.rage) for (let i = 0; i < mp.rage.length; i++) {
+      const r = mp.rage[i]; t.rgDone = t.rgDone || [];
+      if (t.rgDone[i] || t.hp / t.hpMax >= r.th) continue;
+      t.rgDone[i] = 1; t.raged = true; pvLabel(t, r.name);
+      const perm = { exp: 1e9, buff: true, nd: 1 };
+      if (r.spd) addStatus(t, { ...perm, k: 'spdUp', v: t.spd * r.spd });
+      if (r.dmg) addStatus(t, { ...perm, k: 'dmgUp', v: r.dmg });
+      if (r.block) addStatus(t, { ...perm, k: 'blockUp', v: r.block });
+      if (r.def) addStatus(t, { ...perm, k: 'defUp', v: t.def * r.def });
+    }
+    // waves / fire rings / whirlwinds every 15% of max HP taken
+    if (mp.cum) {
+      t.cumAcc = (t.cumAcc || 0) + hpDmg;
+      const repl = t.raged && mp.cum.some((c) => c.phase && c.rep);
+      while (t.cumAcc >= 0.15 * t.hpMax && t.alive && !B.over) {
+        t.cumAcc -= 0.15 * t.hpMax;
+        for (const c of mp.cum) { if (c.phase ? !t.raged : repl) continue; pvLabel(t, c.name); pvAoe(t, c.r, c.el, c.hits); }
+      }
+    }
+    if (mp.rejuv) { const r = mp.rejuv[0]; t.rjAcc = (t.rjAcc || 0) + hpDmg; while (t.rjAcc >= r.th * t.hpMax) { t.rjAcc -= r.th * t.hpMax; t.rjLeft = r.t; } }
+    if (mp.selfDestruct && !t.sdDone && t.alive && t.hp / t.hpMax < mp.selfDestruct[0].th) {
+      const s = mp.selfDestruct[0]; t.sdDone = true; pvLabel(t, s.name); pvAoe(t, s.r, s.el, 1);
+      if (t.alive) kill(t, null);
+    }
+  }
+  /** technique damage taken: stacks that wear off per hit */
+  function mobPassiveStacks(t) {
+    if (t.drN > 0) t.drN--;
+    if (t.strataN > 0) t.strataN--;
+    if (t.sipN > 0) t.sipN--;
+    if (t.cloudN > 0) t.cloudN--;
+  }
+  function mobPassiveDealt(a, t, kind, el) {
+    const mp = a.mp;
+    if (mp.wither && t.alive) for (const w of mp.wither) if (rnd() < w.p) {
+      const s = has(t, 'wither');
+      if (s) { s.n = Math.min(w.max, s.n + 1); s.exp = t.turnNo + w.t; recalc(t); } else addStatus(t, { k: 'wither', v: w.v, n: 1, exp: t.turnNo + w.t });
+    }
+    if (mp.mark && t.alive) for (const m of mp.mark) if (rnd() < m.p) {
+      t.pvMk = t.pvMk || {}; t.pvMk[m.name] = (t.pvMk[m.name] || 0) + 1;
+      if (t.pvMk[m.name] >= m.n) { t.pvMk[m.name] = 0; if (m.r) pvAoe(a, m.r, m.el, 1, t.x, t.y); else hit(a, t, a.mc || 1, 0, m.el, { noProc: 1, noReact: 1 }); }
+    }
+    if (mp.prey && kind === 2 && t.alive) hit(a, t, a.mc || 1, 0, mp.prey[0].el, { noProc: 1, noReact: 1 });
+    if (mp.gather) {
+      const g = mp.gather[0]; a.gN = (a.gN || 0) + 1;
+      if (a.gN >= g.n) {
+        a.gN = 0; const pool = foesOfT(a, a.x, a.y, g.r);
+        if (pool.length) { const f = pool[Math.floor(rnd() * pool.length)]; pvLabel(a, g.name); for (let h = 0; h < g.hits && f.alive && !B.over; h++) hit(a, f, (a.mc || 1) / g.hits, 0, g.el, { noProc: 1, noReact: 1 }); }
+      }
+    }
   }
   const lost15 = (u) => Math.min(5, Math.floor((1 - u.hp / u.hpMax) / 0.15 + 1e-9));
   const debuffKinds = (u) => { const k = new Set(); for (const s of u.st) if (!s.buff && s.k !== 'shield') k.add(s.k); return k.size; };
@@ -376,6 +464,7 @@ export function simulate(P, seed, log) {
   }
   /** attacker-side charm procs after a technique hit */
   function onDealt(a, t, kind, el) {
+    if (a.mp && !B.over) mobPassiveDealt(a, t, kind, el);
     const c = a.ch; if (!c || B.over) return;
     for (const p of c.procs) {
       if ((p.on === 'crit' && kind !== 1) || (p.opt.cond && p.opt.cond !== el) || rnd() >= p.p) continue;
@@ -397,6 +486,7 @@ export function simulate(P, seed, log) {
       if (!a.alive || !t.alive || dist(a.x, a.y, t.x, t.y) > r.range || rnd() >= r.p) continue;
       fired = true;
       if (r.inflict) tryStatus(t, a, r.inflict);
+      else if (r.aoe) { for (const f of U.filter((x) => x.alive && x.team !== t.team && dist(x.x, x.y, t.x, t.y) <= r.aoe)) hit(t, f, r.coef, r.flat, r.el, { noProc: 1, noReact: 1 }); }
       else hit(t, a, r.coef, r.flat, r.el, { base: (r.by === 'def' ? eDef(t) : eAtk(t)) * r.coef + r.flat, noProc: 1, noReact: 1 });
     }
     if (c.reflect && t.shield > 0 && a.alive) { fired = true; applyDamage(t, a, Math.max(1, Math.floor(d * c.reflect)), { el: 'light', kind: 4 }); }
@@ -409,14 +499,19 @@ export function simulate(P, seed, log) {
     const dg = t.dodge + t.dodgeB;
     if (dg > 0 && rnd() < dg) { if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d: 0, k: 3, hp: t.hp, sh: t.shield, el }); return 0; }
     const atk = eAtk(a); let def = eDef(t), boost = o.boost || 0, redX = 1;
+    if (a.pierceUntil != null && a.pierceUntil >= a.turnNo && a.mp && a.mp.pierce) def *= 1 - a.mp.pierce[0].v;
+    if (t.drN > 0) redX *= Math.max(0.05, 1 - t.drN * t.drV);
+    if (t.strataN === 0 && t.strataV) redX *= 1 + t.strataV;
     if (a.ch) {
       const c = a.ch;
       if (c.defIgnore) { let nb = 0; for (const s of a.st) if (s.buff) nb++; def *= 1 - Math.min(0.95, c.defIgnore + 0.1 * Math.min(3, nb)); }
       for (const [m, v] of c.dmgUp) boost += v * upMode(m, a, t, o);
     }
     if (t.ch) for (const [m, v] of t.ch.dmgRed) redX *= 1 - Math.min(0.9, v * redMode(m, a, t));
+    const em = elemMult(a, t, el);
+    if (em <= 0) { if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d: 0, k: 5, hp: t.hp, sh: t.shield, el }); return 0; } // element immunity (비전)
     let d = (o.base != null ? o.base : atk * coef + flat) * (atk / (atk + def));
-    d *= elemMult(a, t, el);
+    d *= em;
     d *= (1 + a.dmgBoost + a.bDmg + boost) / (1 + t.dmgRes);
     d *= (1 + t.vuln + t.sigil) * t.red * redX;
     const acc = a.acc + (o.acc || 0);
@@ -428,7 +523,8 @@ export function simulate(P, seed, log) {
     if (P.balance && t.kind === 'hero') d *= B.pvpScale;
     d *= o.mult || 1;
     d = Math.max(1, Math.floor(d));
-    const dealt = applyDamage(a, t, d, { doom: o.doom, kind, el, ls: (o.ls || 0) + (o.noProc ? 0 : a.lsAll || 0) });
+    const dealt = applyDamage(a, t, d, { doom: o.doom, kind, el, ls: (o.ls || 0) + (o.noProc ? 0 : (a.lsAll || 0) + (a.sipN ? a.sipN * a.sipV : 0)) });
+    if (!o.noProc && t.mp) mobPassiveStacks(t);
     if (!o.noProc) onDealt(a, t, kind, el);
     if (!o.noReact && t.alive && a.alive) onHurt(a, t, kind, d);
     // Light Sword Array: one counter per incoming cast
@@ -575,6 +671,11 @@ export function simulate(P, seed, log) {
   function castDamage(u, k, pl, pre) {
     const s = k.s, n = k.n;
     B.castId++; u.casts++;
+    if (u.mp) {
+      const mp = u.mp;
+      if (mp.overload && !u.overOn && u.casts >= mp.overload[0].n) { const o = mp.overload[0]; u.overOn = 1; pvLabel(u, o.name); addStatus(u, { k: 'dmgUp', v: o.dmg, exp: 1e9, buff: true, nd: 1 }); addStatus(u, { k: 'defUp', v: -u.def * o.def, exp: 1e9, buff: true, nd: 1 }); }
+      if (mp.pierce && u.casts % mp.pierce[0].n === 0) u.pierceUntil = u.turnNo + mp.pierce[0].t;
+    }
     if (pl.x !== u.x || pl.y !== u.y) moveTo(u, pl.x, pl.y, s.leap);
     if (ev) ev.push({ e: 'cast', u: u.id, n: s.ko || s.en, el: s.el, tg: pl.targets.map((t) => t.id), ax: pl.ax, ay: pl.ay, sh: s.tg.t, ar: s.tg.ar || s.tg.r || 0 });
     let targets = pl.targets;
@@ -586,7 +687,7 @@ export function simulate(P, seed, log) {
     const sp = s.sp || {};
     let dealt = 0;
     const one = (t, coef, flat, mult) => { o.mult = mult || 1; if (sp.k === 'execute') o.mult *= 1 + Math.min(sp.max, Math.floor((1 - t.hp / t.hpMax) / 0.05) * sp.step); const d = hit(u, t, coef, flat, s.el, o); dealt += d; return d; };
-    const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
+    const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
     if (sp.k === 'shieldBurst') {
       let sh = 0; for (let i = u.st.length - 1; i >= 0; i--) if (u.st[i].k === 'shield') { sh += u.st[i].v; u.st.splice(i, 1); } recalc(u);
       o.base = sh * n.coef + n.flat;
@@ -664,7 +765,7 @@ export function simulate(P, seed, log) {
     for (const f of list) {
       hit(p, f, sp.coef, sp.flat, sp.el, { noProc: 1, noReact: 1 });
       if (f.alive && sp.eff) for (const e of sp.eff) tryStatus(p, f, e);
-      if (f.alive && sp.dispelBuff) { const bi = f.st.map((x, i) => (x.buff ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(f, bi[Math.floor(rnd() * bi.length)]); recalc(f); } }
+      if (f.alive && sp.dispelBuff) { const bi = f.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(f, bi[Math.floor(rnd() * bi.length)]); recalc(f); } }
     }
     if (sp.healOwner) heal(p, u, u.hpMax * sp.healPct + sp.healFlat);
   }
@@ -761,6 +862,13 @@ export function simulate(P, seed, log) {
       if (u.ch.regen) heal(u, u, u.hpMax * u.ch.regen.healPct + u.ch.regen.healFlat);
       if (u.ch.omen) for (const f of U) if (f.alive && f.team !== u.team && dist(f.x, f.y, u.x, u.y) <= 5) tryStatus(u, f, { k: 'vuln', v: 0.25, p: 0.5, t: 1 });
     }
+    // monster passives at the start of the monster's turn
+    if (u.alive && !B.over && u.mp) {
+      const mp = u.mp;
+      if (mp.regen) heal(u, u, u.hpMax * mp.regen[0].v);
+      if (mp.rejuv && u.rjLeft > 0) { u.rjLeft--; heal(u, u, u.hpMax * mp.rejuv[0].v); }
+      if (mp.startAoe) for (const s of mp.startAoe) pvAoe(u, s.r, s.el, 1);
+    }
     if (u.alive && !B.over && u.petI != null) {
       const p = U[u.petI];
       if (p.sup.k === 'healLow' && u.hp / u.hpMax < 0.8) heal(p, u, u.hpMax * p.sup.healPct + p.sup.healFlat);
@@ -792,6 +900,21 @@ export function simulate(P, seed, log) {
           u.petStk++; if (u.petStk === 4 && sp.v.StatusDmgAddPer) addStatus(u, { k: 'dmgUp', v: sp.v.StatusDmgAddPer, exp: 1e9, buff: true });
         } else if (sp.k === 'shield3') { u.petStk++; if (u.petStk % 3 === 0) addShield(u, u, eDef(u) * (sp.v.ShieldByDefence || 0), 3); }
       }
+      // monster passives at the end of the monster's turn
+      if (u.alive && !B.over && u.mp) {
+        const mp = u.mp;
+        if (mp.endAoe) for (const s of mp.endAoe) {
+          const tg = foesOfT(u, u.x, u.y, s.r); if (!tg.length) continue;
+          pvLabel(u, s.name);
+          for (const f of tg) {
+            hit(u, f, u.mc || 1, 0, s.el, { noProc: 1, noReact: 1 });
+            if (s.dispel && f.alive && rnd() < s.dispel) { const bi = f.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(f, bi[Math.floor(rnd() * bi.length)]); recalc(f); } }
+          }
+        }
+        if (mp.luck && u.alive) { const v = mp.luck[0].v, r = Math.floor(rnd() * 3); addStatus(u, { k: r === 0 ? 'atkUp' : r === 1 ? 'defUp' : 'spdUp', v: (r === 0 ? u.atk : r === 1 ? u.def : u.spd) * v, exp: u.turnNo + 1, buff: true }); }
+        if (mp.siphon) u.sipN = Math.min(mp.siphon[0].n, (u.sipN || 0) + mp.siphon[0].add);
+        if (mp.cloud) u.cloudN = Math.min(mp.cloud[0].n, (u.cloudN || 0) + mp.cloud[0].add);
+      }
     }
     // end of turn: expire statuses
     if (u.alive) { let ch = 0; for (let i = u.st.length - 1; i >= 0; i--) if (u.turnNo >= u.st[i].exp) { removeStatus(u, i); ch = 1; } if (ch) recalc(u); }
@@ -802,6 +925,13 @@ export function simulate(P, seed, log) {
     if (u.pet || !u.alive) continue;
     // guild conquest: "United We Stand" — the boss takes 99% less DMG for its first 3 turns
     if (u.uws) addStatus(u, { k: 'dmgRed', v: 0.99, exp: 3, buff: true });
+    if (u.mp) {
+      const mp = u.mp;
+      if (mp.drStk) { u.drN = mp.drStk[0].n; u.drV = mp.drStk[0].v; }
+      if (mp.strata) { u.strataN = mp.strata[0].n; u.strataV = mp.strata[0].vuln; }
+      if (mp.siphon) { u.sipN = mp.siphon[0].n; u.sipV = mp.siphon[0].v; }
+      if (mp.cloud) { u.cloudN = mp.cloud[0].n; u.cloudV = mp.cloud[0].v; }
+    }
     const c = u.ch, perm = { exp: 1e9, buff: true };
     if (c) {
       for (const s of c.shields) if (s.when === 'pre') addShield(u, u, (s.by === 'hp' ? u.hpMax : u.def) * s.v, s.t);

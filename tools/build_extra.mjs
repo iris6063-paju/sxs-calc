@@ -3,6 +3,7 @@
 // Inputs are locally saved community pages (see CREDITS.md); they are only parsed as data.
 import fs from 'node:fs';
 import path from 'node:path';
+import { PV } from './passives.mjs';
 
 const [, , DL, DL2, OUT] = process.argv;
 const J = (f) => JSON.parse(fs.readFileSync(path.join(DL, f), 'utf8'));
@@ -10,20 +11,27 @@ const dec = (s) => String(s).replace(/&quot;/g, '"').replace(/&amp;/g, '&').repl
 const strip = (s) => dec(String(s).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 const rep = []; const log = (...a) => rep.push(a.join(' '));
 const TIER = [1, 3, 6, 10, 16, 24];
-const EL = { Physical: 'phy', Wind: 'wind', Water: 'water', Fire: 'fire', Light: 'light', Dark: 'dark' };
-const elOf = (html) => { const m = /(Physical|Wind|Water|Fire|Light|Dark)(?:<\/span>)? (?:Doom |True |Crit )?DMG/.exec(html) || /(Physical|Wind|Water|Fire|Light|Dark)/.exec(html); return m ? EL[m[1]] : 'none'; };
+const EL = { Physical: 'phy', Wind: 'wind', Water: 'water', Fire: 'fire', Light: 'light', Dark: 'dark', Chaos: 'chaos' };
+const elOf = (html) => { const m = /(Physical|Wind|Water|Fire|Light|Dark|Chaos)(?:<\/span>)? (?:Doom |True |Crit )?DMG/.exec(html) || /(Physical|Wind|Water|Fire|Light|Dark|Chaos)/.exec(html); return m ? EL[m[1]] : 'none'; };
 
 /* ── text → targeting/effects (same rules as build_data.mjs) ── */
 const STATUS = { 'Armor Break 2': ['abreak', 0.3], 'Armor Break 1': ['abreak', 0.15], 'Weakened 1': ['weak', 0.15], 'Weakened 2': ['weak', 0.3], 'Slow 1': ['slow', 0.15], 'Slow 2': ['slow', 0.3], Slow: ['slow', 0.15], Stun: ['stun'], Frozen: ['freeze'], Immobilize: ['immob'], Rimebound: ['immob'], Taunt: ['taunt'], Frenzy: ['frenzy'], Blind: ['blind'], Cold: ['cold'], Wet: ['wet'], Erosion: ['dot'], Poison: ['dot'], Bleed: ['dot'], Burn: ['dot'], Vulnerability: ['vuln', 0.25], Fragility: ['vuln', 0.25] };
 function parseText(d) {
+  // strip() turns tags into spaces, which splits "3<b>×</b>2" / "1<b>-grid</b>" / "a<b>100%</b>" — glue them back
+  d = d.replace(/(\d)\s*[×x]\s*(\d)/g, '$1×$2').replace(/(\d) -(grid|row)/g, '$1-$2').replace(/\ba(\d)/g, 'a $1').replace(/\+ (\d)/g, '+$1');
   const o = { hits: 1, eff: [] }; let m;
   if ((m = /DMG (once|twice|(\d+) times)/.exec(d))) o.hits = m[1] === 'once' ? 1 : m[1] === 'twice' ? 2 : +m[2];
-  if ((m = /[Ss]elects a (?:grid|target) within (\d+) grids? of the caster/.exec(d))) { const r = +m[1]; let a; if ((a = /within a (\d+)-grid square area (?:of|around) th(?:e|at) target/.exec(d))) o.tg = { t: 'TQ', r, ar: +a[1] }; else if ((a = /within (\d+) grids? of (?:the target|each target)/.exec(d))) o.tg = { t: 'T', r, ar: +a[1] }; else o.tg = { t: 'T', r, ar: 1 }; }
+  if ((m = /(?:star rays|in an area) within (\d+) grids? of the caster/.exec(d))) o.tg = { t: 'A', r: +m[1] + (/rays/.test(m[0]) ? 1 : 0) };
+  else if ((m = /all (?:enemies|units) (?:within|in) (?:a |an )?(\d+)-(?:grid|row) (?:cone|trapezoid) area in front/.exec(d))) o.tg = { t: 'F', w: +m[1] % 2 ? +m[1] : +m[1] + 1, h: +m[1] };
+  else if (/DMG (?:once|twice|\d+ times) to all enemies\./.test(d)) o.tg = { t: 'A', r: 99 };
+  else if ((m = /to random enemies within (\d+) grids?/.exec(d))) o.tg = { t: 'A', r: +m[1] };
+  else if ((m = /[Ss]elects a (?:grid|target) within (\d+) grids?(?: of the caster)?/.exec(d))) { const r = +m[1]; let a; if ((a = /within a (\d+)-grid square area (?:of|around) th(?:e|at) target/.exec(d))) o.tg = { t: 'TQ', r, ar: +a[1] }; else if ((a = /within (\d+) grids? of (?:the target|each target)/.exec(d))) o.tg = { t: 'T', r, ar: +a[1] }; else o.tg = { t: 'T', r, ar: 1 }; }
   else if ((m = /1 enemy within (\d+) to (\d+) grids?/.exec(d))) o.tg = { t: 'S', min: +m[1], r: +m[2] };
   else if ((m = /1 enemy within (\d+) grids?/.exec(d))) o.tg = { t: 'S', r: +m[1] };
   else if ((m = /lowest HP within (\d+) grids?[\s\S]*?(\d+)-grid square/.exec(d))) o.tg = { t: 'TQ', r: +m[1], ar: +m[2] };
   else if ((m = /random grids within (\d+) grids?/.exec(d))) o.tg = { t: 'T', r: +m[1], ar: 1 };
-  else if ((m = /all enemies (?:within|in) (?:a |an )?(\d+)[×x](\d+) grid(?: area)? (?:in front|in the front|to the caster|along|in t)/.exec(d)) || (m = /(?:missiles|bolts) within a (\d+)[×x](\d+) grid area in front/.exec(d))) o.tg = { t: 'F', w: +m[1], h: +m[2] };
+  else if (/^(?:Sequentially )?[Dd]eals .*grid area (?:respectively )?in front/.test(d) && (m = [...d.matchAll(/(\d+)×(\d+)/g)]).length > 1) { const l = m[m.length - 1]; o.tg = { t: 'F', w: +l[1], h: +l[2] }; o.hits = Math.max(o.hits, m.length); } // expanding waves → largest area
+  else if ((m = /all enemies (?:within|in) (?:a |an )?(\d+)[×x](\d+) grids?(?: area)? (?:in front|in the front|to the caster|along|in t)/.exec(d)) || (m = /(?:missiles|bolts) within a (\d+)[×x](\d+) grid area in front/.exec(d))) o.tg = { t: 'F', w: +m[1], h: +m[2] };
   else if (/all enemies (?:within|in) (?:a |an )?\d+[×x]\d+ grid(?: area)? (?:around|on both sides)/.test(d)) o.tg = { t: 'Q', r: 1 };
   else if ((m = /all enemies (?:within|in) (?:a |an )?(\d+)[×x](\d+) grid(?: area)? of the caster/.exec(d))) o.tg = { t: 'F', w: Math.min(+m[1], +m[2]), h: Math.max(+m[1], +m[2]) };
   else if ((m = /all enemies within (?:a )?(\d+)-grid (square|circular)? ?area/.exec(d))) o.tg = { t: m[2] === 'square' ? 'Q' : 'A', r: +m[1] };
@@ -271,7 +279,7 @@ function addMob(key, def, sr, lv) {
   if (def.x && Object.keys(def.x).length) mob.x = def.x;
   for (const sid of def.sk) {
     const e = esk[Math.abs(sid)]; if (!e) continue; const desc = strip(e.d);
-    if (sid < 0) { const m = /takes (\d+)% less (\w+) DMG and (\d+)% higher (\w+) DMG/.exec(desc); if (m && EL[m[2]] && EL[m[4]]) mob.er = { [EL[m[2]]]: -m[1] / 100, [EL[m[4]]]: +m[3] / 100 }; continue; }
+    if (sid < 0) { (mob.pv = mob.pv || []).push(-sid); const m = /takes (\d+)% less (\w+) DMG and (\d+)% higher (\w+) DMG/.exec(desc); if (m && EL[m[2]] && EL[m[4]]) mob.er = { [EL[m[2]]]: -m[1] / 100, [EL[m[4]]]: +m[3] / 100 }; continue; }
     const p = parseText(desc), el = elOf(e.d);
     if (!p.tg || el === 'none') continue;
     mob.sk.push({ en: e.n, el, ic: e.i, ...p });
@@ -329,6 +337,17 @@ for (const m of eidx.modes) {
   if (m.id === 'crucible') for (const g of m.groups) addGroup('crucible', g.id, g.file, { Apprentice: '견습', Elite: '정예', Expert: '숙련', Champion: '챔피언', Master: '마스터', Paragon: '패러곤', Saint: '세인트', Godtouched11: '에테리얼' }[g.name] || g.name, g.name, true);
 }
 log('extra mobs', MOBS2.length, 'curves', Object.keys(CURVES2).join(','), 'rpg', JSON.stringify(RPG).length);
+// passives (비전) used by any shipped mob → Korean text + model + icon
+const usedPv = new Set();
+for (const m of MOBS2) for (const id of m.pv || []) usedPv.add(id);
+for (const m of baseData.matchAll(/"pv":\[([\d,]+)\]/g)) for (const id of m[1].split(',')) usedPv.add(+id);
+const MOB_PV = {};
+for (const id of [...usedPv].sort((a, b) => a - b)) {
+  const e = esk[id], t = PV[id];
+  if (!t) { log('PASSIVE WITHOUT TABLE ENTRY', id, e && e.n); continue; }
+  MOB_PV[id] = { en: e ? e.n : String(id), ko: t[0], d: t[1], i: e && e.i ? e.i : null, ...t[2] };
+}
+log('mob passives', Object.keys(MOB_PV).length, 'modelled', Object.values(MOB_PV).filter((p) => p.k !== 'none').length, 'estimated', Object.values(MOB_PV).filter((p) => p.est).length);
 
 const out = `// GENERATED by tools/build_extra.mjs — do not edit by hand. Unofficial fan data (see CREDITS.md).
 export const KO_SKILL = ${JSON.stringify(KO_SKILL)};
@@ -341,6 +360,7 @@ export const MOBS2 = ${JSON.stringify(MOBS2)};
 export const CURVES2 = ${JSON.stringify(CURVES2)};
 export const RPG = ${JSON.stringify(RPG)};
 export const ENC = ${JSON.stringify(ENC)};
+export const MOB_PV = ${JSON.stringify(MOB_PV)};
 `;
 fs.writeFileSync(OUT, out);
 console.log('wrote', OUT, (out.length / 1024).toFixed(0) + ' KB');

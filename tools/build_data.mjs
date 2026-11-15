@@ -403,6 +403,7 @@ for (const [mid, file, ko, en, sr, rankKo] of MAP_DEF) {
       if (!e) continue;
       const desc = strip(e.d);
       if (sid < 0) {
+        (mob.pv = mob.pv || []).push(-sid); // passive (비전); modelled from tools/passives.mjs
         const m = /takes (\d+)% less (\w+) DMG and (\d+)% higher (\w+) DMG/.exec(desc);
         if (m && EL[m[2]] && EL[m[4]]) { mob.er = { [EL[m[2]]]: -m[1] / 100, [EL[m[4]]]: +m[3] / 100 }; }
         else passiveUnparsed[e.n] = desc.slice(0, 90);

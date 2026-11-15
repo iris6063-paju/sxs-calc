@@ -7,7 +7,7 @@ import { heroArt, mobArt, hasMobArt } from './art.js';
 
 export const EL = {
   phy: { ko: '물리', c: '#c9c2b2' }, wind: { ko: '바람', c: '#6fd9a8' }, water: { ko: '물', c: '#4aa8ff' },
-  fire: { ko: '불', c: '#ff7a3c' }, light: { ko: '빛', c: '#ffd75a' }, dark: { ko: '어둠', c: '#b07cff' }, none: { ko: '보조', c: '#9fb3a5' },
+  fire: { ko: '불', c: '#ff7a3c' }, light: { ko: '빛', c: '#ffd75a' }, dark: { ko: '어둠', c: '#b07cff' }, chaos: { ko: '혼돈', c: '#e05cb0' }, none: { ko: '보조', c: '#9fb3a5' },
 };
 const OUT = '#2a1b14', CREAM = '#fff6e2';
 const P2 = new Map();

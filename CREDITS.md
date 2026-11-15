@@ -7,7 +7,8 @@
 ## 전투 공식 · 수치 (커뮤니티 자료)
 
 - **Purrwikimania** — https://www.purrwikimania.com/combat/
-  피해 계산 순서, 속도(행동 간격), 치명 · 막기, 원소 배율, 레벨 보정, 팀 전투 규칙, 스킬 계수 · 레벨 기준표, 적 능력치 · 층 구성.
+  피해 계산 순서, 속도(행동 간격), 치명 · 막기, 원소 배율, 레벨 보정, 팀 전투 규칙, 스킬 계수 · 레벨 기준표, 적 능력치 · 층 구성,
+  몹 스킬과 몹 · 보스 비전(패시브) 71종의 설명(`tools/passives.mjs` 의 전투 모델과 한국어 번역 이름은 이 설명을 바탕으로 이 프로젝트에서 만든 것입니다).
   `js/gamedata.js` 의 수치는 이 사이트가 정리한 표에서 계산기에 필요한 부분(직업 18종의 전투스킬, 판타지아 등반 4개 지역)을 추려 변환한 것입니다.
 - **Keripo — "[Sword x Staff] Damage Formula (Datamined)"** — https://keripo.com/2026/10/sword-x-staff-damage-formula-datamined/
   (원 정리: Reddit r/SwordxStaff_Official, 디컴파일 u/ninjan74) 피해 구간(Z1~Z6) 구조와 판정 순서 교차 확인.
@@ -27,7 +28,7 @@
 - **전투 스킬 · 비법 아이콘(`assets/skills/`)과 한국어 스킬 이름 · 설명**은 게임사 저작물로 권리는 각 권리자에게 있습니다.
   [소드X스태프허브 스킬 도감](https://metahub.wiki/swordxstaff/ko/database/)에 공개된 한국판 리소스를 스킬 ID 기준으로 가져와, 비영리 팬 계산기에서 식별용으로만 씁니다.
   권리자의 요청이 있으면 즉시 내리겠습니다.
-- **몹 스킬 아이콘(`assets/mobskills/`)** 역시 게임 저작물이며, Purrwikimania 적 정보 페이지에 공개된 파일을 같은 목적·조건으로 씁니다.
+- **몹 스킬 · 비전 아이콘(`assets/mobskills/`)** 역시 게임 저작물이며, Purrwikimania 적 정보 페이지에 공개된 파일을 같은 목적·조건으로 씁니다.
 - **game-icons.net** — https://game-icons.net — CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
   Lorc, Delapouite, Skoll, Carl Olsen 외 기여자의 실루엣 아이콘을 [Iconify](https://iconify.design) `game-icons` 묶음에서 가져와
   재채색 · 외곽선 · 스티커 테두리 · 합성 · 애니메이션을 더해 **몹 스탠디**와 **영웅의 무기 · 장식 부품**으로 재구성했습니다(`js/icons.js`, `js/sprites.js`).

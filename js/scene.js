@@ -329,6 +329,7 @@ export function createStage(canvas) {
         const t = units[ev.t], c = p.cur;
         t.hp = ev.hp; t.sh = ev.sh; drawBar(t);
         if (ev.k === 3) { popNum('빗나감', '#cfd3d8', head(t)); if (c) c.miss++; }
+        else if (ev.k === 5) { popNum('면역', '#9fe7ff', head(t)); if (c) c.miss++; }
         else {
           t.hit = 1;
           const col = ev.k === 1 ? '#ffd23f' : ev.k === 2 ? '#b9c4cf' : ev.k === 4 ? '#c59bff' : '#ffffff';

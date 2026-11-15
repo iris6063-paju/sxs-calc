@@ -1,6 +1,6 @@
 // UI: team builder (skills, charms, Fantomon), encounter presets, Monte Carlo runner and results.
 import { CLASSES, SKILLS, MAPS, RANKS, MAXLV } from './gamedata.js';
-import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC } from './engine.js';
+import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV } from './engine.js';
 import { createStage } from './scene.js';
 import { renderAvatar, EL } from './sprites.js';
 import { loadArt } from './art.js';
@@ -73,7 +73,7 @@ function newHero(cls = 'Huwei', level = 40, name = '캐릭터', mult = 2.5) {
 }
 function petDefaults(h, id) { const p = PET.get(id); return { id, rank: 3, adult: false, hp: Math.round(h.hp * p.base[0] / 100), atk: Math.round(h.atk * p.base[1] / 100), def: Math.round(h.def * p.base[2] / 100), spd: Math.round(h.spd * p.base[3] / 100) }; }
 function demo() {
-  return { v: 2, mode: 'pve', runs: 1000, roundCap: { pve: 15, pvp: 100 }, mobCoef: 100, pvpBalance: true, preset: { mode: 'fantasia', group: 'fa1', n: 71 }, teams: [[newHero('Huwei', 40, '나')], floorUnits('fa1', 71)] };
+  return { v: 2, mode: 'pve', runs: 1000, roundCap: { pve: 15, pvp: 100 }, mobCoef: 100, pvpBalance: true, pvEst: true, preset: { mode: 'fantasia', group: 'fa1', n: 71 }, teams: [[newHero('Huwei', 40, '나')], floorUnits('fa1', 71)] };
 }
 const b64e = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const b64d = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
@@ -106,7 +106,7 @@ let saveT = 0, rosterT = 0, lastRes = null, lastSetup = null, running = false;
 
 function toSetup() {
   return {
-    mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100,
+    mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100, pvEst: state.pvEst !== false,
     teams: state.teams.map((t) => t.map((u) => (u.kind === 'mob' ? { kind: 'mob', uid: u.uid, key: u.key, level: u.level, count: u.count, sr: u.sr, fix: u.fix, uws: u.uws }
       : { kind: 'hero', uid: u.uid, name: u.name, cls: u.cls, level: u.level, atk: u.atk, def: u.def, hp: u.hp, spd: u.spd, ...u.adv, skills: u.skills, charms: u.charms, pet: u.pet }))),
   };
@@ -311,6 +311,9 @@ const mobSt = (u) => (u.fix ? stFrom(u.fix, u.level) : mobStats(u.key, u.level, 
 function mobHtml(u) {
   const mob = MOB.get(u.key), st = mobSt(u), open = openSet.has(u.uid), fixed = mobFixed(u);
   const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.en)}</b><div class="sum" style="margin:3px 0 0">${skillTags({ ...s, kind: 'dmg', cd: 0 }, null)}</div></div></div></div>`).join('');
+  const pvs = (mob.pv || []).map((id) => MOB_PV[id]).filter(Boolean);
+  const pvBadge = (p) => (p.k === 'none' ? tag(`⚠ 미반영 · ${p.why || '효과 비공개'}`, 'warn') : p.est ? (state.pvEst !== false ? tag('추정 수치로 반영', 'est') : tag('추정값 꺼짐 · 미반영', 'warn')) : tag('반영', 'ok'));
+  const pvHtml = pvs.length ? `<div class="sec"><span>비전 (패시브 ${pvs.length})</span></div>` + pvs.map((p) => `<div class="skill"><div class="mobsk">${p.i ? MOBSKILL_ICON({ ic: p.i, el: p.el || 'none' }) : '<span class="ico mob"><em>✦</em></span>'}<div><b>${esc(p.ko)}</b> <small class="en">${esc(p.en)}</small><div class="desc" style="margin-top:2px">${esc(p.d)}</div><div class="sum" style="margin:4px 0 0">${pvBadge(p)}</div></div></div></div>`).join('') : '';
   const er = mob.er ? Object.entries(mob.er).map(([k, v]) => `받는 ${EL[k].ko} 대미지 ${v > 0 ? '+' : ''}${Math.round(v * 100)}%`).join(' · ') : '';
   return `<article class="unit mob ${open ? 'open' : ''}" data-uid="${u.uid}">
     <div class="unit-head" data-act="toggle">
@@ -324,7 +327,7 @@ function mobHtml(u) {
       ${fixed ? '<div class="note" style="margin:6px 0 0">층·단계 기준 고정 능력치 (게임 자료로 계산)</div>' : ''}
       ${u.uws ? '<div class="note" style="margin:4px 0 0">길드 토벌 보스 효과 United We Stand: 처음 3턴 동안 받는 대미지 99% 감소</div>' : ''}
       <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}</div>
-      <div class="sec"><span>스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)</span></div>${sk}
+      <div class="sec"><span>스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)</span></div>${sk}${pvHtml}
     </div></article>`;
 }
 function presetHtml() {
@@ -461,9 +464,11 @@ function onTeamInput(ti, e, commit) {
 /* ───────── settings ───────── */
 function syncSettings() {
   $$('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === state.mode));
-  $('#runsSel').value = String(state.runs); $('#capInp').value = state.roundCap[state.mode]; $('#mobCoefInp').value = state.mobCoef; $('#balChk').checked = state.pvpBalance;
+  $('#runsSel').value = String(state.runs); $('#capInp').value = state.roundCap[state.mode]; $('#mobCoefInp').value = state.mobCoef; $('#balChk').checked = state.pvpBalance; $('#pvChk').checked = state.pvEst !== false;
   $('#balLabel').hidden = state.mode !== 'pvp';
-  $('#mobCoefLabel').hidden = !state.teams.some((t) => t.some((u) => u.kind === 'mob'));
+  const hasMob = state.teams.some((t) => t.some((u) => u.kind === 'mob'));
+  $('#mobCoefLabel').hidden = !hasMob;
+  $('#pvLabel').hidden = !hasMob || !state.teams.some((t) => t.some((u) => u.kind === 'mob' && (MOB.get(u.key).pv || []).some((id) => MOB_PV[id] && MOB_PV[id].est)));
 }
 function setMode(mode, keep) {
   if (state.mode === mode) return;
@@ -481,6 +486,7 @@ $('#runsSel').addEventListener('change', (e) => { state.runs = +e.target.value; 
 $('#capInp').addEventListener('change', (e) => { state.roundCap[state.mode] = Math.max(1, Math.min(200, Math.round(+e.target.value || 15))); e.target.value = state.roundCap[state.mode]; touch(true); });
 $('#mobCoefInp').addEventListener('change', (e) => { state.mobCoef = Math.max(10, Math.min(500, +e.target.value || 100)); e.target.value = state.mobCoef; renderTeam(0); renderTeam(1); touch(true); });
 $('#balChk').addEventListener('change', (e) => { state.pvpBalance = e.target.checked; touch(true); });
+$('#pvChk').addEventListener('change', (e) => { state.pvEst = e.target.checked; renderTeam(0); renderTeam(1); touch(true); });
 $('#resetBtn').addEventListener('click', () => { state = demo(); openSet.clear(); lastRes = null; $('#results').innerHTML = ''; $('#winTag').hidden = true; renderAll(); touch(); toast('예시 구성으로 되돌렸습니다'); });
 $('#shareBtn').addEventListener('click', async () => {
   const url = location.origin + location.pathname + '#s=' + b64e(JSON.stringify(state));
