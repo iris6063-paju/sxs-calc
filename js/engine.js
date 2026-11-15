@@ -35,9 +35,16 @@ export function rngFrom(seed) {
 }
 
 /* ───────── data helpers ───────── */
+/** precomputed stat block (guild conquest floors, Hieromon tiers, mobs without a shipped curve) → mobStats() shape */
+export function stFrom(a, level) {
+  const b = LV.eres[lvi(level)] || 1;
+  return { hp: a[0], atk: a[1], def: a[2], spd: a[3], critRate: a[4], critDmg: a[5], critRes: a[6], blockRate: a[7], blockEff: a[8], acc: a[9], dmgBoost: a[10], dmgRes: a[11], effHit: (a[12] / b) * 100, effRes: (a[13] / b) * 100 };
+}
 export function mobStats(key, level, sr) {
   const mob = MOB.get(key);
-  const cv = CURVES[mob.map ? MAP.get(mob.map).cls[mob.pg] : (RPG[mob.pg] || {})[sr || mob.sr] ?? (RPG[mob.pg] || {})[mob.sr]];
+  const cls = mob.map ? MAP.get(mob.map).cls[mob.pg] : (RPG[mob.pg] || {})[sr || mob.sr] ?? (RPG[mob.pg] || {})[mob.sr];
+  const cv = cls != null ? CURVES[cls] : null;
+  if (!cv) return mob.st ? stFrom(mob.st, mob.lv) : null;
   const lv = clamp(level, cv.lo, cv.hi), i0 = Math.floor(lv) - cv.lo, fr = lv - Math.floor(lv), i1 = Math.min(i0 + 1, cv.hi - cv.lo);
   const get = (k) => (cv.v[k] ? Math.trunc(cv.v[k][i0] + (cv.v[k][i1] - cv.v[k][i0]) * fr) : cv.c[k] || 0);
   const main = (k, i) => Math.max(1, Math.trunc(get(k) * (mob.f[i] / 10000)));
@@ -46,7 +53,8 @@ export function mobStats(key, level, sr) {
     hp: main('MaxHp', 0), atk: main('Attack', 1), def: main('Defence', 2), spd: main('Speed', 3),
     critRate: get('CritRatePercent') / 100, critDmg: get('CritPowerPercent') / 100, critRes: get('CritAvoidPercent') / 100,
     blockRate: get('BlockPercent') / 100, blockEff: (get('BlockValuePercent') + (x.BlockValuePercent || 0)) / 100, acc: get('BlockAvoidPercent') / 100,
-    dmgBoost: get('DmgAddPercent') / 100, dmgRes: get('DmgReducePercent') / 100, effHit: get('EffectRate') / 100, effRes: get('EffectDodge') / 100,
+    // Effect Hit / Effect RES are flat: percent = value ÷ Base Effect RES of the level
+    dmgBoost: get('DmgAddPercent') / 100, dmgRes: get('DmgReducePercent') / 100, effHit: (get('EffectRate') / (LV.eres[lvi(level)] || 1)) * 100, effRes: (get('EffectDodge') / (LV.eres[lvi(level)] || 1)) * 100,
   };
 }
 export function heroBase(level) {
@@ -156,9 +164,10 @@ function buildPet(d, owner) {
   u.mat = d.adult && p.mat ? p.mat : null;
   return u;
 }
-function buildMob(key, level, opts, sr) {
-  const mob = MOB.get(key), st = mobStats(key, level, sr);
-  const u = { kind: 'mob', name: mob.ko, key, level, move: 4, big: mob.ty === 2, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null };
+function buildMob(key, level, opts, sr, fix, uws) {
+  const mob = MOB.get(key), st = Array.isArray(fix) && fix.length === 14 ? stFrom(fix, level) : mobStats(key, level, sr);
+  if (!st) throw new Error(`${mob.ko}: 이 레벨·랭크의 능력치 자료가 없습니다`);
+  const u = { kind: 'mob', name: mob.ko, key, level, move: 4, big: mob.ty === 2, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null, uws: !!uws };
   u.atk = st.atk; u.def = st.def; u.hpMax = st.hp; u.spd = st.spd;
   for (const k of PCT) u[k] = (st[k] || 0) / 100;
   for (const k of RAW) u[k] = 0;
@@ -172,7 +181,7 @@ export function prepare(setup) {
   const teams = [[], []];
   setup.teams.forEach((defs, ti) => {
     for (const d of defs) {
-      if (d.kind === 'mob') { const n = clamp(+d.count || 1, 1, 20); for (let i = 0; i < n; i++) { const u = buildMob(d.key, +d.level || 1, opts, d.sr); u.ref = d.uid; u.nth = i; teams[ti].push(u); } }
+      if (d.kind === 'mob') { const n = clamp(+d.count || 1, 1, 20); for (let i = 0; i < n; i++) { const u = buildMob(d.key, +d.level || 1, opts, d.sr, d.fix, d.uws); u.ref = d.uid; u.nth = i; teams[ti].push(u); } }
       else { const h = buildHero(d, opts); teams[ti].push(h); if (d.pet && d.pet.id) { const p = buildPet(d.pet, h); if (p) { p.ref = d.uid + ':pet'; h.petU = p; } } }
     }
   });
@@ -791,6 +800,8 @@ export function simulate(P, seed, log) {
   /* ── pre-battle: charms, Fantomon passives, then "casts before battle" skills ── */
   for (const u of U) {
     if (u.pet || !u.alive) continue;
+    // guild conquest: "United We Stand" — the boss takes 99% less DMG for its first 3 turns
+    if (u.uws) addStatus(u, { k: 'dmgRed', v: 0.99, exp: 3, buff: true });
     const c = u.ch, perm = { exp: 1e9, buff: true };
     if (c) {
       for (const s of c.shields) if (s.when === 'pre') addShield(u, u, (s.by === 'hp' ? u.hpMax : u.def) * s.v, s.t);

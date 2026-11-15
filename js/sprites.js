@@ -51,7 +51,10 @@ const MOB_ART = [
   [/toad|frog/i, 'frog'], [/obake|dorotabo|phantom|myraface|aobozu/i, 'ghost'], [/fish/i, 'fish'], [/shell/i, 'shell'], [/fox/i, 'fox'], [/umibozu/i, 'octopus'], [/beetle/i, 'beetle'],
   [/vine|ginseng|withered/i, 'plant'], [/gangi|^nue/i, 'imp'], [/tengu/i, 'tengu'], [/kamaitachi|thunderling|wanyudo|amaterasu/i, 'spirit'], [/kappa|turtle/i, 'turtle'],
   [/general|guard|sword soul|blademon|hero|herald/i, 'knight'], [/puppet|strawman|clayling|sage|arbiter|hoarder/i, 'doll'], [/deer/i, 'deer'], [/lion|suanni|tiger/i, 'lion'],
-  [/bronze|mirror|cauldron|burner/i, 'relic'], [/ape/i, 'ape'], [/qinyuan/i, 'bee'], [/goat/i, 'goat'], [/loong|dragon/i, 'dragon'], [/hound/i, 'hound'],
+  [/bronze|mirror|cauldron|burner/i, 'relic'], [/ape/i, 'ape'], [/qinyuan/i, 'bee'], [/goat/i, 'goat'], [/loong|dragon|wyrm|draconox|rimereaver|yoldra/i, 'dragon'], [/hound|爆雷/i, 'hound'],
+  // guild conquest / Hieromon bosses beyond the Fantasia maps
+  [/walrus/i, 'boar'], [/deepsea|shark/i, 'fish'], [/fixer|armament|clockwork|saucer|mecha/i, 'golem'], [/pirate ship|狂噬/i, 'ghost'], [/molten|magma|giant|灼热/i, 'ogre'],
+  [/king dova|king aiur/i, 'knight'], [/tormentor/i, 'imp'], [/aeralith/i, 'spirit'], [/thalanima/i, 'octopus'], [/岩层/i, 'golem'],
 ];
 const PET_ART = { Falko: 'eagle', Boaro: 'boar', Mandragora: 'plant', Zeioletus: 'spirit', Terragon: 'dino', Sylvaerie: 'spirit', Kels: 'fish', Armopi: 'turtle', Herbote: 'plant', Nyxarchon: 'dragon', Aegiswing: 'eagle', Pandarial: 'bear', Chomusuke: 'fox', 'Cabbage Dog': 'hound', Prismora: 'spirit', 'Luminarch Steed': 'deer', Yoldra: 'dragon', Hexitty: 'fox', Mumpkin: 'ghost' };
 export const mobArtSlug = (mob) => (mob.art ? mob.art : (MOB_ART.find(([re]) => re.test(mob.en)) || [0, null])[1]);

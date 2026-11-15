@@ -1,5 +1,5 @@
 // Smoke tests for charms, Fantomon and the extra encounters: node tools/test_extra.mjs
-import { heroBase, prepare, simulate, monteCarlo, CHARMS, PETS, ENC, SK, mobStats } from '../js/engine.js';
+import { heroBase, prepare, simulate, monteCarlo, CHARMS, PETS, ENC, SK, mobStats, stFrom } from '../js/engine.js';
 import { SKILLS, CLASSES } from '../js/gamedata.js';
 
 const hero = (cls, level, over = {}) => ({ kind: 'hero', uid: 'h' + Math.random(), cls, level, ...heroBase(level), skills: SKILLS.filter((s) => s.cls === cls && s.kind !== 'none').slice(0, 4).map((s) => ({ id: s.id, rank: 6 })), ...over });
@@ -28,10 +28,11 @@ for (const p of PETS) for (const adult of [false, true]) {
   console.log(`pet ${p.ko} (${p.sup.k})${adult ? ' adult' : ''}: mirror ${pct(r)} spawned ${spawned}/4 petDmg ${Math.round(r.units[2].dmg / r.n)}`);
 }
 // extra encounters: first and last fight of every group
-for (const m of ENC) for (const g of m.groups) for (const f of [g.fights[0], g.fights[g.fights.length - 1]]) {
-  const foes = []; for (let i = 1; i < f.length; i += 4) foes.push({ kind: 'mob', key: f[i], count: f[i + 1], level: f[i + 2], sr: f[i + 3] });
+for (const m of ENC) for (const g of m.groups) for (const fi of [0, g.fights.length - 1]) {
+  const f = g.fights[fi];
+  const foes = []; for (let i = 1, ui = 0; i < f.length; i += 4, ui++) foes.push({ kind: 'mob', key: f[i], count: f[i + 1], level: f[i + 2], sr: f[i + 3], fix: g.st ? g.st[fi][ui] : undefined, uws: g.uws });
   const lv = Math.min(250, Math.round(foes[0].level)), b = heroBase(lv);
-  const st = mobStats(foes[0].key, foes[0].level, foes[0].sr);
+  const st = foes[0].fix ? stFrom(foes[0].fix, foes[0].level) : mobStats(foes[0].key, foes[0].level, foes[0].sr);
   const P = prepare({ mode: 'pve', teams: [[hero('Shushi', lv, { atk: b.atk * 3, hp: b.hp * 3, def: b.def * 3 })], foes], roundCap: 15 });
   check(simulate(P, 9, true), `enc ${m.id}/${g.id}`);
   if (g === m.groups[0] || m.id !== 'dungeon') console.log(`enc ${m.id}/${g.id} "${f[0]}" lv${foes[0].level} ${foes[0].sr} first mob hp ${st.hp} atk ${st.atk} units ${P.units.length}`);

@@ -149,7 +149,9 @@ for (const id of Object.keys(KO_SKILL)) if (!CLS18_IDS.has(+id)) delete KO_SKILL
 log('shipped ko names', Object.keys(KO_SKILL).length, 'of', CLS18_IDS.size, 'ids; missing:', [...CLS18_IDS].filter((id) => !KO_SKILL[id]).join(','));
 
 /* ── Fantomon ── */
-const KO_PET = { Falko: '팔코', Boaro: '보아로', Mandragora: '만드라고라', Zeioletus: '제이올레투스', Terragon: '테라곤', Sylvaerie: '실바에리', Kels: '켈스', Armopi: '아르모피', Herbote: '허보트', Nyxarchon: '닉사르콘', Aegiswing: '이지스윙', Pandarial: '판다리얼', Chomusuke: '쵸무스케', 'Cabbage Dog': '양배추 강아지', Prismora: '프리즈모라', 'Luminarch Steed': '루미나크 준마', Yoldra: '욜드라', Hexitty: '헥시티', Mumpkin: '멈프킨' };
+// KR client names where the KR community wiki confirms them (나이트군·핌핌·보라몬·철하피·캘시·너굴너굴·멧돼지); the rest are transliterations
+const KO_PET_OK = new Set(['Nyxarchon', 'Aegiswing', 'Zeioletus', 'Armopi', 'Kels', 'Mandragora', 'Boaro']);
+const KO_PET = { Falko: '팔코', Boaro: '멧돼지', Mandragora: '너굴너굴', Zeioletus: '보라몬', Terragon: '테라곤', Sylvaerie: '실바에리', Kels: '캘시', Armopi: '철하피', Herbote: '허보트', Nyxarchon: '나이트군', Aegiswing: '핌핌', Pandarial: '판다리얼', Chomusuke: '쵸무스케', 'Cabbage Dog': '양배추 강아지', Prismora: '프리즈모라', 'Luminarch Steed': '루미나크 준마', Yoldra: '욜드라', Hexitty: '헥시티', Mumpkin: '멈프킨' };
 const ROLE = { DPS: '딜러', Tank: '탱커', Support: '서포터' };
 const PETS = [];
 const petsPath = path.join(DL2, 'pets.html');
@@ -159,7 +161,7 @@ if (fs.existsSync(petsPath)) {
     const h = a[2], en = strip(/<h3>([\s\S]*?)<\/h3>/.exec(h)[1]);
     const role = strip((/<dt>Role<\/dt><dd>([\s\S]*?)<\/dd>/.exec(h) || [])[1] || '');
     const bm = /HP (\d+)%[^A]*ATK (\d+)%[^D]*DEF (\d+)%[^S]*SPD (\d+)%/.exec(strip((/<dt>Battle base<\/dt><dd>([\s\S]*?)<\/dd>/.exec(h) || [])[1] || ''));
-    const pet = { id: +a[1], en, ko: KO_PET[en] || en, role: ROLE[role] || role, base: bm ? [+bm[1], +bm[2], +bm[3], +bm[4]] : [90, 100, 90, 100], skills: [] };
+    const pet = { id: +a[1], en, ko: KO_PET[en] || en, ok: KO_PET_OK.has(en) ? 1 : 0, role: ROLE[role] || role, base: bm ? [+bm[1], +bm[2], +bm[3], +bm[4]] : [90, 100, 90, 100], skills: [] };
     for (const p of h.matchAll(/<div class="phase">([\s\S]*?)(?=<div class="phase">|$)/g)) {
       const title = strip((/<h4>([\s\S]*?)<\/h4>/.exec(p[1]) || [])[1] || '');
       for (const s of p[1].matchAll(/<div class="petskill"([^>]*)>([\s\S]*?)(?=<div class="petskill"|$)/g)) {
@@ -209,13 +211,19 @@ if (fs.existsSync(petsPath)) {
 /* ── extra encounters ── */
 const eidx = J('enemies_index.json'), esk = J('enemy_skills.json');
 const have = new Set(fs.readdirSync(DL));
-const curveFile = {}; for (const f of ['0', '1', '2', '3', 'st']) if (have.has(`curve_${f}.json`)) curveFile[f] = J(`curve_${f}.json`);
+const curveFile = {}; for (const f of ['0', '1', '2', '3', '4', '5', '6', 'st']) if (have.has(`curve_${f}.json`)) curveFile[f] = J(`curve_${f}.json`);
 const KEEP = ['MaxHp', 'Attack', 'Defence', 'Speed', 'CritRatePercent', 'CritPowerPercent', 'CritAvoidPercent', 'BlockPercent', 'BlockValuePercent', 'BlockAvoidPercent', 'DmgAddPercent', 'DmgReducePercent', 'EffectRate', 'EffectDodge'];
 const CURVES2 = {}, RPG = {}, MOBS2 = [], seenMob = new Set();
 const baseData = fs.existsSync(path.join(path.dirname(OUT), 'gamedata.js')) ? fs.readFileSync(path.join(path.dirname(OUT), 'gamedata.js'), 'utf8') : '';
 const baseCurves = new Set([...baseData.matchAll(/"(\d{3,5})":\{"lo":/g)].map((m) => m[1]));
 const KO_MOB2 = {
-  'Storm Griffin': '폭풍 그리핀', Flamoenix: '화염 불사조', 'Yamata no Orochi': '야마타노오로치', 'Primordial Loong': '태초의 용', 'Dimensional Golem': '차원 골렘', 'Bovine Titan': '황소 거인', 'Polyhedral Sun': '다면체 태양',
+  // Hieromon: names seen in the KR client (신수 시련 notices / KR community wiki)
+  'Storm Griffin': '폭풍 그리핀', Flamoenix: '불사조', 'Yamata no Orochi': '야마타노 오로치', 'Primordial Loong': '태고의 용', 'Galactic Mecha': '은하 메카', Yoldra: '욜드라',
+  // guild conquest bosses past the Fantasia maps (unofficial translations)
+  'Walrus First Mate': '바다코끼리 일등항해사', 'Deepsea Champion': '심해 챔피언', 'Invincible Breaker Bear': '무적의 파괴곰', 'Master Fixer': '수리 명인', 'Mysterious Armament': '수수께끼 병기',
+  'Clockwork King': '태엽 왕', 'Missile Shark': '미사일 상어', 'Ghost Pirate Ship': '유령 해적선', 'Saucer-α': '비행접시-α', 'Molten Demon': '용암 악마', Rimereaver: '서리 약탈자',
+  'King Dova': '도바 왕', 'King Aiur': '아이우르 왕', Tormentor: '고문자', Shatterwyrm: '파쇄룡', 'Magma Fiend': '마그마 마귀', 'Frostbite Giant': '동상 거인', Aeralith: '에어랄리스',
+  Thalanima: '탈라니마', '灼热': '작열의 화신', '岩层之主': '암층의 군주', '爆雷兽': '폭뢰수', Draconox: '드라코녹스', '狂噬灵': '광식령', 'Dimensional Golem': '차원 골렘', 'Bovine Titan': '황소 거인', 'Polyhedral Sun': '다면체 태양',
   'Mech Puppet': '기계 인형', 'Small Geocrusher': '작은 대지파쇄자', Aobozu: '아오보즈', 'Stag Beetle': '사슴벌레', 'Vine Phantom': '덩굴 환영', 'Tidewolf Shaman': '물결늑대 주술사', 'Six-Tailed Fox': '육미호',
   'Giant Raccoon': '거대 너구리', Myraface: '천면귀', 'Plague God': '역병신', 'Sickle Puppet': '낫 인형', Lotusfish: '연꽃 물고기', 'Xi Fish': '습습어',
   Qiongqi: '궁기', 'Bronze Blademon': '청동 검마', 'White Tiger': '백호', 'Cloudmist Phoenix': '운무 봉황', 'Withered Queen': '시든 여왕', 'Chaos Hound': '혼돈의 사냥개', 'Fallen Hero': '타락한 영웅', 'Chaos Herald': '혼돈의 전령',
@@ -230,6 +238,31 @@ function ensureCurve(cls) {
   cv.k.forEach((k, i) => { if (!KEEP.includes(k)) return; const col = rows.map((r) => (r ? r[i] : 0)); if (col.every((x) => x === col[0])) { if (col[0]) out.c[k] = col[0]; } else out.v[k] = col; });
   CURVES2[cls] = out; return true;
 }
+/* exact enemy stats the client's way (BattleFormulaHandler.CalcMonsterBattleProps), used where we ship no curve */
+const f32 = Math.fround;
+function levelRow(cv, level) {
+  const exact = (lv) => (lv < cv.lo || lv > cv.hi ? null : cv.r[lv - cv.lo] || null);
+  const L = f32(level), num = Math.floor(L), frac = f32(L - num), out = {};
+  if (frac < f32(1e-5)) { const r = exact(num) || (num >= cv.hi ? exact(cv.hi) : null); if (!r) return null; cv.k.forEach((k, i) => { if (r[i] !== 0) out[k] = r[i]; }); return out; }
+  let lp = exact(num), rp = exact(Math.ceil(L));
+  if (!lp && !rp) { lp = exact(cv.hi); rp = null; if (!lp) return null; }
+  if (!lp || !rp) { const one = lp || rp; cv.k.forEach((k, i) => { if (one[i] !== 0) out[k] = one[i]; }); return out; }
+  cv.k.forEach((k, i) => { if (lp[i] === 0 && rp[i] === 0) return; const a = f32(lp[i]), b = f32(rp[i]); out[k] = Math.trunc(f32(a + f32(f32(b - a) * frac))); });
+  return out;
+}
+function exactStats(def, level, sr) {
+  const cls = eidx.rpg[def.pg] && eidx.rpg[def.pg][sr]; if (cls == null) return null;
+  const cf = curveFile[eidx.classFile[cls]], cv = cf && cf[cls]; if (!cv) return null;
+  const row = levelRow(cv, level); if (!row) return null;
+  const v = {};
+  eidx.stats.forEach((k, i) => { const m = def.f[i]; if (m == null || !(k in row)) return; let x = Math.trunc(row[k] * (m / 10000)); if (['MaxHp', 'Attack', 'Defence', 'Speed'].includes(k)) x = Math.max(1, x); v[k] = x; });
+  for (const [k, x] of Object.entries(def.x || {})) v[k] = (v[k] || 0) + x;
+  const g = (k) => v[k] || 0;
+  // same layout as engine mobStats(): hp, atk, def, spd, then percents ×100
+  // EffectRate / EffectDodge are flat values (converted with the level's Base Effect RES in the engine), the rest are percent ×100
+  return [g('MaxHp'), g('Attack'), g('Defence'), g('Speed'), g('CritRatePercent') / 100, g('CritPowerPercent') / 100, g('CritAvoidPercent') / 100, g('BlockPercent') / 100,
+    g('BlockValuePercent') / 100, g('BlockAvoidPercent') / 100, g('DmgAddPercent') / 100, g('DmgReducePercent') / 100, g('EffectRate'), g('EffectDodge')].map((x) => +x.toFixed(2));
+}
 function addMob(key, def, sr, lv) {
   if (seenMob.has(key)) return; seenMob.add(key);
   const mob = { k: key, en: def.n, ko: KO_MOB2[def.n] || baseKo[def.n] || def.n, ty: /Boss|Hieromon/.test(def.t) ? 2 : def.t === 'Elite' ? 1 : 0, pg: def.pg, sr, lv, f: def.f.slice(0, 4), sk: [] };
@@ -241,39 +274,59 @@ function addMob(key, def, sr, lv) {
     if (sid < 0) { const m = /takes (\d+)% less (\w+) DMG and (\d+)% higher (\w+) DMG/.exec(desc); if (m && EL[m[2]] && EL[m[4]]) mob.er = { [EL[m[2]]]: -m[1] / 100, [EL[m[4]]]: +m[3] / 100 }; continue; }
     const p = parseText(desc), el = elOf(e.d);
     if (!p.tg || el === 'none') continue;
-    mob.sk.push({ en: e.n, el, ...p });
+    mob.sk.push({ en: e.n, el, ic: e.i, ...p });
   }
   if (!mob.sk.length) mob.sk.push({ en: 'Attack', el: 'phy', hits: 1, tg: { t: 'S', r: 1 } });
   MOBS2.push(mob);
 }
-const DUN_KO = { Auroradrasil: '오로라 세계수', 'Mecha Summit': '기계 정상', 'Ocean Palace Ruins': '해저 궁전 유적', 'Aquorigin Shrine': '물의 근원 신전', Hellhold: '지옥 요새', 'Demonseal Gorge': '봉마 협곡', "Warlord's Rest": '장군의 안식처', 'Cloudcrest Temple': '구름마루 사원', Bladeshire: '검의 고을', Celestship: '천상선' };
+const DUN_KO = { Auroradrasil: '이그드라실', 'Mecha Summit': '기신산', 'Ocean Palace Ruins': '해저 궁전 유적', 'Aquorigin Shrine': '물의 근원 신전', Hellhold: '지옥 요새', 'Demonseal Gorge': '봉마 협곡', "Warlord's Rest": '장군의 안식처', 'Cloudcrest Temple': '구름마루 사원', Bladeshire: '검의 고을', Celestship: '천상선' };
 const DIFF_KO = { Normal: '일반', Hard: '어려움', Nightmare: '악몽', Purgatory: '연옥', Abyss: '심연' };
-const roomKo = (t) => t.replace(/^F(\d+) - /, '$1층 · ').replace('Big Boss Room', '대형 보스 방').replace('Elite Monster Room', '정예 방').replace('Monster Room', '몬스터 방').replace('Boss Room', '보스 방').replace('Final Boss', '최종 보스').replace('Boss', '보스').replace(/^Floor (\d+)/, '$1층').replace(/^(Apprentice|Elite|Expert|Champion|Master) (\d+): (.+)$/, (_, r, n, name) => `${{ Apprentice: '견습', Elite: '정예', Expert: '숙련', Champion: '챔피언', Master: '마스터' }[r]} ${n} · ${KO_MOB2[name] || name}`);
+const roomKo = (t) => t.replace(/^(Apprentice|Elite|Expert|Champion|Master|Paragon|Saint|Godtouched11?) (\d+): (.+)$/, (_, r, n, name) => `${{ Apprentice: '견습', Elite: '정예', Expert: '숙련', Champion: '챔피언', Master: '마스터', Paragon: '패러곤', Saint: '세인트', Godtouched1: '에테리얼', Godtouched11: '에테리얼' }[r]} ${n} · ${KO_MOB2[name] || name}`).replace(/^F(\d+) - /, '$1층 · ').replace('Big Boss Room', '대형 보스 방').replace('Elite Monster Room', '정예 방').replace('Monster Room', '몬스터 방').replace('Boss Room', '보스 방').replace('Final Boss', '최종 보스').replace('Boss', '보스').replace(/^Floor (\d+)/, '$1층').replace(/^(Apprentice|Elite|Expert|Champion|Master) (\d+): (.+)$/, (_, r, n, name) => `${{ Apprentice: '견습', Elite: '정예', Expert: '숙련', Champion: '챔피언', Master: '마스터' }[r]} ${n} · ${KO_MOB2[name] || name}`);
 const SR_OK = /^(Norank|Blackiron|Bronze|Silver|Gold)/;
 const ENC = [];
-function addGroup(modeId, gid, file, ko, en) {
+// exact = ship precomputed per-unit stats (every floor/tier, no curve needed); otherwise only fights our shipped curves cover
+function addGroup(modeId, gid, file, ko, en, exact) {
   if (!have.has(file)) return;
-  const d = J(file), fights = [];
+  const d = J(file), fights = [], st = [];
+  let uws = false;
   for (const f of d.fights) {
-    const units = []; let ok = true;
+    const units = [], ust = []; let ok = true;
+    if ((f.fx || []).some((x) => x[0] === 'United We Stand')) uws = true;
     for (const w of f.w) for (const e of w) {
-      const def = d.defs[e[0]], sr = e[3] || f.sr; if (!def || !SR_OK.test(sr)) { ok = false; break; }
+      const def = d.defs[e[0]], sr = e[3] || f.sr; if (!def) { ok = false; break; }
+      if (exact) {
+        const s = exactStats(def, e[2], sr); if (!s) { ok = false; break; }
+        const curveOk = SR_OK.test(sr) && clsFor(def.pg, sr) != null && ensureCurve(eidx.rpg[def.pg][sr]);
+        addMob(e[0], def, sr, e[2]);
+        const mob = MOBS2.find((m) => m.k === e[0]);
+        if (!curveOk && !mob.st) { mob.st = s; mob.lv = e[2]; mob.sr = sr; mob.fixed = 1; }
+        units.push([e[0], e[1], Math.round(e[2] * 10) / 10, sr]); ust.push(s);
+        continue;
+      }
+      if (!SR_OK.test(sr)) { ok = false; break; }
       const cls = clsFor(def.pg, sr); if (cls == null || !ensureCurve(cls)) { ok = false; break; }
       const lim = (CURVES2[cls] || { hi: 320 }).hi; if (e[2] > lim) { ok = false; break; }
       addMob(e[0], def, sr, e[2]);
       const ex = units.find((u) => u[0] === e[0] && u[2] === e[2] && u[3] === sr); if (ex) ex[1] += e[1]; else units.push([e[0], e[1], Math.round(e[2] * 10) / 10, sr]);
     }
-    if (ok && units.length) fights.push([roomKo(f.t), ...units.flat()]);
+    if (!ok || !units.length) continue;
+    let title = roomKo(f.t);
+    if (modeId === 'conquest') { const m = MOBS2.find((x) => x.k === units[0][0]); title = `${f.n}층 · ${m ? m.ko : units[0][0]}`; }
+    fights.push([title, ...units.flat()]);
+    if (exact) st.push(ust);
   }
   if (!fights.length) return;
   let mode = ENC.find((m) => m.id === modeId); if (!mode) { mode = { id: modeId, groups: [] }; ENC.push(mode); }
-  mode.groups.push({ id: gid, ko, en, fights });
-  log('enc', modeId, gid, ko, 'fights', fights.length, '/', d.fights.length);
+  const g = { id: gid, ko, en, fights };
+  if (exact) g.st = st;
+  if (uws) g.uws = 1;
+  mode.groups.push(g);
+  log('enc', modeId, gid, ko, 'fights', fights.length, '/', d.fights.length, exact ? '(exact stats)' : '', uws ? 'UWS' : '');
 }
 for (const m of eidx.modes) {
   if (m.id === 'dungeons') for (const g of m.groups) { const [nm, df] = g.name.split(' · '); if (DUN_KO[nm]) addGroup('dungeon', g.id, g.file, `${DUN_KO[nm]} · ${DIFF_KO[df] || df}`, g.name); }
-  if (m.id === 'conquest') for (const g of m.groups) addGroup('conquest', g.id, g.file, '길드 정복', g.name);
-  if (m.id === 'crucible') for (const g of m.groups) addGroup('crucible', g.id, g.file, { Apprentice: '견습', Elite: '정예', Expert: '숙련', Champion: '챔피언', Master: '마스터' }[g.name] || g.name, g.name);
+  if (m.id === 'conquest') for (const g of m.groups) addGroup('conquest', g.id, g.file, '길드 토벌', g.name, true);
+  if (m.id === 'crucible') for (const g of m.groups) addGroup('crucible', g.id, g.file, { Apprentice: '견습', Elite: '정예', Expert: '숙련', Champion: '챔피언', Master: '마스터', Paragon: '패러곤', Saint: '세인트', Godtouched11: '에테리얼' }[g.name] || g.name, g.name, true);
 }
 log('extra mobs', MOBS2.length, 'curves', Object.keys(CURVES2).join(','), 'rpg', JSON.stringify(RPG).length);
 

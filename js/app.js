@@ -1,6 +1,6 @@
 // UI: team builder (skills, charms, Fantomon), encounter presets, Monte Carlo runner and results.
 import { CLASSES, SKILLS, MAPS, RANKS, MAXLV } from './gamedata.js';
-import { SK, MOB, MAP, CLS, heroBase, mobStats, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC } from './engine.js';
+import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC } from './engine.js';
 import { createStage } from './scene.js';
 import { renderAvatar, EL } from './sprites.js';
 import { loadArt } from './art.js';
@@ -19,7 +19,7 @@ const ADV = [['critRate', '치명타율 %'], ['critDmg', '치명타 대미지 %'
   ['phyMastery', '물리 마스터리'], ['aff', '원소 친화력'], ['res', '원소 저항'], ['phyRes', '물리 저항'], ['aegis', '원소 가호']];
 const EFF_KO = { abreak: '방어력 감소', weak: '약화', slow: '감속', stun: '스턴', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명', cold: '냉기', wet: '습윤', dot: '침식', riven: '막기율 감소', sigil: '낙인', vuln: '취약', randDebuff: '랜덤 디버프' };
 const effName = (e) => (e.k === 'dot' && e.el && e.el !== 'dark' ? (e.el === 'fire' ? '작열' : '지속 대미지') : EFF_KO[e.k] || e.k) + (e.v && ['abreak', 'weak', 'slow'].includes(e.k) ? ` ${e.v >= 0.3 ? 2 : 1}` : '');
-const MODE_KO = { fantasia: '판타지아 등반', dungeon: '일일 던전', conquest: '길드 토벌 (길드 보스)', crucible: '신수의 시련 (히에로몬)' };
+const MODE_KO = { fantasia: '환상계단', dungeon: '일일 던전', conquest: '길드 토벌 (길드 보스 460층)', crucible: '신수 시련' };
 
 /* ───────── official skill icons (optional, user-supplied): assets/skills/skill_<id>.webp|png ───────── */
 // assets/skills/icons.json → { "ext": "webp" | "png" | "" }  (empty = no icon files supplied, built-in tiles are used)
@@ -38,14 +38,25 @@ function floorUnits(mapId, floor) {
   for (let i = 1; i < f.length; i += 2) { const ex = out.find((u) => u.key === f[i]); if (ex) ex.count = Math.min(20, ex.count + f[i + 1]); else out.push({ uid: uid(), kind: 'mob', key: f[i], level: f[0], count: f[i + 1] }); }
   return out;
 }
-const fightUnits = (f) => { const out = []; for (let i = 1; i < f.length; i += 4) out.push({ uid: uid(), kind: 'mob', key: f[i], count: Math.min(20, f[i + 1]), level: f[i + 2], sr: f[i + 3] }); return out; };
+// a preset fight → mob units; groups with precomputed stats (guild conquest floors, Hieromon tiers) attach them as `fix`
+const fightUnits = (f, g, fi) => {
+  const out = [];
+  for (let i = 1, ui = 0; i < f.length; i += 4, ui++) {
+    const u = { uid: uid(), kind: 'mob', key: f[i], count: Math.min(20, f[i + 1]), level: f[i + 2], sr: f[i + 3] };
+    if (g && g.st && g.st[fi] && g.st[fi][ui]) u.fix = g.st[fi][ui];
+    if (g && g.uws) u.uws = 1;
+    out.push(u);
+  }
+  return out;
+};
 const CATALOG = [
   { id: 'fantasia', groups: MAPS.map((m) => ({ id: m.id, ko: m.ko, n: m.floors.length, label: (i) => `${i}층 · Lv.${m.floors[i - 1][0]}`, units: (i) => floorUnits(m.id, i) })) },
-  ...ENC.map((m) => ({ id: m.id, groups: m.groups.map((g) => ({ id: g.id, ko: g.ko, n: g.fights.length, label: (i) => `${g.fights[i - 1][0]} · Lv.${g.fights[i - 1][3]}`, units: (i) => fightUnits(g.fights[i - 1]) })) })),
+  ...ENC.map((m) => ({ id: m.id, groups: m.groups.map((g) => ({ id: g.id, ko: g.ko, n: g.fights.length, label: (i) => `${g.fights[i - 1][0]} · Lv.${g.fights[i - 1][3]}`, units: (i) => fightUnits(g.fights[i - 1], g, i - 1) })) })),
 ];
+const MOBSKILL_ICON = (s) => (s.ic ? `<span class="ico has-img mob" style="--c:${(EL[s.el] || EL.none).c}"><img src="assets/mobskills/${s.ic}.png" alt="" loading="lazy" onerror="this.parentNode.classList.remove('has-img');this.remove()"><b class="eldot"></b></span>` : '');
 const encMode = (id) => CATALOG.find((m) => m.id === id) || CATALOG[0];
 const encGroup = (mode, id) => mode.groups.find((g) => g.id === id) || mode.groups[0];
-const mobHome = (mob) => (mob.map ? MAP.get(mob.map).ko : MODE_KO[{ 1: 'dungeon', 2: 'conquest', 3: 'crucible' }[mob.k.split('|')[1]]] || '기타');
+const mobHome = (mob) => (mob.map ? `환상계단 · ${MAP.get(mob.map).ko}` : { 1: '일일 던전', 2: '길드 토벌', 3: '신수 시련' }[mob.k.split('|')[1]] || '기타');
 
 /* ───────── state ───────── */
 function lineChain(clsKey) { const c = CLS.get(clsKey), baseKey = c.line[0] === 'W' ? 'Zhanshi' : 'Fashi'; return [c, ...CLASSES.filter((x) => x.tier < c.tier && (x.line === c.line || x.key === baseKey)).sort((a, b) => b.tier - a.tier)]; }
@@ -73,7 +84,12 @@ function sanitize(s) {
   out.mode = out.mode === 'pvp' ? 'pvp' : 'pve';
   const four = (arr, ok) => { const a = (Array.isArray(arr) ? arr : []).slice(0, 4).map((x) => (x && ok(x) ? x : null)); while (a.length < 4) a.push(null); return a; };
   out.teams = s.teams.map((t) => (Array.isArray(t) ? t : []).filter((u) => u && (u.kind === 'mob' ? MOB.has(u.key) : CLS.has(u.cls))).map((u) => {
-    if (u.kind === 'mob') return { uid: u.uid || uid(), kind: 'mob', key: u.key, level: +u.level || 1, count: Math.max(1, Math.min(20, +u.count || 1)), sr: u.sr || MOB.get(u.key).sr };
+    if (u.kind === 'mob') {
+      const m = { uid: u.uid || uid(), kind: 'mob', key: u.key, level: +u.level || 1, count: Math.max(1, Math.min(20, +u.count || 1)), sr: u.sr || MOB.get(u.key).sr };
+      if (Array.isArray(u.fix) && u.fix.length === 14 && u.fix.every((x) => typeof x === 'number' && isFinite(x))) m.fix = u.fix;
+      if (u.uws) m.uws = 1;
+      return m;
+    }
     const pet = u.pet && PET.has(+u.pet.id) ? { id: +u.pet.id, rank: +u.pet.rank || 3, adult: !!u.pet.adult, atk: +u.pet.atk || 1, def: +u.pet.def || 0, hp: +u.pet.hp || 1, spd: +u.pet.spd || 1 } : null;
     return { uid: u.uid || uid(), kind: 'hero', name: String(u.name || '캐릭터').slice(0, 20), cls: u.cls, level: +u.level || 1, atk: +u.atk || 1, def: +u.def || 0, hp: +u.hp || 1, spd: +u.spd || 1, adv: u.adv && typeof u.adv === 'object' ? u.adv : {},
       skills: four(u.skills, (x) => x.custom || SK.has(x.id)), charms: four(u.charms, (x) => CHARM.has(x.id)), pet };
@@ -91,7 +107,7 @@ let saveT = 0, rosterT = 0, lastRes = null, lastSetup = null, running = false;
 function toSetup() {
   return {
     mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100,
-    teams: state.teams.map((t) => t.map((u) => (u.kind === 'mob' ? { kind: 'mob', uid: u.uid, key: u.key, level: u.level, count: u.count, sr: u.sr }
+    teams: state.teams.map((t) => t.map((u) => (u.kind === 'mob' ? { kind: 'mob', uid: u.uid, key: u.key, level: u.level, count: u.count, sr: u.sr, fix: u.fix, uws: u.uws }
       : { kind: 'hero', uid: u.uid, name: u.name, cls: u.cls, level: u.level, atk: u.atk, def: u.def, hp: u.hp, spd: u.spd, ...u.adv, skills: u.skills, charms: u.charms, pet: u.pet }))),
   };
 }
@@ -215,8 +231,8 @@ const RANK_OPTS = RANKS.map((r, i) => `<option value="${i + 1}">${r}</option>`).
 const CLS_OPTS = [1, 2, 3, 4, 5].map((t) => `<optgroup label="${t === 1 ? '기본 직업' : t + '차 전직'}">` + CLASSES.filter((c) => c.tier === t).map((c) => `<option value="${c.key}">${c.ko} (${c.en})</option>`).join('') + '</optgroup>').join('');
 const mobOpt = (x) => `<option value="${x.k}">${x.ty ? '[' + TYPE_KO[x.ty] + '] ' : ''}${x.ko} · ${x.en}</option>`;
 const MOB_OPTS = MAPS.map((m) => `<optgroup label="등반 · ${m.ko}">` + ALL_MOBS.filter((x) => x.map === m.id).map(mobOpt).join('') + '</optgroup>').join('')
-  + [['1', '일일 던전'], ['2', '길드 토벌 (길드 보스)'], ['3', '신수 (히에로몬)']].map(([v, ko]) => `<optgroup label="${ko}">` + ALL_MOBS.filter((x) => !x.map && x.k.endsWith('|' + v)).map(mobOpt).join('') + '</optgroup>').join('');
-const PET_OPTS = '<option value="">없음</option>' + PETS.map((p) => `<option value="${p.id}">${p.ko} · ${p.en} (${p.role})</option>`).join('');
+  + [['1', '일일 던전'], ['2', '길드 토벌 보스'], ['3', '신수 시련 (히에로몬)']].map(([v, ko]) => `<optgroup label="${ko}">` + ALL_MOBS.filter((x) => !x.map && x.k.endsWith('|' + v)).map(mobOpt).join('') + '</optgroup>').join('');
+const PET_OPTS = '<option value="">없음</option>' + PETS.map((p) => `<option value="${p.id}">${p.ok ? `${p.ko} · ${p.en}` : `${p.en} (${p.ko}?)`} · ${p.role}</option>`).join('');
 const fld = (label, f, val, extra = '', cls = '') => `<label class="f ${cls}"><span>${label}</span><input type="number" data-f="${f}" value="${val}" ${extra}></label>`;
 const heroMini = (u) => `<span>공 ${fmt(u.atk)}</span><span>방 ${fmt(u.def)}</span><span>생 ${fmt(u.hp)}</span><span>속 ${fmt(u.spd)}</span>`;
 
@@ -290,9 +306,11 @@ function heroHtml(u) {
       </details>
     </div></article>`;
 }
+const mobFixed = (u) => !!u.fix || !!MOB.get(u.key).fixed;
+const mobSt = (u) => (u.fix ? stFrom(u.fix, u.level) : mobStats(u.key, u.level, u.sr)) || { hp: 0, atk: 0, def: 0, spd: 0, critDmg: 0, blockEff: 0 };
 function mobHtml(u) {
-  const mob = MOB.get(u.key), st = mobStats(u.key, u.level, u.sr), open = openSet.has(u.uid);
-  const sk = mob.sk.map((s) => `<div class="skill"><div class="sum" style="margin-left:0"><b style="margin-right:4px">${esc(s.en)}</b>${skillTags({ ...s, kind: 'dmg', cd: 0 }, null)}</div></div>`).join('');
+  const mob = MOB.get(u.key), st = mobSt(u), open = openSet.has(u.uid), fixed = mobFixed(u);
+  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.en)}</b><div class="sum" style="margin:3px 0 0">${skillTags({ ...s, kind: 'dmg', cd: 0 }, null)}</div></div></div></div>`).join('');
   const er = mob.er ? Object.entries(mob.er).map(([k, v]) => `받는 ${EL[k].ko} 대미지 ${v > 0 ? '+' : ''}${Math.round(v * 100)}%`).join(' · ') : '';
   return `<article class="unit mob ${open ? 'open' : ''}" data-uid="${u.uid}">
     <div class="unit-head" data-act="toggle">
@@ -302,7 +320,9 @@ function mobHtml(u) {
     </div>
     <div class="unit-body">
       <label class="f" style="margin-top:8px"><span>몹 선택</span><select data-f="key" data-val="${u.key}">${MOB_OPTS}</select></label>
-      <div class="grid2">${fld('레벨', 'level', u.level, `min="1" max="380" step="0.1"`)}${fld('수량', 'count', u.count, 'min="1" max="20"')}</div>
+      <div class="grid2">${fld('레벨', 'level', u.level, `min="1" max="2000" step="0.1" ${fixed ? 'readonly title="층·단계에 고정된 능력치입니다. 다른 층은 전투 불러오기에서 고르세요."' : ''}`)}${fld('수량', 'count', u.count, 'min="1" max="20"')}</div>
+      ${fixed ? '<div class="note" style="margin:6px 0 0">층·단계 기준 고정 능력치 (게임 자료로 계산)</div>' : ''}
+      ${u.uws ? '<div class="note" style="margin:4px 0 0">길드 토벌 보스 효과 United We Stand: 처음 3턴 동안 받는 대미지 99% 감소</div>' : ''}
       <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}</div>
       <div class="sec"><span>스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)</span></div>${sk}
     </div></article>`;
@@ -382,7 +402,7 @@ function onTeamClick(ti, e) {
   if (act === 'base' && f) { Object.assign(f.u, heroBase(f.u.level)); rerenderUnit(card, f.u); touch(); return; }
   if (act === 'petBase' && f && f.u.pet) { const keep = f.u.pet; f.u.pet = { ...petDefaults(f.u, keep.id), rank: keep.rank, adult: keep.adult }; rerenderUnit(card, f.u); touch(); return; }
   if (act === 'addHero') { if (countUnits(team) >= MAX_UNITS) return toast('한 팀은 최대 ' + MAX_UNITS + '명입니다'); const ref = state.teams[0].find((u) => u.kind === 'hero'); const h = newHero(ti ? 'Doushi' : 'Shushi', ref ? ref.level : 40, ti ? '상대 ' + (team.filter((u) => u.kind === 'hero').length + 1) : '동료 ' + team.filter((u) => u.kind === 'hero').length); team.push(h); openSet.add(h.uid); }
-  else if (act === 'addMob') { if (countUnits(team) >= MAX_UNITS) return toast('한 팀은 최대 ' + MAX_UNITS + '명입니다'); const last = [...team].reverse().find((u) => u.kind === 'mob'); const m = MAPS[0]; const u = last ? { uid: uid(), kind: 'mob', key: last.key, level: last.level, sr: last.sr, count: 1 } : { uid: uid(), kind: 'mob', key: m.floors[0][1], level: m.floors[0][0], count: 1 }; team.push(u); openSet.add(u.uid); }
+  else if (act === 'addMob') { if (countUnits(team) >= MAX_UNITS) return toast('한 팀은 최대 ' + MAX_UNITS + '명입니다'); const last = [...team].reverse().find((u) => u.kind === 'mob'); const m = MAPS[0]; const u = last ? { uid: uid(), kind: 'mob', key: last.key, level: last.level, sr: last.sr, count: 1, ...(last.fix ? { fix: last.fix } : {}), ...(last.uws ? { uws: 1 } : {}) } : { uid: uid(), kind: 'mob', key: m.floors[0][1], level: m.floors[0][0], count: 1 }; team.push(u); openSet.add(u.uid); }
   else if (act === 'clear') team.length = 0;
   else if (act === 'del' && f) { team.splice(f.i, 1); openSet.delete(f.u.uid); }
   else if (act === 'dup' && f) { if (countUnits(team) + (f.u.kind === 'mob' ? f.u.count : 1) > MAX_UNITS) return toast('한 팀은 최대 ' + MAX_UNITS + '명입니다'); const c = JSON.parse(JSON.stringify(f.u)); c.uid = uid(); if (c.kind === 'hero') c.name = (c.name + ' 2').slice(0, 20); team.splice(f.i + 1, 0, c); }
@@ -391,6 +411,7 @@ function onTeamClick(ti, e) {
     state.preset = { mode: mode.id, group: grp.id, n }; state.teams[1] = grp.units(n);
     if (state.mode !== 'pve') setMode('pve', true);
     toast(`${grp.ko} · ${grp.label(n)}`);
+    if (mode.id === 'crucible' && state.roundCap.pve !== 10) { state.roundCap.pve = 10; toast('신수 시련은 10턴 제한이라 라운드 제한을 10으로 맞췄습니다'); }
     if (mode.id === 'conquest' || mode.id === 'crucible') setTimeout(() => toast('대미지 경쟁 전투입니다 — 결과의 「아군 평균 총 대미지」를 보세요'), 2300);
   } else return;
   renderTeam(ti); syncSettings(); touch();
@@ -407,8 +428,13 @@ function onTeamInput(ti, e, commit) {
     const k = t.dataset.f;
     if (k === 'name') { u.name = t.value.slice(0, 20) || '캐릭터'; $('.unit-title b', card).textContent = u.name; }
     else if (k === 'cls') { u.cls = t.value; u.skills = defaultSkills(u.cls); rerenderUnit(card, u); }
-    else if (k === 'key') { u.key = t.value; const mob = MOB.get(u.key); if (mob.map) { const m = MAP.get(mob.map); delete u.sr; if (u.level < m.lvMin || u.level > m.lvMax + 5) u.level = m.lvMin; } else { u.sr = mob.sr; u.level = mob.lv; } rerenderUnit(card, u); }
-    else if (k === 'level') { u.level = u.kind === 'mob' ? Math.max(1, Math.min(380, +t.value || 1)) : Math.max(1, Math.min(MAXLV, Math.round(+t.value || 1))); if (commit) rerenderUnit(card, u); }
+    else if (k === 'key') {
+      u.key = t.value; const mob = MOB.get(u.key); delete u.fix; delete u.uws;
+      if (mob.map) { const m = MAP.get(mob.map); delete u.sr; if (u.level < m.lvMin || u.level > m.lvMax + 5) u.level = m.lvMin; }
+      else { u.sr = mob.sr; u.level = mob.lv; if (mob.fixed) u.fix = mob.st; if (u.key.endsWith('|2')) u.uws = 1; }
+      rerenderUnit(card, u);
+    }
+    else if (k === 'level') { if (u.kind === 'mob' && mobFixed(u)) return; u.level = u.kind === 'mob' ? Math.max(1, Math.min(380, +t.value || 1)) : Math.max(1, Math.min(MAXLV, Math.round(+t.value || 1))); if (commit) rerenderUnit(card, u); }
     else if (k === 'count') { const others = countUnits(state.teams[f.ti]) - u.count; u.count = Math.max(1, Math.min(20, MAX_UNITS - others, Math.round(+t.value || 1))); if (commit) { const n = rerenderUnit(card, u); $('.team-head span', n.closest('.team')).textContent = countUnits(state.teams[f.ti]) + '명'; } }
     else { u[k] = num(t.value, k === 'def' ? 0 : 1); const mini = $('[data-mini]', card); if (mini) mini.innerHTML = heroMini(u); }
   } else if (t.dataset.adv) { if (t.value === '') delete u.adv[t.dataset.adv]; else u.adv[t.dataset.adv] = +t.value; }

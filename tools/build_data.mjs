@@ -412,7 +412,7 @@ for (const [mid, file, ko, en, sr, rankKo] of MAP_DEF) {
       const elm = /color:#[0-9a-f]{6}\\?">(Physical|Wind|Water|Fire|Light|Dark)</i.exec(e.d);
       if (!p.tg || !['S', 'A', 'Q', 'F', 'T', 'TQ'].includes(p.tg.t) || !elm) { droppedSkills++; log('mob skill dropped:', def.n, '/', e.n, '::', desc.slice(0, 120)); continue; }
       keptSkills++;
-      const s = { en: e.n, el: EL[elm[1]], ...p };
+      const s = { en: e.n, el: EL[elm[1]], ic: e.i, ...p };
       delete s.zi; delete s.pre;
       mob.sk.push(s);
     }
