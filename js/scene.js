@@ -3,6 +3,18 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { HeroSprite, drawMob, drawPet, EL } from './sprites.js';
 import { MOB, PET } from './engine.js';
+import { ST_SHORT, stOrder } from './status.js';
+
+/* battlefield grounds: board tiles, island top, foliage tint, sky, fog and light */
+const GROUNDS = {
+  forest: { ko: '숲 섬', tile: [0xa7d77a, 0x9bcf6f], grass: 0x86c45c, leaf: null, sky: [0x3f8fe0, 0xa9dbf3, 0xffedcc], fog: 0xd5ecf2, hemi: [0xe6f6ff, 0x6f9050, 1.15], sun: [0xfff1d6, 2.3], exp: 1.08 },
+  moon: { ko: '달밤 숲', tile: [0x5d7f6a, 0x557662], grass: 0x40604f, leaf: [0x2e5a4a, 0.55], sky: [0x0a1430, 0x2b3c6b, 0x5a4a7a], fog: 0x26345a, hemi: [0x9fb4ff, 0x1d2a2a, 0.8], sun: [0xc8d6ff, 1.25], exp: 1.05 },
+  desert: { ko: '사막 투기장', tile: [0xe4b47c, 0xd9a66e], grass: 0xd8b07a, leaf: [0x9aa04a, 0.45], sky: [0x4f95d6, 0xf3d7a8, 0xffe4b8], fog: 0xf1dcb8, hemi: [0xfff1d8, 0xa07a50, 1.1], sun: [0xfff0cc, 2.6], exp: 1.05 },
+  snow: { ko: '설원', tile: [0xf1f6fc, 0xe3ecf6], grass: 0xf3f7fc, leaf: [0xdfe9f2, 0.55], sky: [0x7aa6d8, 0xdbe8f5, 0xf4f8ff], fog: 0xe6eef7, hemi: [0xf4f8ff, 0x9fb2c8, 1.15], sun: [0xffffff, 1.9], exp: 0.98 },
+  lava: { ko: '용암 지대', tile: [0x5a463f, 0x4d3c36], grass: 0x3e2e29, leaf: [0x3a2a24, 0.7], sky: [0x2a0e0a, 0x8a3a1c, 0xff8a3c], fog: 0x5a2a1a, hemi: [0xffb08a, 0x401a10, 0.95], sun: [0xffb070, 2.0], exp: 1.1 },
+  stone: { ko: '석조 정원', tile: [0xc4c2b8, 0xb7b5ab], grass: 0x8fae74, leaf: [0x6f9a62, 0.25], sky: [0x6f9fd0, 0xc9dde8, 0xf0e6d6], fog: 0xd9e3e6, hemi: [0xeef4f8, 0x7c8a70, 1.1], sun: [0xfff4e0, 2.1], exp: 1.05 },
+};
+export const GROUND_LIST = Object.entries(GROUNDS).map(([k, g]) => [k, g.ko]);
 
 const T = 1.2;                       // world size of one grid cell
 const wx = (gy) => (gy - 10) * T;    // grid row  → world x (team A on the left)
@@ -92,7 +104,7 @@ export function createStage(canvas) {
     fragmentShader: 'varying vec3 p; uniform vec3 top; uniform vec3 mid; uniform vec3 bot; void main(){ float h = normalize(p).y; vec3 c = h > 0.0 ? mix(mid, top, pow(h, 0.55)) : mix(mid, bot, pow(min(1.0, -h * 3.0), 0.7)); gl_FragColor = vec4(c, 1.0); }',
   }));
   scene.add(sky);
-  scene.add(new THREE.HemisphereLight(0xe6f6ff, 0x6f9050, 1.15));
+  const hemi = new THREE.HemisphereLight(0xe6f6ff, 0x6f9050, 1.15); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff1d6, 2.3);
   sun.position.set(14, 24, 12); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 24, bottom: -24, near: 1, far: 70 }); sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
@@ -116,14 +128,18 @@ export function createStage(canvas) {
   for (let gx = 4; gx <= 16; gx++) for (let gy = 3; gy <= 17; gy++) cells.push([gx, gy]);
   const tiles = new THREE.InstancedMesh(new THREE.BoxGeometry(T * 0.94, 0.1, T * 0.94), std(0xffffff, { roughness: 0.85 }), cells.length);
   const m4 = new THREE.Matrix4(), tc = new THREE.Color();
-  cells.forEach(([gx, gy], i) => {
-    m4.makeTranslation(wx(gy), 0.03, wz(gx)); tiles.setMatrixAt(i, m4);
-    const odd = (gx + gy) & 1;
-    tc.set(odd ? 0xa7d77a : 0x9bcf6f);
-    if (gy >= 6 && gy <= 9 && gx >= 8 && gx <= 12) tc.lerp(new THREE.Color(0x7fb2ff), 0.3);
-    if (gy >= 11 && gy <= 14 && gx >= 8 && gx <= 12) tc.lerp(new THREE.Color(0xff9a8a), 0.3);
-    tiles.setColorAt(i, tc);
-  });
+  const zoneA = new THREE.Color(0x7fb2ff), zoneB = new THREE.Color(0xff9a8a);
+  function paintTiles(tile) {
+    cells.forEach(([gx, gy], i) => {
+      tc.set(tile[(gx + gy) & 1 ? 0 : 1]);
+      if (gy >= 6 && gy <= 9 && gx >= 8 && gx <= 12) tc.lerp(zoneA, 0.3);
+      if (gy >= 11 && gy <= 14 && gx >= 8 && gx <= 12) tc.lerp(zoneB, 0.3);
+      tiles.setColorAt(i, tc);
+    });
+    tiles.instanceColor.needsUpdate = true;
+  }
+  cells.forEach(([gx, gy], i) => { m4.makeTranslation(wx(gy), 0.03, wz(gx)); tiles.setMatrixAt(i, m4); });
+  tiles.setColorAt(0, tc); paintTiles(GROUNDS.forest.tile);
   tiles.receiveShadow = true; world.add(tiles);
   const inArena = (x, z, pad = 0.6) => Math.abs(x) < 8.4 + pad + 0.6 && Math.abs(z) < 7.2 + pad + 0.6;
 
@@ -233,7 +249,7 @@ export function createStage(canvas) {
   let units = [];
   function makeUnit(m, i) {
     const g = new THREE.Group();
-    const u = { m, g, hp: m.hpMax, sh: 0, alive: true, atk: -1, hit: 0, fall: 0, tw: null, seed: i * 1.7, lunge: null, frame: i };
+    const u = { m, g, hp: m.hpMax, sh: 0, alive: true, atk: -1, hit: 0, fall: 0, tw: null, seed: i * 1.7, lunge: null, frame: i, sts: new Map(), tn: 0, gx: m.x, gy: m.y };
     const pet = m.kind === 'pet' ? PET.get(m.petId) : null;
     const mob = m.kind === 'mob' ? MOB.get(m.key) : pet ? { ty: 0 } : null;
     const h = mob ? (mob.ty === 2 ? 2.5 : mob.ty === 1 ? 1.75 : pet ? 1.3 : 1.38) : 2.05, w = mob ? h : h / 1.2;
@@ -250,8 +266,8 @@ export function createStage(canvas) {
     u.card = new THREE.Mesh(geo, u.mat); u.card.rotation.order = 'YXZ'; u.card.position.y = 0.1; u.tex = tex; u.h = h;
     const base = new THREE.Mesh(baseGeo, new THREE.MeshStandardMaterial({ color: TEAM[m.team], roughness: 0.5 })); base.position.y = 0.11; base.castShadow = true; base.scale.setScalar(mob && mob.ty === 2 ? 1.5 : 1);
     const sh = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false })); sh.rotation.x = -Math.PI / 2; sh.position.y = 0.09; sh.scale.setScalar(mob && mob.ty === 2 ? 1.6 : 1.1);
-    u.bar = textTexture(128, 20);
-    u.barS = new THREE.Sprite(new THREE.SpriteMaterial({ map: u.bar.tex, transparent: true, depthTest: false, toneMapped: false })); u.barS.scale.set(1.05, 0.165, 1); u.barS.position.y = h + 0.34; u.barS.renderOrder = 5;
+    u.bar = textTexture(256, 76); // status chips (top) + HP/shield bar (bottom)
+    u.barS = new THREE.Sprite(new THREE.SpriteMaterial({ map: u.bar.tex, transparent: true, depthTest: false, toneMapped: false })); u.barS.scale.set(2.1, 0.62, 1); u.barS.position.y = h + 0.55; u.barS.renderOrder = 5;
     g.add(sh, base, u.card, u.barS); g.position.set(wx(m.y), 0, wz(m.x));
     if (m.out) { g.visible = false; u.alive = false; u.hidden = true; }
     drawBar(u); unitsG.add(g); return u;
@@ -259,10 +275,29 @@ export function createStage(canvas) {
   window.addEventListener('sxs-art', () => { for (const e of mobTex.values()) e.draw(); });
   function drawBar(u) {
     const c = u.bar.ctx, f = Math.max(0, u.hp / u.m.hpMax), s = Math.min(1, u.sh / u.m.hpMax);
-    c.clearRect(0, 0, 128, 20); c.fillStyle = 'rgba(20,16,14,.85)'; c.beginPath(); c.roundRect(0, 0, 128, 20, 8); c.fill();
-    c.fillStyle = u.m.team ? '#ff6b5e' : '#5aa2ff'; c.beginPath(); c.roundRect(3, 3, Math.max(4, 122 * f), 14, 6); c.fill();
-    if (s > 0) { c.fillStyle = 'rgba(240,248,255,.92)'; c.beginPath(); c.roundRect(3, 3, Math.max(4, 122 * s), 5, 3); c.fill(); }
+    c.clearRect(0, 0, 256, 76);
+    // HP bar (centre 128 px wide, like before) with the shield as a pale strip on top
+    const bx = 64, by = 50;
+    c.fillStyle = 'rgba(20,16,14,.85)'; c.beginPath(); c.roundRect(bx, by, 128, 20, 8); c.fill();
+    c.fillStyle = u.m.team ? '#ff6b5e' : '#5aa2ff'; c.beginPath(); c.roundRect(bx + 3, by + 3, Math.max(4, 122 * f), 14, 6); c.fill();
+    if (s > 0) { c.fillStyle = 'rgba(240,248,255,.92)'; c.beginPath(); c.roundRect(bx + 3, by + 3, Math.max(4, 122 * s), 5, 3); c.fill(); }
+    // status chips: control → debuffs → buffs, at most 2 + a count
+    if (u.sts.size && u.alive) {
+      const list = [...u.sts].sort((a, b) => stOrder(a) - stOrder(b));
+      c.font = `800 19px ${SANS}`; c.textBaseline = 'middle';
+      const chips = list.slice(0, 2).map(([k, e]) => ({ t: (ST_SHORT[k] || k) + (e.n > 1 ? '×' + e.n : ''), bg: stOrder([k, e]) === 0 ? '#c2410c' : stOrder([k, e]) === 1 ? '#9b2c2c' : k === 'shield' ? '#35608c' : '#2f7a46' }));
+      if (list.length > 2) chips.push({ t: '+' + (list.length - 2), bg: '#4a4640' });
+      const ws = chips.map((ch) => c.measureText(ch.t).width + 14), tot = ws.reduce((a, b) => a + b, 0) + 4 * (chips.length - 1);
+      let x = 128 - tot / 2;
+      chips.forEach((ch, i) => { c.fillStyle = ch.bg; c.beginPath(); c.roundRect(x, 14, ws[i], 28, 9); c.fill(); c.fillStyle = '#fff'; c.fillText(ch.t, x + 7, 29); x += ws[i] + 4; });
+    }
     u.bar.tex.needsUpdate = true;
+  }
+  /** status bookkeeping from 'st' events: count of instances, stacks, own turns left at the time of the event */
+  function applySt(u, ev) {
+    const m = u.sts, e = m.get(ev.k);
+    if (ev.on) { if (e) { if (!ev.u) e.c++; e.n = ev.n || 0; e.d = ev.d || 0; e.at = u.tn; e.b = ev.b; } else m.set(ev.k, { c: 1, n: ev.n || 0, d: ev.d || 0, at: u.tn, b: ev.b }); }
+    else if (e && --e.c <= 0) m.delete(ev.k);
   }
   function disposeUnits() { for (const u of units) { unitsG.remove(u.g); u.card.geometry.dispose(); u.mat.dispose(); u.bar.tex.dispose(); if (u.sprite) u.tex.dispose(); } units = []; }
   function setRoster(meta) { disposeUnits(); units = meta.map(makeUnit); ring.visible = false; }
@@ -294,7 +329,7 @@ export function createStage(canvas) {
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.05, 8, 36), new THREE.MeshBasicMaterial({ color: 0xffe9a8 })); ring.rotation.x = Math.PI / 2; ring.position.y = 0.2; ring.visible = false; scene.add(ring);
 
   /* replay */
-  let play = null, speed = 1, paused = false;
+  let play = null, speed = 1, paused = false, topView = false;
   const head = (u) => new THREE.Vector3(u.g.position.x, u.h * 0.72, u.g.position.z);
   const uname = (m) => (m.kind === 'mob' ? `${m.name}${m.nth != null && m.dup ? '#' + (m.nth + 1) : ''}` : m.name);
   function flushCast() {
@@ -308,8 +343,8 @@ export function createStage(canvas) {
   function doEvent(ev) {
     const p = play;
     switch (ev.e) {
-      case 'turn': { flushCast(); const u = units[ev.u]; ring.visible = true; ring.position.x = u.g.position.x; ring.position.z = u.g.position.z; ring.material.color.set(u.m.team ? 0xffb3a8 : 0xa8ccff); if (ev.r !== p.round) { p.round = ev.r; p.hooks.onRound && p.hooks.onRound(ev.r); } return 0.07; }
-      case 'move': { const u = units[ev.u]; u.tw = { x0: u.g.position.x, z0: u.g.position.z, x1: wx(ev.y), z1: wz(ev.x), k: 0, d: ev.pull ? 0.2 : 0.26, hop: ev.leap ? 1.5 : ev.pull ? 0.15 : 0.45 }; return ev.pull ? 0.08 : 0.24; }
+      case 'turn': { flushCast(); const u = units[ev.u]; u.tn++; ring.visible = true; ring.position.x = u.g.position.x; ring.position.z = u.g.position.z; ring.material.color.set(u.m.team ? 0xffb3a8 : 0xa8ccff); if (ev.r !== p.round) { p.round = ev.r; p.hooks.onRound && p.hooks.onRound(ev.r); } return 0.07; }
+      case 'move': { const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.tw = { x0: u.g.position.x, z0: u.g.position.z, x1: wx(ev.y), z1: wz(ev.x), k: 0, d: ev.pull ? 0.2 : 0.26, hop: ev.leap ? 1.5 : ev.pull ? 0.15 : 0.45 }; return ev.pull ? 0.08 : 0.24; }
       case 'cast': {
         flushCast(); const u = units[ev.u]; u.atk = 0;
         const col = (EL[ev.el] || EL.none).c;
@@ -341,7 +376,8 @@ export function createStage(canvas) {
       }
       case 'heal': { const t = units[ev.t]; t.hp = ev.hp; drawBar(t); popNum('+' + fmt(ev.v), '#7dff9a', head(t)); p.hooks.onHp && p.hooks.onHp(); return 0.06; }
       case 'shield': { const t = units[ev.t]; t.sh = ev.sh; drawBar(t); popNum('실드 +' + fmt(ev.v), '#bfe6ff', head(t)); return 0.06; }
-      case 'spawn': { const u = units[ev.u]; u.g.position.set(wx(ev.y), 0, wz(ev.x)); u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; drawBar(u); popRing(u.g.position.x, u.g.position.z, 1.6, '#ffe9a8'); popLabel(`${u.m.name} 실체화!`, '#ffe9a8', new THREE.Vector3(u.g.position.x, u.h + 0.9, u.g.position.z)); term.line(`  ✦ ${u.m.name} 실체화`, '#ffd24a'); return 0.3; }
+      case 'st': { const t = units[ev.t]; applySt(t, ev); drawBar(t); return 0; }
+      case 'spawn': { const u = units[ev.u]; u.g.position.set(wx(ev.y), 0, wz(ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1); u.barS.visible = true; drawBar(u); popRing(u.g.position.x, u.g.position.z, 1.6, '#ffe9a8'); popLabel(`${u.m.name} 실체화!`, '#ffe9a8', new THREE.Vector3(u.g.position.x, u.h + 0.9, u.g.position.z)); term.line(`  ✦ ${u.m.name} 실체화`, '#ffd24a'); return 0.3; }
       case 'die': { const u = units[ev.u]; u.alive = false; u.fall = 0.001; u.barS.visible = false; term.line(`  ✝ ${uname(u.m)} 쓰러짐`, '#8f8b80'); return 0.18; }
       case 'skip': { const u = units[ev.u]; popNum('행동 불가', '#9fd2ff', head(u)); return 0.2; }
       case 'end': { flushCast(); ring.visible = false; return 0.3; }
@@ -352,7 +388,9 @@ export function createStage(canvas) {
     const names = {}; meta.forEach((m) => { if (m.kind === 'mob') names[m.name] = (names[m.name] || 0) + 1; });
     meta.forEach((m) => { m.dup = m.kind === 'mob' && names[m.name] > 1; });
     setRoster(meta);
-    play = { ev: events, i: 0, wait: 0.5, round: 0, cur: null, hooks, burst: 0, done: false };
+    // action starts (each unit turn) for stepping and the timeline
+    const starts = []; events.forEach((e, i) => { if (e.e === 'turn') starts.push(i); });
+    play = { ev: events, i: 0, wait: 0.5, round: 0, cur: null, hooks, burst: 0, done: false, starts, stopAt: null };
     paused = false;
   }
   function stepReplay(dt) {
@@ -360,11 +398,58 @@ export function createStage(canvas) {
     p.wait -= dt * speed;
     let guard = 0;
     while (p.wait <= 0 && p.i < p.ev.length && guard++ < 40) {
+      if (p.stopAt != null && p.i >= p.stopAt) { p.stopAt = null; paused = true; p.hooks.onPause && p.hooks.onPause(); break; }
       const ev = p.ev[p.i++];
       if (ev.e === 'cast') { let n = 0; for (let j = p.i; j < p.ev.length && (p.ev[j].e === 'hit' || p.ev[j].e === 'st' || p.ev[j].e === 'die' || p.ev[j].e === 'move'); j++) if (p.ev[j].e === 'hit') n++; p.burst = n; }
       p.wait += doEvent(ev);
+      p.hooks.onEvent && p.hooks.onEvent(p.i);
       if (ev.e === 'end') { p.done = true; p.hooks.onEnd && p.hooks.onEnd(ev); break; }
     }
+  }
+  /* ── seeking: rebuild the board state at event index i without effects ── */
+  function resetUnits() {
+    for (const u of units) {
+      const m = u.m;
+      u.g.position.set(wx(m.y), 0, wz(m.x)); u.gx = m.x; u.gy = m.y;
+      u.hp = m.hpMax; u.sh = 0; u.alive = !m.out; u.hidden = !!m.out; u.g.visible = !m.out;
+      u.fall = 0; u.atk = -1; u.hit = 0; u.tw = null; u.lunge = null; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1);
+      u.barS.visible = true; u.sts.clear(); u.tn = 0;
+    }
+  }
+  function applySilent(ev, p) {
+    switch (ev.e) {
+      case 'turn': { const u = units[ev.u]; u.tn++; p.round = ev.r; ring.visible = true; ring.position.x = u.g.position.x; ring.position.z = u.g.position.z; ring.material.color.set(u.m.team ? 0xffb3a8 : 0xa8ccff); break; }
+      case 'move': { const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.g.position.set(wx(ev.y), 0, wz(ev.x)); break; }
+      case 'hit': { const t = units[ev.t]; t.hp = ev.hp; t.sh = ev.sh; break; }
+      case 'heal': units[ev.t].hp = ev.hp; break;
+      case 'shield': units[ev.t].sh = ev.sh; break;
+      case 'st': applySt(units[ev.t], ev); break;
+      case 'spawn': { const u = units[ev.u]; u.g.position.set(wx(ev.y), 0, wz(ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.barS.visible = true; break; }
+      case 'die': { const u = units[ev.u]; u.alive = false; u.fall = 1; u.barS.visible = false; break; }
+      case 'end': ring.visible = false; break;
+    }
+  }
+  function clearFx() { for (const n of nums) { n.life = 0; n.s.visible = false; } for (const n of labels) { n.life = 0; n.s.visible = false; } for (const n of rings) { n.life = 0; n.m.visible = false; } for (const n of bolts) { n.life = 0; n.m.visible = false; } }
+  function seek(i) {
+    const p = play; if (!p) return;
+    i = Math.max(0, Math.min(p.ev.length, i | 0));
+    resetUnits(); clearFx(); p.round = 0; p.cur = null; p.stopAt = null; ring.visible = false;
+    for (let j = 0; j < i; j++) applySilent(p.ev[j], p);
+    for (const u of units) { if (u.fall >= 1) u.card.rotation.x = -1.42; drawBar(u); }
+    const wasDone = p.done;
+    p.i = i; p.wait = 0.12; p.done = i >= p.ev.length;
+    p.hooks.onRound && p.round && p.hooks.onRound(p.round);
+    p.hooks.onSeek && p.hooks.onSeek(i);
+    p.hooks.onEvent && p.hooks.onEvent(i);
+    if (p.done && !wasDone) { const last = p.ev[p.ev.length - 1]; if (last && last.e === 'end') p.hooks.onEnd && p.hooks.onEnd(last); }
+  }
+  /** previous / next action: back jumps to the start of the action just played, forward plays one action then pauses */
+  function stepAction(dir) {
+    const p = play; if (!p) return;
+    if (dir < 0) { let s = 0; for (const x of p.starts) { if (x < p.i) s = x; else break; } paused = true; seek(s); p.hooks.onPause && p.hooks.onPause(); return; }
+    if (p.done) return;
+    const next = p.starts.find((x) => x > p.i);
+    p.stopAt = next != null ? next : null; paused = false; p.hooks.onResume && p.hooks.onResume();
   }
 
   /* frame loop */
@@ -387,8 +472,12 @@ export function createStage(canvas) {
       if (u.hit > 0) { u.hit = Math.max(0, u.hit - a / 0.3); lx += Math.sin(u.hit * 40) * 0.07 * u.hit; if (!u.sprite) u.mat.color.setRGB(1, 1 - 0.6 * u.hit, 1 - 0.6 * u.hit); }
       const bob = u.alive ? Math.sin(tAll * 2.4 + u.seed) * 0.035 : 0;
       u.card.position.set(lx, 0.1 + bob, lz);
-      u.card.rotation.y = Math.atan2(camera.position.x - g.position.x, camera.position.z - g.position.z);
-      if (u.fall > 0) { u.fall = Math.min(1, u.fall + a / 0.45); u.card.rotation.x = -1.42 * u.fall * u.fall; u.mat.opacity = 1 - 0.35 * u.fall; if (!u.sprite) u.mat.color.setScalar(1 - 0.45 * u.fall); } else u.card.rotation.x = 0;
+      const cdx = camera.position.x - g.position.x, cdz = camera.position.z - g.position.z;
+      u.card.rotation.y = Math.atan2(cdx, cdz);
+      // seen from above, lean the paper standee back so it faces the camera instead of showing its edge
+      const lean = topView ? -Math.atan2(camera.position.y - u.h * 0.4, Math.hypot(cdx, cdz)) * 0.9 : 0;
+      if (u.fall > 0) { u.fall = Math.min(1, u.fall + a / 0.45); u.card.rotation.x = Math.min(lean, -1.42 * u.fall * u.fall); u.mat.opacity = 1 - 0.35 * u.fall; if (!u.sprite) u.mat.color.setScalar(1 - 0.45 * u.fall); } else u.card.rotation.x = lean;
+      { const hd = Math.hypot(cdx, cdz) || 1, off = topView ? Math.sin(-lean) * u.h * 0.95 : 0; u.barS.position.set(-cdx / hd * off, topView ? Math.cos(-lean) * u.h + 0.4 : u.h + 0.55, -cdz / hd * off); }
       u.card.rotation.z = tilt + (u.alive && !u.sprite ? Math.sin(tAll * 1.9 + u.seed) * 0.03 : 0);
       if (!u.sprite && u.alive) { const s = 1 + Math.sin(tAll * 2.4 + u.seed) * 0.025; u.card.scale.set(2 - s, s, 1); }
       if (u.sprite && (u.atk >= 0 || u.hit > 0 || (frame + u.frame) % 3 === 0 || u.fall > 0)) { u.sprite.draw(tAll, { atk: u.atk, hit: u.hit, flip: u.m.team === 1, dead: !u.alive }); u.tex.needsUpdate = true; }
@@ -408,21 +497,41 @@ export function createStage(canvas) {
     fall.tex.offset.y = (tAll * 0.9) % 1; water.material.opacity = 0.84 + Math.sin(tAll * 1.3) * 0.04;
     glowL.intensity = 13 + Math.sin(tAll * 9) * 0.6 + (term.status ? 4 : 0); led.material.color.setHex(term.status && Math.floor(tAll * 6) % 2 ? 0xffd9c8 : 0xd97757);
     term.draw(tAll);
-    if (!userMoved) { const az = Math.sin(tAll * 0.12) * 0.15; camera.position.set(Math.sin(az) * camR, camR * 0.49, Math.cos(az) * camR - 2.4); }
+    if (!userMoved) {
+      if (topView) camera.position.set(0, camR * 1.32, 2.2); // duel-field style: straight over the board
+      else { const az = Math.sin(tAll * 0.12) * 0.15; camera.position.set(Math.sin(az) * camR, camR * 0.49, Math.cos(az) * camR - 2.4); }
+    }
     controls.update();
     renderer.render(scene, camera);
   }
   tick();
   document.addEventListener('visibilitychange', () => { if (document.hidden) { running = false; } else if (!running) { running = true; clock.getDelta(); tick(); } });
 
+  /* ground theme + camera presets */
+  const leafAll = [...leafMats, ...pineMat], leafOrig = leafAll.map((m) => m.color.clone()), tmpC = new THREE.Color();
+  function setGround(key) {
+    const g = GROUNDS[key] || GROUNDS.forest;
+    paintTiles(g.tile);
+    grass.material.color.set(g.grass);
+    leafAll.forEach((m, i) => { m.color.copy(leafOrig[i]); if (g.leaf) m.color.lerp(tmpC.set(g.leaf[0]), g.leaf[1]); });
+    sky.material.uniforms.top.value.set(g.sky[0]); sky.material.uniforms.mid.value.set(g.sky[1]); sky.material.uniforms.bot.value.set(g.sky[2]);
+    scene.fog.color.set(g.fog); hemi.color.set(g.hemi[0]); hemi.groundColor.set(g.hemi[1]); hemi.intensity = g.hemi[2];
+    sun.color.set(g.sun[0]); sun.intensity = g.sun[1]; renderer.toneMappingExposure = g.exp;
+  }
+  function setTopView(on) { topView = !!on; userMoved = false; controls.minPolarAngle = topView ? 0 : 0.45; controls.target.set(0, topView ? 0 : 3.0, topView ? 0 : -3.0); }
+
   return {
-    term, setRoster,
+    term, setRoster, setGround, setTopView, isTopView: () => topView,
     play: startReplay,
     stop() { play = null; ring.visible = false; },
-    setSpeed(v) { speed = v; }, setPaused(v) { paused = v; }, isPlaying: () => !!(play && !play.done),
-    skip() { if (!play || play.done) return; const p = play; const keep = speed; while (!p.done && p.i < p.ev.length) { const ev = p.ev[p.i++]; doEvent(ev); if (ev.e === 'end') { p.done = true; p.hooks.onEnd && p.hooks.onEnd(ev); } } for (const u of units) { if (u.tw) { u.g.position.set(u.tw.x1, 0, u.tw.z1); u.tw = null; } } speed = keep; },
+    setSpeed(v) { speed = v; }, setPaused(v) { paused = v; }, isPaused: () => paused, isPlaying: () => !!(play && !play.done),
+    skip() { if (!play || play.done) return; seek(play.ev.length); },
+    seek, stepAction,
+    pos: () => (play ? { i: play.i, n: play.ev.length, round: play.round, done: play.done } : null),
+    /** live board state for the side panels: HP, shield, alive, cell, statuses with own turns left */
+    live: () => units.map((u) => ({ m: u.m, hp: u.hp, sh: u.sh, alive: u.alive, hidden: !!u.hidden, x: u.gx, y: u.gy, sts: [...u.sts].sort((a, b) => stOrder(a) - stOrder(b)).map(([k, e]) => ({ k, n: e.n, b: e.b, left: e.d ? Math.max(1, e.at + e.d - u.tn) : 0 })) })),
     teamHp() { const o = [[0, 0], [0, 0]]; for (const u of units) { if (u.m.pet) continue; o[u.m.team][0] += Math.max(0, u.hp); o[u.m.team][1] += u.m.hpMax; } return o; },
-    resetView() { userMoved = false; controls.target.set(0, 3.0, -3.0); },
+    resetView() { setTopView(false); },
     zoom(f) { userMoved = true; const v = camera.position.clone().sub(controls.target); v.setLength(Math.max(controls.minDistance, Math.min(controls.maxDistance, v.length() * f))); camera.position.copy(controls.target).add(v); },
   };
 }

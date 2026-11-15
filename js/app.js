@@ -1,7 +1,8 @@
 // UI: team builder (skills, charms, Fantomon), encounter presets, Monte Carlo runner and results.
 import { CLASSES, SKILLS, MAPS, RANKS, MAXLV } from './gamedata.js';
-import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV } from './engine.js';
-import { createStage } from './scene.js';
+import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH } from './engine.js';
+import { createStage, GROUND_LIST } from './scene.js';
+import { ST_KO } from './status.js';
 import { renderAvatar, EL } from './sprites.js';
 import { loadArt } from './art.js';
 
@@ -82,17 +83,20 @@ function sanitize(s) {
   const d = demo();
   const out = { ...d, ...s, v: 2, roundCap: { ...d.roundCap, ...(s.roundCap || {}) }, preset: { ...d.preset, ...(s.preset && s.preset.mode ? s.preset : {}) } };
   out.mode = out.mode === 'pvp' ? 'pvp' : 'pve';
-  const four = (arr, ok) => { const a = (Array.isArray(arr) ? arr : []).slice(0, 4).map((x) => (x && ok(x) ? x : null)); while (a.length < 4) a.push(null); return a; };
+  out.ground = GROUND_LIST.some(([k]) => k === s.ground) ? s.ground : 'forest';
+  const cellOf = (c) => (Array.isArray(c) && c.length === 2 && c.every((v) => Number.isInteger(v)) ? [c[0], c[1]] : undefined);
+  const four =(arr, ok) => { const a = (Array.isArray(arr) ? arr : []).slice(0, 4).map((x) => (x && ok(x) ? x : null)); while (a.length < 4) a.push(null); return a; };
   out.teams = s.teams.map((t) => (Array.isArray(t) ? t : []).filter((u) => u && (u.kind === 'mob' ? MOB.has(u.key) : CLS.has(u.cls))).map((u) => {
     if (u.kind === 'mob') {
       const m = { uid: u.uid || uid(), kind: 'mob', key: u.key, level: +u.level || 1, count: Math.max(1, Math.min(20, +u.count || 1)), sr: u.sr || MOB.get(u.key).sr };
       if (Array.isArray(u.fix) && u.fix.length === 14 && u.fix.every((x) => typeof x === 'number' && isFinite(x))) m.fix = u.fix;
       if (u.uws) m.uws = 1;
+      if (cellOf(u.cell)) m.cell = cellOf(u.cell);
       return m;
     }
     const pet = u.pet && PET.has(+u.pet.id) ? { id: +u.pet.id, rank: +u.pet.rank || 3, adult: !!u.pet.adult, atk: +u.pet.atk || 1, def: +u.pet.def || 0, hp: +u.pet.hp || 1, spd: +u.pet.spd || 1 } : null;
     return { uid: u.uid || uid(), kind: 'hero', name: String(u.name || '캐릭터').slice(0, 20), cls: u.cls, level: +u.level || 1, atk: +u.atk || 1, def: +u.def || 0, hp: +u.hp || 1, spd: +u.spd || 1, adv: u.adv && typeof u.adv === 'object' ? u.adv : {},
-      skills: four(u.skills, (x) => x.custom || SK.has(x.id)), charms: four(u.charms, (x) => CHARM.has(x.id)), pet };
+      skills: four(u.skills, (x) => x.custom || SK.has(x.id)), charms: four(u.charms, (x) => CHARM.has(x.id)), pet, cell: cellOf(u.cell) };
   }));
   return out;
 }
@@ -107,8 +111,8 @@ let saveT = 0, rosterT = 0, lastRes = null, lastSetup = null, running = false;
 function toSetup() {
   return {
     mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100, pvEst: state.pvEst !== false,
-    teams: state.teams.map((t) => t.map((u) => (u.kind === 'mob' ? { kind: 'mob', uid: u.uid, key: u.key, level: u.level, count: u.count, sr: u.sr, fix: u.fix, uws: u.uws }
-      : { kind: 'hero', uid: u.uid, name: u.name, cls: u.cls, level: u.level, atk: u.atk, def: u.def, hp: u.hp, spd: u.spd, ...u.adv, skills: u.skills, charms: u.charms, pet: u.pet }))),
+    teams: state.teams.map((t) => t.map((u) => (u.kind === 'mob' ? { kind: 'mob', uid: u.uid, key: u.key, level: u.level, count: u.count, sr: u.sr, fix: u.fix, uws: u.uws, cell: u.cell }
+      : { kind: 'hero', uid: u.uid, name: u.name, cls: u.cls, level: u.level, atk: u.atk, def: u.def, hp: u.hp, spd: u.spd, ...u.adv, skills: u.skills, charms: u.charms, pet: u.pet, cell: u.cell }))),
   };
 }
 const countUnits = (t) => t.reduce((s, u) => s + (u.kind === 'mob' ? u.count : 1), 0);
@@ -126,6 +130,7 @@ function showRoster() {
   stage.stop();
   try { stage.setRoster(roster(toSetup())); } catch (e) { console.error(e); }
   $('#banner').hidden = true; $('#roundTag').textContent = '대기 중'; hud();
+  clearBattle();
 }
 function hud() { const h = stage.teamHp(); $('#hpA').style.width = (h[0][1] ? (h[0][0] / h[0][1]) * 100 : 0) + '%'; $('#hpB').style.width = (h[1][1] ? (h[1][0] / h[1][1]) * 100 : 0) + '%'; }
 
@@ -541,7 +546,7 @@ async function run() {
   clearTimeout(rosterT); // a pending roster refresh must not wipe the replay that follows
   running = true; $('#runBtn').disabled = true; stage.stop(); $('#banner').hidden = true;
   try { stage.setRoster(roster(setup)); } catch (e) { /* shown below */ }
-  hud();
+  hud(); clearBattle();
   const n = state.runs, seed = (Math.random() * 2 ** 31) | 0, t0 = performance.now();
   term.clear(); term.setBig(null);
   term.line(`> /simulate ${state.mode} --runs ${n} --cap ${setup.roundCap}R`, '#f0eee6');
@@ -558,7 +563,7 @@ async function run() {
     term.line(`● 승률 ${(p * 100).toFixed(1)}% (±${ci.toFixed(1)}%p) — ${verdict(p)}`, pctColor(p));
     term.line(`  ⎿ ${res.wins[0]}승 ${res.wins[1]}패${res.draws ? ' ' + res.draws + '무' : ''} · 평균 ${(res.rounds / res.n).toFixed(1)}R · ${(ms / 1000).toFixed(1)}s`, '#9b978b');
     showResults(res);
-    playSample('rep');
+    startSamples(res, setup);
   } catch (e) {
     console.error(e); term.setStatus(null); term.line('✗ 오류: ' + e.message, '#ff6b5e'); toast('시뮬레이션 오류: ' + e.message);
   } finally { running = false; $('#runBtn').disabled = false; }
@@ -572,7 +577,6 @@ function showResults(res) {
   res.meta.forEach((m, i) => { const key = m.team + '|' + (m.kind === 'mob' ? m.ref : m.id); let r = by.get(key); if (!r) { r = { team: m.team, name: (m.pet ? '🐾 ' : '') + m.name, n: 0, dmg: 0, taken: 0, kills: 0, alive: 0 }; by.set(key, r); rows.push(r); } const a = res.units[i]; r.n++; r.dmg += a.dmg / N; r.taken += a.taken / N; r.kills += a.kills / N; r.alive += a.alive / N; if (m.team === 0) dmgA += a.dmg / N; });
   const maxD = Math.max(1, ...rows.map((r) => r.dmg));
   const winTag = $('#winTag'); winTag.hidden = false; winTag.textContent = (p * 100).toFixed(1) + '%'; winTag.style.color = col; winTag.style.borderColor = col;
-  const has = (w) => res.samples.some((s) => s[1] === w);
   $('#results').classList.remove('stale');
   $('#results').innerHTML = `
     <div class="card dial">
@@ -581,10 +585,10 @@ function showResults(res) {
       <div class="pct" style="color:${col}">${(p * 100).toFixed(1)}<small style="font-size:22px">%</small></div>
       <div class="cap">아군 승리 확률 · 95% 신뢰구간 ±${ci.toFixed(1)}%p</div>
       <div class="verdict" style="color:${col}">${verdict(p)}</div>
-      <div class="replay-row" style="justify-content:center">
-        <button class="btn" data-replay="rep">대표 전투 다시 보기</button>
-        ${has(0) ? '<button class="btn" data-replay="win">승리 사례</button>' : ''}${has(1) ? '<button class="btn" data-replay="lose">패배 사례</button>' : ''}
-      </div>
+    </div>
+    <div class="card samples-card">
+      <div class="smp-head"><b>다시 볼 전투</b><span>결과 비율대로 고른 ${Math.min(10, res.samples.length)}판 · 같은 결과 안에서는 길이·첫 쓰러짐이 다르게</span></div>
+      <div class="samples" id="samples"></div>
     </div>
     <div class="card">
       <div class="kv">
@@ -601,32 +605,249 @@ function showResults(res) {
       </tbody></table></div>
     </div>`;
 }
-$('#results').addEventListener('click', (e) => { const b = e.target.closest('[data-replay]'); if (b && !running) playSample(b.dataset.replay); });
-function playSample(kind) {
-  const res = lastRes, setup = lastSetup; if (!res || !res.samples.length) return;
-  const maj = res.wins[0] >= res.wins[1] ? 0 : 1, avg = res.rounds / res.n;
-  let pool = res.samples.filter((s) => s[1] === (kind === 'win' ? 0 : kind === 'lose' ? 1 : maj)); if (!pool.length) pool = res.samples;
-  const pick = kind === 'rep' ? pool.slice().sort((a, b) => Math.abs(a[2] - avg) - Math.abs(b[2] - avg))[0] : pool[Math.floor(Math.random() * pool.length)];
-  let r; try { r = replay(setup, pick[0]); } catch (e) { console.error(e); return; }
+/* ───────── battle screen: sample fights · timeline · combat log · live status · minimap ───────── */
+let cur = null; // the replay on screen: { r, setup, seed, acts, evToAct, nm }
+/** up to 10 fights to watch: each result in proportion (at least 2 of any result seen), spread over fight length */
+function pickSamples(res) {
+  const S = res.samples, groups = new Map();
+  for (const s of S) { if (!groups.has(s[1])) groups.set(s[1], []); groups.get(s[1]).push(s); }
+  const want = Math.min(10, S.length);
+  const alloc = [...groups].map(([w, list]) => ({ w, list, n: Math.min(list.length, Math.max(2, Math.round((want * list.length) / S.length))) }));
+  let guard = 0; while (alloc.reduce((a, x) => a + x.n, 0) > want && guard++ < 50) { const big = alloc.slice().sort((a, b) => b.n - a.n)[0]; if (big.n <= 1) break; big.n--; }
+  const maj = res.wins[0] >= res.wins[1] ? 0 : 1, out = [];
+  for (const g of alloc.sort((a, b) => (a.w === maj ? -1 : b.w === maj ? 1 : a.w - b.w))) {
+    const sorted = g.list.slice().sort((a, b) => a[2] - b[2]), seen = new Set();
+    for (let j = 0; j < g.n; j++) { const s = sorted[Math.round((j * (sorted.length - 1)) / Math.max(1, g.n - 1))]; if (!seen.has(s[0])) { seen.add(s[0]); out.push(s); } }
+  }
+  return out;
+}
+const resKo = (w, to) => (w === 0 ? '승리' : w === 1 ? (to ? '시간 초과 패배' : '패배') : '무승부');
+function startSamples(res, setup) {
+  const list = pickSamples(res), avg = res.rounds / res.n, maj = res.wins[0] >= res.wins[1] ? 0 : 1;
+  const pool = list.filter((s) => s[1] === maj), rep = (pool.length ? pool : list).slice().sort((a, b) => Math.abs(a[2] - avg) - Math.abs(b[2] - avg))[0];
+  const box = $('#samples'); if (!box) return;
+  box.innerHTML = list.map((s) => `<button class="smp ${s[1] === 0 ? 'win' : s[1] === 1 ? 'lose' : 'draw'}" data-seed="${s[0]}"><b>${resKo(s[1])}${s === rep ? ' · 대표' : ''}</b><span>${s[2]}라운드</span><small>…</small></button>`).join('');
+  // fill in action counts and who fell first, one replay per idle slice
+  let k = 0;
+  const fill = () => {
+    if (lastSetup !== setup || k >= list.length) return;
+    const s = list[k++], el = box.querySelector(`[data-seed="${s[0]}"]`);
+    try {
+      const r = replay(setup, s[0]), acts = r.events.filter((e) => e.e === 'turn' && !r.meta[e.u].pet).length;
+      const fd = r.events.find((e) => e.e === 'die' && !r.meta[e.u].pet), end = r.events[r.events.length - 1];
+      if (el) { el.querySelector('span').textContent = `${acts}행동 · ${s[2]}라운드${end && end.timeout ? ' · 시간 초과' : ''}`; el.querySelector('small').textContent = fd ? `첫 쓰러짐: ${r.meta[fd.u].name}` : '쓰러진 유닛 없음'; }
+    } catch (e) { console.error(e); }
+    setTimeout(fill, 0);
+  };
+  setTimeout(fill, 60);
+  if (rep) playSeed(setup, rep[0]);
+}
+$('#results').addEventListener('click', (e) => { const b = e.target.closest('.smp'); if (b && !running && lastSetup) playSeed(lastSetup, +b.dataset.seed); });
+
+function unitNames(meta) {
+  const cnt = {}; meta.forEach((m) => { if (m.kind === 'mob') cnt[m.name] = (cnt[m.name] || 0) + 1; });
+  return meta.map((m) => (m.kind === 'mob' && cnt[m.name] > 1 ? `${m.name}#${(m.nth || 0) + 1}` : m.name));
+}
+/** one entry per unit turn: casts, damage (by the acting side), heals, misses, moves, falls, statuses gained */
+function buildActs(r) {
+  const acts = [], evToAct = new Int32Array(r.events.length + 1).fill(-1), M = r.meta;
+  let a = null;
+  r.events.forEach((e, i) => {
+    if (e.e === 'turn') { a = { i, u: e.u, r: e.r, casts: [], dmg: 0, taken: 0, heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0 }; acts.push(a); }
+    else if (a) {
+      switch (e.e) {
+        case 'cast': a.casts.push(e); break;
+        case 'hit': if (e.k === 3 || e.k === 5) a.miss++; else if (M[e.a].team === M[a.u].team) { a.dmg += e.d; if (e.k === 1) a.crit++; if (e.k === 2) a.block++; } else a.taken += e.d; break;
+        case 'heal': a.heal += e.v; break;
+        case 'move': if (e.u === a.u && !e.pull) a.move++; break;
+        case 'die': a.falls.push(e.u); break;
+        case 'spawn': a.spawn = e.u; break;
+        case 'skip': a.skip = 1; break;
+        case 'st': if (e.on && !e.u && a.gains.length < 5) a.gains.push(e); break;
+      }
+    }
+    evToAct[i] = acts.length - 1;
+  });
+  evToAct[r.events.length] = acts.length - 1;
+  return { acts, evToAct };
+}
+function actLine(a, nm, M) {
+  const who = M[a.u], tg = new Map();
+  for (const c of a.casts) if (!c.sup) for (const t of c.tg) tg.set(t, 1);
+  const tgs = [...tg.keys()], names = a.casts.map((c) => esc(c.n));
+  const what = names.length ? names.join(' · ') : a.skip ? '행동 불가' : a.spawn >= 0 ? '' : '사용 가능한 전투 스킬 없음';
+  const sub = [];
+  if (a.move) sub.push(`이동`);
+  if (a.crit || a.block || a.miss) sub.push([a.crit && `치명타 ${a.crit}`, a.block && `막기 ${a.block}`, a.miss && `빗나감 ${a.miss}`].filter(Boolean).join(' · '));
+  if (a.heal) sub.push(`<span class="hl">치유 +${fmt(a.heal)}</span>`);
+  if (a.taken) sub.push(`반격·반사 −${fmt(a.taken)}`);
+  for (const g of a.gains) sub.push(`${esc(nm[g.t])}: ${ST_KO[g.k] || g.k}${g.n > 1 ? ' ×' + g.n : ''}`);
+  if (a.spawn >= 0) sub.push(`✦ ${esc(nm[a.spawn])} 실체화`);
+  for (const f of a.falls) sub.push(`<span class="fl">✝ ${esc(nm[f])} 쓰러짐</span>`);
+  return `<div class="lg t${who.team}" data-a="${a.i}"><span class="lr">R${a.r}</span><b>${esc(nm[a.u])}</b> ${what}${tgs.length ? ` → ${esc(nm[tgs[0]])}${tgs.length > 1 ? ` 외 ${tgs.length - 1}` : ''}` : ''}${a.dmg ? ` <span class="dm">−${fmt(a.dmg)}</span>` : ''}${sub.length ? `<div class="sub">${sub.join(' · ')}</div>` : ''}</div>`;
+}
+function fieldChips(setup) {
+  const c = [];
+  if (setup.mode === 'pvp' && setup.pvpBalance !== false) { c.push(['균형의 미 · 캐릭터 대상 대미지 ×0.2', 'PvP 전장 효과 (Beauty of Balance)']); c.push(['12라운드부터 라운드마다 대미지 +10%p · 치유·실드 감소', 'PvP 전장 효과 (Swift Resolution)']); }
+  if (setup.teams.some((t) => t.some((u) => u.uws))) c.push(['United We Stand · 보스가 첫 3턴 받는 대미지 −99%', '길드 토벌 층 효과']);
+  c.push([`라운드 제한 ${setup.roundCap}R`, '한 라운드 = 생존한 전원이 한 번씩 행동']);
+  if (setup.teams.some((t) => t.some((u) => u.kind === 'mob'))) { if (setup.mobCoef !== 1) c.push([`몹 스킬 계수 ${Math.round(setup.mobCoef * 100)}%`, '']); if (setup.pvEst === false) c.push(['몹 비전 추정값 꺼짐', '']); }
+  return c.map(([t, title]) => `<span class="fchip" title="${esc(title)}">${t}</span>`).join('');
+}
+function playSeed(setup, seed) {
+  let r; try { r = replay(setup, seed); } catch (e) { console.error(e); return; }
+  const { acts, evToAct } = buildActs(r), nm = unitNames(r.meta);
+  cur = { r, setup, seed, acts, evToAct, nm, k: -2 };
+  $$('#samples .smp').forEach((b) => b.classList.toggle('on', +b.dataset.seed === seed));
   $('#banner').hidden = true; $('#roundTag').textContent = '전투 재생';
-  term.line(`  ⎿ ${kind === 'win' ? '승리' : kind === 'lose' ? '패배' : '대표'} 전투 재생 (seed ${pick[0]})`, '#d97757');
+  term.line(`  ⎿ 전투 재생 (seed ${seed})`, '#d97757');
+  $('#logList').innerHTML = acts.map((a) => actLine(a, nm, r.meta)).join('') || '<div class="lg-empty">기록 없음</div>';
+  cur.lines = [...$('#logList').children];
+  $('#fieldChips').innerHTML = fieldChips(setup);
+  $('#tlRange').max = acts.length; $('#tlRange').value = 0; $('#tl').classList.remove('idle');
+  drawStrip();
   stage.play(r.events, r.meta, {
     onRound: (n) => { $('#roundTag').textContent = `라운드 ${n} / ${setup.roundCap}`; },
     onHp: hud,
+    onEvent: scheduleBattle,
+    onSeek: (i) => { if (i < r.events.length) $('#banner').hidden = true; hud(); scheduleBattle(); },
+    onPause: syncPause, onResume: syncPause,
     onEnd: (ev) => {
       const b = $('#banner'); b.hidden = false; b.className = 'banner' + (ev.w === 0 ? '' : ' lose');
       b.textContent = ev.w === 0 ? '승리!' : ev.w === 1 ? (ev.timeout ? '시간 초과 패배' : '패배…') : '무승부';
       term.line(`✔ 전투 종료 — ${ev.w === 0 ? '아군 승리' : ev.w === 1 ? '상대 승리' : '무승부'} (${ev.r}R${ev.timeout ? ', 시간 초과' : ''})`, ev.w === 0 ? '#7bc96f' : '#ff6b5e'); hud();
-      setTimeout(() => { if (!stage.isPlaying()) b.hidden = true; }, 2600);
+      setTimeout(() => { if (!stage.isPlaying() && stage.pos() && stage.pos().done) b.hidden = true; }, 2600);
+      scheduleBattle();
     },
   });
-  hud();
+  syncPause(); hud(); scheduleBattle();
 }
+function clearBattle() {
+  cur = null;
+  $('#logList').innerHTML = '<div class="lg-empty">「승률 계산」을 누르면 대표 전투의 행동이 여기에 기록됩니다.</div>';
+  $('#tlRange').max = 0; $('#tlRange').value = 0; $('#tl').classList.add('idle');
+  $('#tlCap').textContent = '전투를 재생하면 타임라인을 끌어 원하는 장면으로 이동할 수 있습니다.';
+  $('#fieldChips').innerHTML = fieldChips(toSetup());
+  drawStrip(); scheduleBattle();
+}
+/* timeline strip: one column per action, height = damage dealt, red tick = a unit fell */
+function drawStrip() {
+  const cv = $('#tlStrip'), w = cv.clientWidth || 600, h = 22, dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = w * dpr; cv.height = h * dpr; const c = cv.getContext('2d'); c.scale(dpr, dpr); c.clearRect(0, 0, w, h);
+  c.fillStyle = '#26241f'; c.fillRect(0, 0, w, h);
+  if (!cur || !cur.acts.length) return;
+  const A = cur.acts, n = A.length, cw = w / n, max = Math.max(1, ...A.map((a) => a.dmg));
+  A.forEach((a, j) => {
+    const team = cur.r.meta[a.u].team, f = a.dmg ? 0.25 + 0.75 * Math.log1p(a.dmg) / Math.log1p(max) : 0.12;
+    c.fillStyle = team ? 'rgba(255,107,94,.85)' : 'rgba(90,162,255,.85)'; c.fillRect(j * cw, h - f * (h - 4), Math.max(1, cw - (cw > 3 ? 1 : 0)), f * (h - 4));
+    if (a.falls.length) { c.fillStyle = '#ffd24a'; c.fillRect(j * cw, 0, Math.max(1.5, cw - 1), 3); }
+  });
+}
+let battleRaf = 0, liveT = 0;
+function scheduleBattle() { if (!battleRaf) battleRaf = requestAnimationFrame(refreshBattle); }
+function refreshBattle() {
+  battleRaf = 0;
+  const pos = stage.pos();
+  if (cur && pos) {
+    const A = cur.acts, k = pos.done ? A.length : pos.i === 0 ? -1 : Math.max(-1, cur.evToAct[pos.i - 1]);
+    if (document.activeElement !== $('#tlRange')) $('#tlRange').value = pos.done ? A.length : k + 1; // = actions completed
+    const a = A[Math.min(A.length - 1, Math.max(0, k))];
+    if (pos.done) { const end = cur.r.events[cur.r.events.length - 1]; $('#tlCap').textContent = `전투 종료 · ${resKo(end.w, end.timeout)} · ${end.r}라운드 · 행동 ${A.length}개`; }
+    else if (k < 0 || !a) $('#tlCap').textContent = `전투 시작 전 · 막대를 끌거나 ▶▶로 한 행동씩 보세요 · 행동 ${A.length}개`;
+    else $('#tlCap').textContent = `라운드 ${a.r} · 행동 ${k + 1}/${A.length} · ${cur.nm[a.u]}: ${a.casts.length ? a.casts.map((c) => c.n).join(' · ') : a.skip ? '행동 불가' : a.move ? '이동' : '스킬 대기'}${a.dmg ? ' · −' + fmt(a.dmg) : ''}`;
+    if (k !== cur.k) {
+      const L = cur.lines, old = cur.k; cur.k = k;
+      const lo = Math.max(0, Math.min(old, k) + 1), hi = Math.min(L.length - 1, Math.max(old, k));
+      if (old === -2) L.forEach((el, j) => el.classList.toggle('future', j > k));
+      else for (let j = lo; j <= hi; j++) L[j].classList.toggle('future', j > k);
+      if (L[old]) L[old].classList.remove('now');
+      if (L[k] && !pos.done) { L[k].classList.add('now'); const box = $('#logList'); const top = L[k].offsetTop - box.offsetTop; if (top < box.scrollTop || top > box.scrollTop + box.clientHeight - 40) box.scrollTop = Math.max(0, top - box.clientHeight / 3); }
+    }
+  }
+  const now = performance.now();
+  if (now - liveT > 120) { liveT = now; drawLive(); drawMini(); } else scheduleBattleLate();
+}
+let lateT = 0; function scheduleBattleLate() { clearTimeout(lateT); lateT = setTimeout(() => { liveT = 0; scheduleBattle(); }, 140); }
+/* live unit list: HP + shield bar, statuses with stacks and own turns left */
+function drawLive() {
+  const L = stage.live(); if (!L.length) { $('#liveList').innerHTML = ''; return; }
+  const nm = cur ? cur.nm : unitNames(L.map((u) => u.m));
+  $('#liveList').innerHTML = L.map((u, i) => {
+    if (u.hidden && !u.alive) return u.m.pet ? `<div class="lv pet off"><span class="nm">🐾 ${esc(nm[i])}</span><small>실체화 대기</small></div>` : '';
+    const f = Math.max(0, u.hp / u.m.hpMax), s = Math.min(1 - f, u.sh / u.m.hpMax);
+    const chips = !u.alive ? '' : u.sts.map((x) => `<i class="st ${x.k === 'shield' ? 'sh' : ST_CTRL.has(x.k) ? 'cc' : x.b ? 'bf' : 'db'}">${ST_KO[x.k] || x.k}${x.n > 1 ? ' ×' + x.n : ''}${x.left ? ` · ${x.left}턴` : ''}</i>`).join('');
+    return `<div class="lv t${u.m.team}${u.alive ? '' : ' dead'}"><span class="nm">${u.m.pet ? '🐾 ' : ''}${esc(nm[i])}</span><div class="hpb"><s style="width:${(f * 100).toFixed(1)}%"></s><u style="left:${(f * 100).toFixed(1)}%;width:${(s * 100).toFixed(1)}%"></u><em>${u.alive ? `${fmtK(u.hp)} / ${fmtK(u.m.hpMax)}${u.sh > 0 ? ' +' + fmtK(u.sh) : ''}` : '쓰러짐'}</em></div>${chips ? `<div class="sts">${chips}</div>` : ''}</div>`;
+  }).join('');
+}
+const ST_CTRL = new Set(['stun', 'freeze', 'immob', 'taunt', 'frenzy']);
+const fmtK = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'K' : fmt(n));
+/* minimap: the drawn board seen from above (our team on the left); drag a fighter inside its box to choose its starting cell */
+const MM = { x0: CELL_BOX.x[0], x1: CELL_BOX.x[1], y0: CELL_BOX.y[0][0], y1: CELL_BOX.y[1][1], c: 18 };
+let drag = null;
+function mmGeo() { const cv = $('#miniMap'), cols = MM.y1 - MM.y0 + 1, rows = MM.x1 - MM.x0 + 1; return { cv, cols, rows, c: MM.c, w: cols * MM.c, h: rows * MM.c }; }
+const toPx = (gx, gy) => [(gy - MM.y0 + 0.5) * MM.c, (gx - MM.x0 + 0.5) * MM.c];
+function drawMini() {
+  const g = mmGeo(), dpr = Math.min(2, window.devicePixelRatio || 1), cv = g.cv;
+  if (cv.width !== g.w * dpr) { cv.width = g.w * dpr; cv.height = g.h * dpr; cv.style.width = g.w + 'px'; cv.style.height = g.h + 'px'; }
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, g.w, g.h);
+  const editing = !cur;
+  for (let gy = MM.y0; gy <= MM.y1; gy++) for (let gx = MM.x0; gx <= MM.x1; gx++) {
+    const [px, py] = toPx(gx, gy), boxA = gy >= CELL_BOX.y[0][0] && gy <= CELL_BOX.y[0][1], boxB = gy >= CELL_BOX.y[1][0] && gy <= CELL_BOX.y[1][1];
+    c.fillStyle = (gx + gy) & 1 ? '#2b2925' : '#26241f'; if (editing && boxA) c.fillStyle = (gx + gy) & 1 ? '#25324a' : '#212d43'; if (editing && boxB) c.fillStyle = (gx + gy) & 1 ? '#45282a' : '#3e2426';
+    c.fillRect(px - MM.c / 2 + 0.5, py - MM.c / 2 + 0.5, MM.c - 1, MM.c - 1);
+  }
+  const L = stage.live();
+  L.forEach((u, i) => {
+    if (u.hidden || u.x == null || u.x < 0) return;
+    const [px, py] = drag && drag.i === i ? [drag.px, drag.py] : toPx(u.x, u.y), r = u.m.big ? 8 : 6.5;
+    c.globalAlpha = u.alive ? 1 : 0.35;
+    c.fillStyle = u.m.team ? '#ff6b5e' : '#5aa2ff'; c.beginPath(); c.arc(px, py, r, 0, 7); c.fill();
+    if (u.alive) { c.strokeStyle = '#fff'; c.lineWidth = 1.6; c.beginPath(); c.arc(px, py, r + 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, u.hp / u.m.hpMax)); c.stroke(); }
+    if (u.m.pet) { c.fillStyle = '#ffe9a8'; c.beginPath(); c.arc(px, py, 2.5, 0, 7); c.fill(); }
+    if (editing && fixedCellOf(u.m)) { c.strokeStyle = '#ffd24a'; c.lineWidth = 1.5; c.strokeRect(px - MM.c / 2 + 1.5, py - MM.c / 2 + 1.5, MM.c - 3, MM.c - 3); }
+    c.globalAlpha = 1;
+  });
+  $('#mmCap').textContent = editing ? '시작 위치 · 파란 칸(아군)·빨간 칸(상대) 안에서 끌어 옮기기' : '실시간 위치 · 원 둘레 = 남은 생명';
+}
+const defOf = (m) => { for (const t of state.teams) for (const d of t) if (d.uid === m.ref) return d; return null; };
+const fixedCellOf = (m) => { const d = defOf(m); return d && d.cell && (m.kind !== 'mob' || !m.nth) ? d.cell : null; };
+function mmPick(e) {
+  const g = mmGeo(), rect = g.cv.getBoundingClientRect(), px = e.clientX - rect.left, py = e.clientY - rect.top;
+  return { px, py, gy: Math.round(px / MM.c - 0.5) + MM.y0, gx: Math.round(py / MM.c - 0.5) + MM.x0 };
+}
+$('#miniMap').addEventListener('pointerdown', (e) => {
+  if (running) return;
+  const p = mmPick(e), L = stage.live();
+  let best = -1, bd = 12;
+  L.forEach((u, i) => { if (u.hidden || u.m.pet || (u.m.kind === 'mob' && u.m.nth)) return; const [x, y] = toPx(u.x, u.y), d = Math.hypot(x - p.px, y - p.py); if (d < bd) { bd = d; best = i; } });
+  if (best < 0) return;
+  if (cur) { showRoster(); } // leave the replay: edit the starting setup
+  drag = { i: best, m: L[best].m, px: p.px, py: p.py }; $('#miniMap').setPointerCapture(e.pointerId); drawMini();
+});
+$('#miniMap').addEventListener('pointermove', (e) => { if (!drag) return; const p = mmPick(e); drag.px = p.px; drag.py = p.py; drawMini(); });
+$('#miniMap').addEventListener('pointerup', (e) => {
+  if (!drag) return;
+  const p = mmPick(e), t = drag.m.team, d = defOf(drag.m); drag = null;
+  if (d && p.gx >= CELL_BOX.x[0] && p.gx <= CELL_BOX.x[1] && p.gy >= CELL_BOX.y[t][0] && p.gy <= CELL_BOX.y[t][1]) { d.cell = [p.gx, p.gy]; touch(true); showRoster(); }
+  else { toast(t ? '상대는 빨간 칸 안에만 놓을 수 있습니다' : '아군은 파란 칸 안에만 놓을 수 있습니다'); drawMini(); }
+});
+$('#mmReset').addEventListener('click', () => { for (const t of state.teams) for (const d of t) delete d.cell; touch(true); showRoster(); });
+
+/* transport */
+function syncPause() { const p = stage.isPaused(); $('#pauseBtn').textContent = p ? '▶ 재생' : '❚❚ 일시정지'; }
 $('#speedSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; stage.setSpeed(+b.dataset.speed); $$('#speedSeg button').forEach((x) => x.classList.toggle('on', x === b)); });
-let paused = false;
-$('#pauseBtn').addEventListener('click', (e) => { paused = !paused; stage.setPaused(paused); e.target.textContent = paused ? '계속' : '일시정지'; });
-$('#skipBtn').addEventListener('click', () => { stage.skip(); hud(); });
-$('#viewBtn').addEventListener('click', () => stage.resetView());
+$('#pauseBtn').addEventListener('click', () => { const p = stage.pos(); if (cur && p && p.done) { stage.seek(0); stage.setPaused(false); } else stage.setPaused(!stage.isPaused()); syncPause(); });
+$('#skipBtn').addEventListener('click', () => { stage.skip(); hud(); scheduleBattle(); });
+$('#stepBack').addEventListener('click', () => { if (cur) stage.stepAction(-1); syncPause(); });
+$('#stepFwd').addEventListener('click', () => { if (cur) stage.stepAction(1); syncPause(); });
+$('#tlRange').addEventListener('input', (e) => { if (!cur) return; const k = +e.target.value; stage.setPaused(true); stage.seek(k >= cur.acts.length ? cur.r.events.length : cur.acts[k].i); syncPause(); });
+$('#logList').addEventListener('click', (e) => { const l = e.target.closest('.lg[data-a]'); if (!l || !cur) return; stage.setPaused(true); stage.seek(+l.dataset.a); stage.stepAction(1); syncPause(); });
+$('#groundSel').innerHTML = GROUND_LIST.map(([k, ko]) => `<option value="${k}">${ko}</option>`).join('');
+$('#groundSel').value = state.ground || 'forest'; stage.setGround(state.ground || 'forest');
+$('#groundSel').addEventListener('change', (e) => { state.ground = e.target.value; stage.setGround(state.ground); touch(true); });
+$('#topBtn').addEventListener('click', () => { stage.setTopView(!stage.isTopView()); $('#topBtn').classList.toggle('on', stage.isTopView()); });
+window.addEventListener('resize', () => { drawStrip(); });
+$('#viewBtn').addEventListener('click', () => { stage.resetView(); $('#topBtn').classList.remove('on'); });
 $('#zoomIn').addEventListener('click', () => stage.zoom(0.82));
 $('#zoomOut').addEventListener('click', () => stage.zoom(1.22));
 

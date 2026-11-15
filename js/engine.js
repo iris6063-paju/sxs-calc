@@ -212,26 +212,34 @@ function compileMobPassives(u, mob, mc, est) {
   if (Object.keys(mp).length) u.mp = mp;
   u.mc = mc;
 }
-/** setup: { mode:'pve'|'pvp', teams:[[def...],[def...]], roundCap, pvpBalance, mobCoef } */
+/** where a unit may be placed before the fight (inside the drawn board): x columns, y rows per team */
+export const CELL_BOX = { x: [4, 16], y: [[3, 9], [11, 17]] };
+const okCell = (c, ti) => Array.isArray(c) && Number.isInteger(c[0]) && Number.isInteger(c[1]) && c[0] >= CELL_BOX.x[0] && c[0] <= CELL_BOX.x[1] && c[1] >= CELL_BOX.y[ti][0] && c[1] <= CELL_BOX.y[ti][1];
+/** setup: { mode:'pve'|'pvp', teams:[[def...],[def...]], roundCap, pvpBalance, mobCoef } — a def may carry cell:[x,y] */
 export function prepare(setup) {
   const opts = { mobCoef: setup.mobCoef, pvEst: setup.pvEst };
   const teams = [[], []];
   setup.teams.forEach((defs, ti) => {
     for (const d of defs) {
-      if (d.kind === 'mob') { const n = clamp(+d.count || 1, 1, 20); for (let i = 0; i < n; i++) { const u = buildMob(d.key, +d.level || 1, opts, d.sr, d.fix, d.uws); u.ref = d.uid; u.nth = i; teams[ti].push(u); } }
-      else { const h = buildHero(d, opts); teams[ti].push(h); if (d.pet && d.pet.id) { const p = buildPet(d.pet, h); if (p) { p.ref = d.uid + ':pet'; h.petU = p; } } }
+      if (d.kind === 'mob') { const n = clamp(+d.count || 1, 1, 20); for (let i = 0; i < n; i++) { const u = buildMob(d.key, +d.level || 1, opts, d.sr, d.fix, d.uws); u.ref = d.uid; u.nth = i; if (!i) u.cellReq = d.cell; teams[ti].push(u); } }
+      else { const h = buildHero(d, opts); h.cellReq = d.cell; teams[ti].push(h); if (d.pet && d.pet.id) { const p = buildPet(d.pet, h); if (p) { p.ref = d.uid + ':pet'; h.petU = p; } } }
     }
   });
   const units = [];
   teams.forEach((list, ti) => {
-    // melee units to the front row, ranged behind; rows fill centre-out
+    // chosen starting cells first (inside the team's box), then melee units to the front row, ranged behind; rows fill centre-out
+    const taken = new Set();
+    for (const u of list) if (okCell(u.cellReq, ti) && !taken.has(u.cellReq[1] * W + u.cellReq[0])) { u.fixedCell = 1; taken.add(u.cellReq[1] * W + u.cellReq[0]); }
     const withReach = list.map((u) => ({ u, reach: Math.max(0, ...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => skillReach(k.s))) || 1 }));
     withReach.sort((a, b) => a.reach - b.reach);
     const cols = [10, 9, 11, 8, 12, 7, 13, 6, 14];
     const perRow = list.length > 20 ? 9 : list.length > 15 ? 7 : 5;
-    withReach.forEach(({ u, reach }, i) => {
-      const row = Math.floor(i / perRow), col = cols[i % perRow];
-      u.team = ti; u.x = col; u.y = ti === 0 ? 9 - row : 11 + row; u.reach = reach;
+    let slot = 0;
+    withReach.forEach(({ u, reach }) => {
+      u.team = ti; u.reach = reach;
+      if (u.fixedCell) { u.x = u.cellReq[0]; u.y = u.cellReq[1]; }
+      else { let x, y; do { const row = Math.floor(slot / perRow); x = cols[slot % perRow]; y = ti === 0 ? 9 - row : 11 + row; slot++; } while (taken.has(y * W + x) && slot < 400); taken.add(y * W + x); u.x = x; u.y = y; }
+      delete u.cellReq; delete u.fixedCell;
       units.push(u);
     });
   });
@@ -311,10 +319,13 @@ export function simulate(P, seed, log) {
     Object.assign(u, { mAtk, mDef, mSpd, aAtk, aSpd, bBlock, bCrit, bDmg, red, vuln, cold, riven, sigil, wet, blind, shield: sh, moveAdd: mv, aDef, dodgeB, bAcc });
   }
   const has = (u, k) => { for (const s of u.st) if (s.k === k) return s; return null; };
+  /** replay log: status gained/refreshed (d = own turns left, n = stacks, b = buff, u = update of an existing one) */
+  const stEv = (t, s, upd) => { if (ev) ev.push({ e: 'st', t: t.id, k: s.k, on: 1, b: s.buff ? 1 : 0, d: s.exp < 1e8 ? s.exp - t.turnNo : 0, n: s.n || 0, u: upd ? 1 : 0 }); };
   function addStatus(t, s) {
-    if (s.uniq) { const i = t.st.findIndex((x) => x.k === s.k && x.uniq); if (i >= 0) { if (s.k === 'hpUp') dropHpUp(t, t.st[i]); t.st.splice(i, 1); } }
+    let rep = false;
+    if (s.uniq) { const i = t.st.findIndex((x) => x.k === s.k && x.uniq); if (i >= 0) { if (s.k === 'hpUp') dropHpUp(t, t.st[i]); t.st.splice(i, 1); rep = true; } }
     t.st.push(s); recalc(t);
-    if (ev) ev.push({ e: 'st', t: t.id, k: s.k, on: 1 });
+    stEv(t, s, rep);
   }
   function dropHpUp(u, s) { const pct = u.hp / u.hpMax; u.hpMax = Math.max(1, u.hpMax - s.v); u.hp = Math.max(1, Math.round(u.hpMax * pct)); }
   function removeStatus(u, i) {
@@ -331,7 +342,7 @@ export function simulate(P, seed, log) {
     if (aliveCount[t.team] <= 0) { B.over = true; B.winner = 1 - t.team; return; }
     if (by && by.alive && by.ch) {
       const c = by.ch;
-      if (c.spdKill) { const s = has(by, 'spdStk'); if (s) { s.n = Math.min(4, s.n + 1); recalc(by); } else addStatus(by, { k: 'spdStk', v: by.spd * c.spdKill, n: 1, exp: 1e9, buff: true }); }
+      if (c.spdKill) { const s = has(by, 'spdStk'); if (s) { s.n = Math.min(4, s.n + 1); recalc(by); stEv(by, s, true); } else addStatus(by, { k: 'spdStk', v: by.spd * c.spdKill, n: 1, exp: 1e9, buff: true }); }
       if (c.killSplash) { const k = c.killSplash, cx = t.x, cy = t.y; for (const f of U) if (f.alive && f.team !== by.team && dist(f.x, f.y, cx, cy) <= k.ar) hit(by, f, k.coef, k.flat, k.el, { noProc: 1, noReact: 1 }); }
     }
   }
@@ -449,7 +460,7 @@ export function simulate(P, seed, log) {
     const mp = a.mp;
     if (mp.wither && t.alive) for (const w of mp.wither) if (rnd() < w.p) {
       const s = has(t, 'wither');
-      if (s) { s.n = Math.min(w.max, s.n + 1); s.exp = t.turnNo + w.t; recalc(t); } else addStatus(t, { k: 'wither', v: w.v, n: 1, exp: t.turnNo + w.t });
+      if (s) { s.n = Math.min(w.max, s.n + 1); s.exp = t.turnNo + w.t; recalc(t); stEv(t, s, true); } else addStatus(t, { k: 'wither', v: w.v, n: 1, exp: t.turnNo + w.t });
     }
     if (mp.mark && t.alive) for (const m of mp.mark) if (rnd() < m.p) {
       t.pvMk = t.pvMk || {}; t.pvMk[m.name] = (t.pvMk[m.name] || 0) + 1;
@@ -576,17 +587,17 @@ export function simulate(P, seed, log) {
     if (CONTROL[k]) { t.ailStreak = t.turnNo - t.lastAil <= 1 ? t.ailStreak + 1 : 1; t.lastAil = t.turnNo; }
     if (k === 'cold' || k === 'riven') {
       const ex = has(t, k), max = k === 'cold' ? 10 : 3;
-      if (ex) { ex.n = Math.min(max, ex.n + 1); ex.exp = t.turnNo + turns; recalc(t); return; }
+      if (ex) { ex.n = Math.min(max, ex.n + 1); ex.exp = t.turnNo + turns; recalc(t); stEv(t, ex, true); return; }
       addStatus(t, { k, n: 1, exp: t.turnNo + turns }); return;
     }
     if (k === 'abreak' || k === 'weak' || k === 'slow') {
       if (e.max > 1) { // stacking variant: +1 stack per application, duration refreshed
         const sx = t.st.find((x) => x.k === k && x.max);
-        if (sx) { sx.n = Math.min(sx.max, sx.n + 1); sx.exp = t.turnNo + turns; recalc(t); return; }
+        if (sx) { sx.n = Math.min(sx.max, sx.n + 1); sx.exp = t.turnNo + turns; recalc(t); stEv(t, sx, true); return; }
         addStatus(t, { k, v, n: 1, max: e.max, exp: t.turnNo + turns }); return;
       }
       const ex = t.st.find((x) => x.k === k && !x.max);
-      if (ex) { ex.v = Math.max(ex.v, v); ex.exp = Math.max(ex.exp, t.turnNo + turns); recalc(t); return; }
+      if (ex) { ex.v = Math.max(ex.v, v); ex.exp = Math.max(ex.exp, t.turnNo + turns); recalc(t); stEv(t, ex, true); return; }
       addStatus(t, { k, v, exp: t.turnNo + turns }); return;
     }
     if (k === 'dot') { addStatus(t, { k, el: e.el || 'dark', src: a.id, exp: t.turnNo + (e.t || 3) }); return; }
@@ -771,7 +782,7 @@ export function simulate(P, seed, log) {
     for (const t of targets) { const i = t.st.findIndex((x) => x.k === 'sigil' && x.cast !== B.castId); if (i >= 0 && t.alive) { removeStatus(t, i); recalc(t); } }
     recalc(u);
     u.eye = 0;
-    if (u.ch && u.ch.critStack && s.el === u.ch.critStack.el) { const st = has(u, 'critStk'); if (st) { st.n = Math.min(8, st.n + 1); st.exp = u.turnNo + 2; recalc(u); } else addStatus(u, { k: 'critStk', v: u.ch.critStack.v, n: 1, exp: u.turnNo + 2, buff: true }); }
+    if (u.ch && u.ch.critStack && s.el === u.ch.critStack.el) { const st = has(u, 'critStk'); if (st) { st.n = Math.min(8, st.n + 1); st.exp = u.turnNo + 2; recalc(u); stEv(u, st, true); } else addStatus(u, { k: 'critStk', v: u.ch.critStack.v, n: 1, exp: u.turnNo + 2, buff: true }); }
     // enemy Thunder Judgment reacts to this cast
     for (const f of U) if (f.alive && u.alive && !B.over && f.team !== u.team && f.ch && f.ch.thunder && dist(f.x, f.y, u.x, u.y) <= 5 && rnd() < f.ch.thunder.p) hit(f, u, f.ch.thunder.coef, f.ch.thunder.flat, 'light', { noProc: 1, noReact: 1 });
     petProc(u, targets);
