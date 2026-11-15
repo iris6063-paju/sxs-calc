@@ -1,0 +1,7 @@
+# Render Blueprint — free static site. Render runs the build command and serves ./public from its CDN.
+services:
+  - type: web
+    name: sxs-calc
+    runtime: static
+    buildCommand: node tools/build_site.mjs
+    staticPublishPath: ./public

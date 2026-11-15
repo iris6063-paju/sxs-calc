@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240">
+<g id="back" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#1f4f93" d="M76 120 Q50 137 38 194 L28 211 Q54 221 78 208 L110 185 119 134Z"/>
+<path fill="#12305c" d="M75 142 Q60 174 48 207 L78 199 103 174 101 140Z"/>
+<path fill="#d6ecff" d="M65 76 Q42 88 48 125 L41 159 57 153 55 176 Q76 164 83 139 L107 102Z"/>
+<path fill="#a4c9ec" d="M59 106 Q52 133 55 148 L61 142 62 160 Q75 145 76 122Z"/>
+</g>
+<g id="body" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#12305c" d="M73 195 L72 212 Q61 211 59 220 Q75 224 90 220 L94 197Z"/>
+<path fill="#12305c" d="M105 195 L108 219 Q124 224 139 219 Q137 211 124 210 L123 194Z"/>
+<path fill="#2f6fc4" d="M75 122 Q96 117 116 129 L125 166 141 204 Q103 219 58 204 L69 166Z"/>
+<path fill="#12305c" d="M100 137 L110 174 125 208 141 204 125 166 116 129Z"/>
+<path fill="#1f4f93" d="M81 135 L74 167 65 190 Q94 201 128 189 L119 160 110 133Z"/>
+<path fill="#63e0ff" d="M71 187 Q99 198 129 186 L132 194 Q98 207 66 195Z"/>
+<path fill="#d6ecff" d="M92 132 L102 137 105 191 91 206 84 195Z"/>
+<path fill="#63e0ff" d="M93 150 L99 157 95 169 89 161Z"/>
+<path fill="#2f6fc4" d="M76 131 Q62 130 58 145 L52 163 70 173 83 151Z"/>
+<path fill="#63e0ff" d="M53 157 L73 165 69 174 49 166Z"/>
+<path fill="#ffd9b8" d="M53 168 Q48 175 55 181 Q63 185 67 173Z"/>
+<path fill="#2f6fc4" d="M111 131 Q121 128 128 139 L136 149 126 165 Q108 159 103 147Z"/>
+<path fill="#12305c" d="M113 149 L127 161 134 151 125 146Z"/>
+<path fill="#63e0ff" d="M127 142 L138 149 130 164 119 157Z"/>
+<path fill="#d6ecff" d="M76 120 L95 130 112 120 118 132 100 145 72 132Z"/>
+<path fill="#63e0ff" d="M96 130 L103 135 98 143 91 136Z"/>
+</g>
+<g id="head" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#d6ecff" d="M63 69 Q84 52 113 63 Q139 73 135 105 L126 130 111 139 111 117 68 123 54 104Z"/>
+<path fill="#ffd9b8" d="M76 77 Q98 67 120 80 L134 99 143 106 Q144 112 135 113 Q131 132 108 135 Q83 136 72 117 L66 98Z"/>
+<path fill="#eeb48e" d="M74 103 Q78 124 97 128 Q115 135 130 122 Q121 138 102 135 Q80 134 72 116Z"/>
+<path fill="#d6ecff" d="M61 77 Q88 59 119 77 L130 91 Q113 88 103 77 Q103 93 83 105 L84 91 Q79 111 65 121 L66 145 54 132 54 104Z"/>
+<path fill="#a4c9ec" d="M65 90 Q67 111 58 126 L65 135 65 121 Q79 110 84 91 L83 105 Q92 99 97 91Z"/>
+<ellipse fill="#2a1b14" cx="105" cy="106" rx="5" ry="10"/>
+<ellipse fill="#2a1b14" cx="129" cy="103" rx="4" ry="9"/>
+<ellipse fill="#ffffff" cx="106" cy="102" rx="1.7" ry="3"/>
+<ellipse fill="#ffffff" cx="130" cy="99" rx="1.4" ry="2.5"/>
+<ellipse fill="#f4ae9e" cx="94" cy="118" rx="6" ry="3"/>
+<ellipse fill="#f4ae9e" cx="133" cy="116" rx="4" ry="2.5"/>
+<path fill="none" d="M114 119 Q119 124 124 118"/>
+<path fill="#2f6fc4" d="M49 78 Q64 56 80 22 L94 10 Q99 37 117 58 L137 76Z"/>
+<path fill="#12305c" d="M94 10 Q94 37 106 58 L122 73 137 76 117 58 Q99 37 94 10Z"/>
+<path fill="#63e0ff" d="M61 58 Q91 67 119 58 L128 70 Q92 83 54 70Z"/>
+<path fill="#1f4f93" d="M37 77 Q58 65 89 72 Q121 77 141 69 Q151 70 148 79 Q131 94 94 89 Q62 86 40 88 Q30 85 37 77Z"/>
+<path fill="#2f6fc4" d="M39 77 Q64 73 92 80 Q120 85 146 74 Q139 89 105 88 Q73 83 40 88 Q31 85 39 77Z"/>
+<path fill="#63e0ff" d="M96 49 L107 60 100 76 88 64Z"/>
+<path fill="#d6ecff" d="M96 49 L98 61 88 64Z"/>
+</g>
+<g id="weapon" data-pivot="134,153" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#1f4f93" d="M126 210 L149 104 157 106 134 212 Q129 217 126 210Z"/>
+<path fill="#63e0ff" d="M128 201 L136 203 134 212 Q129 217 126 210Z"/>
+<path fill="#2f6fc4" d="M149 114 L139 98 143 80 150 77 148 96 154 102 163 98 171 82 177 87 169 106 157 116Z"/>
+<path fill="#63e0ff" d="M148 109 L160 112 158 121 146 118Z"/>
+<path fill="#63e0ff" d="M161 48 L173 66 160 91 151 70Z"/>
+<path fill="#d6ecff" d="M161 48 L160 70 151 70Z"/>
+<path fill="#2f6fc4" d="M160 70 L173 66 160 91Z"/>
+<path fill="none" d="M151 44 L147 39 M177 56 L182 53 M170 40 L172 34"/>
+<path fill="#ffd9b8" d="M128 146 Q133 141 139 146 L143 151 Q146 156 140 161 L132 163 Q125 161 126 155 L130 153 Q125 151 128 146Z"/>
+<path fill="none" d="M133 151 L140 153"/>
+</g>
+</svg>

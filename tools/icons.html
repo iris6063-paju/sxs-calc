@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>icon sheet (dev)</title>
+<style>body{background:#223;color:#eee;font:11px monospace;margin:8px}.g{display:grid;grid-template-columns:repeat(12,1fr);gap:4px}.c{background:#334;text-align:center;padding:2px}svg{width:72px;height:72px;display:block;margin:auto}</style>
+<div class="g" id="g"></div>
+<script type="module">
+import { ICONS } from '../js/icons.js';
+const g = document.getElementById('g');
+for (const [n, d] of Object.entries(ICONS)) {
+  const c = document.createElement('div'); c.className = 'c';
+  c.innerHTML = `<svg viewBox="0 0 512 512"><path fill="#fff" d="${d}"/></svg>${n}`;
+  g.appendChild(c);
+}
+</script>

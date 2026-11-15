@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240">
+<g id="back" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#2c8f8a" d="M65 104 Q94 94 120 110 L143 204 Q117 219 94 207 Q68 220 39 207 L53 148Z"/>
+<path fill="#1f4d55" d="M81 117 L70 201 L94 207 Q117 219 143 204 L120 110 108 121 108 195 94 185Z"/>
+</g>
+<g id="body" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#1f4d55" d="M70 171 L97 173 95 207 68 208Z"/>
+<path fill="#1f4d55" d="M103 174 L127 171 132 206 105 209Z"/>
+<path fill="#59b8b0" d="M65 196 Q79 190 96 197 L96 222 57 222 Q54 209 65 196Z"/>
+<path fill="#59b8b0" d="M105 198 Q120 191 133 199 L145 211 145 222 104 222Z"/>
+<path fill="#f0c04a" d="M58 213 L96 213 96 222 57 222Z"/>
+<path fill="#f0c04a" d="M104 213 L145 213 145 222 104 222Z"/>
+<path fill="#59b8b0" d="M61 117 Q89 105 119 117 L129 161 119 184 72 184 57 160Z"/>
+<path fill="#1f4d55" d="M109 119 L119 125 129 161 119 184 98 184 104 159Z"/>
+<path fill="#f0c04a" d="M68 121 L94 132 119 120 115 140 95 150 73 139Z"/>
+<path fill="#d9f5f0" d="M83 148 L96 154 108 148 105 165 95 172 85 165Z"/>
+<path fill="#f0c04a" d="M68 174 L122 174 120 186 72 186Z"/>
+<rect x="88" y="173" width="17" height="15" rx="4" fill="#f0c04a"/>
+<path fill="#59b8b0" d="M48 125 Q41 137 47 156 L64 167 76 150 69 128Z"/>
+<path fill="#59b8b0" d="M117 123 Q133 122 138 135 L140 149 128 158 115 144Z"/>
+<path fill="#1f4d55" d="M124 138 L138 135 140 149 128 158 120 149Z"/>
+<path fill="#59b8b0" d="M43 127 Q40 106 60 102 Q79 103 83 123 L74 138 48 136Z"/>
+<path fill="#f0c04a" d="M43 126 L78 124 74 138 48 136Z"/>
+<path fill="#59b8b0" d="M109 120 Q112 101 129 105 Q147 109 146 128 L135 138 115 134Z"/>
+<path fill="#f0c04a" d="M111 124 L145 124 135 138 115 134Z"/>
+<path fill="#f0c04a" d="M16 157 Q16 129 44 127 Q72 129 74 157 L72 187 Q63 207 44 217 Q24 207 17 187Z"/>
+<path fill="#59b8b0" d="M25 157 Q25 137 44 136 Q64 138 65 157 L63 184 Q58 198 44 207 Q30 198 26 184Z"/>
+<path fill="#1f4d55" d="M44 136 Q64 138 65 157 L63 184 Q58 198 44 207 L44 188 54 178 54 154Z"/>
+<path fill="#f0c04a" d="M38 149 L50 149 50 164 59 164 59 176 50 176 50 190 38 190 38 176 30 176 30 164 38 164Z"/>
+</g>
+<g id="head" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#1f4d55" d="M61 62 Q59 27 96 24 Q133 23 144 53 L142 91 127 109 75 104 59 85Z"/>
+<path fill="#ffd9b8" d="M79 49 Q101 34 126 47 Q142 55 144 74 L149 81 143 87 Q143 104 125 112 Q105 120 85 106 L72 83Z"/>
+<ellipse cx="77" cy="82" rx="10" ry="13" fill="#ffd9b8"/>
+<path fill="#59b8b0" d="M56 65 Q54 28 88 22 Q121 16 141 45 L143 62 127 58 117 44 98 56 78 59 77 96 62 91Z"/>
+<path fill="#1f4d55" d="M62 60 L78 57 77 96 63 90Z"/>
+<path fill="#f0c04a" d="M64 27 L61 12 78 23 94 9 108 23 125 13 126 34 Q96 24 67 40Z"/>
+<path fill="#f0c04a" d="M62 48 Q94 31 126 40 L135 54 Q105 44 78 63 L59 65Z"/>
+<path fill="#d9f5f0" d="M96 27 L103 34 97 42 90 35Z"/>
+<ellipse cx="108" cy="79" rx="6" ry="11" fill="#2a1b14"/>
+<ellipse cx="132" cy="76" rx="5" ry="10" fill="#2a1b14"/>
+<ellipse cx="109" cy="75" rx="2" ry="3" fill="#ffffff"/>
+<ellipse cx="133" cy="72" rx="1.5" ry="2.5" fill="#ffffff"/>
+<ellipse cx="96" cy="94" rx="7" ry="3" fill="#efa58f"/>
+<ellipse cx="138" cy="91" rx="5" ry="3" fill="#efa58f"/>
+<path fill="none" d="M117 96 Q122 101 127 95"/>
+<path fill="#f0c04a" d="M66 77 L76 77 75 93 68 97 63 90Z"/>
+</g>
+<g id="weapon" data-pivot="137,151" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#d9f5f0" d="M142 136 L145 102 174 70 178 111 157 143Z"/>
+<path fill="#59b8b0" d="M174 70 L178 111 157 143 151 138 165 108Z"/>
+<path fill="#f0c04a" d="M131 132 L143 134 157 140 167 138 168 148 155 153 136 143 128 142Z"/>
+<path fill="#1f4d55" d="M141 143 L151 148 140 169 130 164Z"/>
+<path fill="#f0c04a" d="M131 161 L142 167 139 175 127 170Z"/>
+<path fill="#ffd9b8" d="M128 143 Q131 139 136 142 L145 147 Q150 150 146 155 L140 162 Q136 166 131 162 L125 157 Q121 153 125 149Z"/>
+<path fill="none" d="M132 149 L140 153"/>
+</g>
+</svg>

@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GPT sprite sheet (dev)</title>
+<style>body{background:#3c5a46;color:#fff;font:11px monospace;margin:6px}.g{display:flex;flex-wrap:wrap;gap:6px}.c{text-align:center;width:118px;background:rgba(0,0,0,.15);border-radius:8px}img{width:118px;display:block}</style>
+<div class="g" id="g"></div>
+<script type="module">
+const ids = await fetch('../assets/gpt/index.json?' + Date.now()).then((r) => r.json());
+const g = document.getElementById('g');
+const q = new URLSearchParams(location.search), f = q.get('f') || '';
+for (const id of ids.filter((x) => x.includes(f))) { const d = document.createElement('div'); d.className = 'c'; d.innerHTML = `<img src="../assets/gpt/${id}.svg?${Date.now()}">${id}`; g.append(d); }
+</script>

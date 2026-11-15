@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240">
+<g id="back" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M83 105C62 112 52 139 39 160L18 184L42 179L45 195C67 176 78 151 95 129Z" fill="#35204f"/>
+<path d="M72 121C57 147 47 168 32 179L42 179L45 195C67 176 78 151 95 129Z" fill="#1c1230"/>
+<path d="M70 59C55 81 58 104 50 115L70 110L74 121L91 102L112 109L128 88L118 56Z" fill="#e7d6f2"/>
+<path d="M61 96L70 110L74 121L91 102L112 109L120 94L91 85Z" fill="#b6a0c8"/>
+</g>
+<g id="body" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M75 169L94 172L92 201L74 204L68 191Z" fill="#1c1230"/>
+<path d="M101 173L121 170L126 199L107 205L100 190Z" fill="#1c1230"/>
+<path d="M74 191L92 194L91 211L94 222H63C60 213 66 206 71 204Z" fill="#5a3a86"/>
+<path d="M107 194L124 191L128 207C139 207 144 213 143 222H108L104 211Z" fill="#5a3a86"/>
+<path d="M65 215H92L94 222H63Z" fill="#35204f"/>
+<path d="M107 214H140L143 222H108Z" fill="#35204f"/>
+<path d="M78 198L85 200L83 210" fill="none" stroke="#e0453a"/>
+<path d="M114 199L120 201L120 210" fill="none" stroke="#e0453a"/>
+<path d="M68 120C55 126 53 141 56 154L65 164L78 155L81 132Z" fill="#5a3a86"/>
+<path d="M57 147L70 145L77 155L68 168L58 163Z" fill="#35204f"/>
+<path d="M62 163C57 169 60 179 67 179C75 179 79 172 75 166L71 162Z" fill="#ffd9b8"/>
+<path d="M77 111L108 109L123 125L119 153L126 178L104 185L95 177L74 181L69 158L70 130Z" fill="#5a3a86"/>
+<path d="M105 115L119 125L115 151L126 178L104 185L95 177L103 152Z" fill="#35204f"/>
+<path d="M73 133L92 143L115 128L109 153L93 163L72 152Z" fill="#1c1230"/>
+<path d="M78 137L92 146L108 137" fill="none" stroke="#e0453a"/>
+<path d="M73 160L94 166L118 157L120 166L95 174L72 168Z" fill="#1c1230"/>
+<polygon points="88,164 98,164 101,172 94,178 86,172" fill="#e0453a"/>
+<path d="M110 120C124 117 133 128 133 141L127 152L114 148L108 134Z" fill="#5a3a86"/>
+<path d="M113 122L126 125L132 136L119 140L108 133Z" fill="#1c1230"/>
+<path d="M121 128L127 132" fill="none" stroke="#e0453a"/>
+<path d="M117 143L129 139L140 148L134 161L120 159L114 151Z" fill="#35204f"/>
+<path d="M122 149L130 147L135 152" fill="none" stroke="#e0453a"/>
+<path d="M69 109L83 102L115 106L121 117L109 128L85 126L67 119Z" fill="#35204f"/>
+<path d="M74 114L89 120L112 117" fill="none" stroke="#1c1230"/>
+</g>
+<g id="head" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M67 53C69 31 101 25 122 41C137 52 139 70 135 83L141 89L132 95C128 109 116 115 101 113C83 112 71 103 68 89C56 92 52 77 60 72L68 74Z" fill="#ffd9b8"/>
+<path d="M68 82C70 99 83 109 101 111L110 112C89 117 73 106 68 93C57 92 54 82 59 76L64 77Z" fill="#eab18d"/>
+<ellipse cx="96" cy="78" rx="6" ry="11" fill="#1c1230"/>
+<ellipse cx="123" cy="76" rx="5" ry="10" fill="#1c1230"/>
+<ellipse cx="97" cy="74" rx="2" ry="3" fill="#ffffff" stroke-width="1"/>
+<ellipse cx="124" cy="72" rx="1.8" ry="2.8" fill="#ffffff" stroke-width="1"/>
+<ellipse cx="84" cy="93" rx="7" ry="3" fill="#ef9b96" stroke-width="1"/>
+<ellipse cx="129" cy="90" rx="5" ry="2.5" fill="#ef9b96" stroke-width="1"/>
+<path d="M108 96Q113 101 118 95" fill="none"/>
+<path d="M61 76L51 65L58 57L54 44L67 40L69 26L85 29L95 18L105 27L121 25L126 36C138 42 144 53 141 66L129 58L121 47L113 65L106 55L94 70L91 54L77 77L75 61L68 83Z" fill="#e7d6f2"/>
+<path d="M58 57L62 46L72 44L76 34M83 51L96 33M107 45L118 35" fill="none" stroke="#b6a0c8"/>
+<path d="M58 57L61 76L68 83L75 61L69 65L66 54Z" fill="#b6a0c8"/>
+<path d="M119 47L129 58L141 66L140 55L128 42Z" fill="#b6a0c8"/>
+<path d="M65 47L70 35L79 38L82 49L73 54Z" fill="#35204f"/>
+<polygon points="71,39 76,42 75,48 70,46" fill="#e0453a"/>
+</g>
+<g id="weapon" data-pivot="136,151" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M140 137L148 111C158 85 174 61 178 29C188 50 187 76 180 96C173 116 160 131 146 140Z" fill="#e7d6f2"/>
+<path d="M178 29C188 50 187 76 180 96C173 116 160 131 146 140L148 128C165 111 177 90 179 67C181 52 179 41 178 29Z" fill="#e0453a"/>
+<path d="M146 128C153 109 165 86 171 68" fill="none" stroke="#b6a0c8"/>
+<path d="M131 137L142 142L133 174L124 171Z" fill="#35204f"/>
+<path d="M129 151L137 154M127 160L134 163" fill="none" stroke="#e0453a"/>
+<path d="M122 172L133 174L134 181L126 186L119 180Z" fill="#5a3a86"/>
+<path d="M124 130L137 134L149 133L157 124L158 139L146 147L133 143L122 143L117 135Z" fill="#5a3a86"/>
+<polygon points="138,134 146,137 143,144 136,141" fill="#e0453a"/>
+<path d="M128 147C130 142 135 142 139 145L143 148C148 147 151 152 148 156L144 162C141 166 135 166 131 162L127 158C124 155 125 150 128 147Z" fill="#ffd9b8"/>
+<path d="M138 150L143 153L140 157" fill="none"/>
+</g>
+</svg>

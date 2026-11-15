@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>sprite sheet (dev)</title>
+<style>body{background:#3c5a46;color:#fff;font:11px monospace;margin:6px}.g{display:flex;flex-wrap:wrap;gap:4px}.c{text-align:center;width:84px}canvas{width:84px;display:block}</style>
+<div class="g" id="g"></div>
+<script type="module">
+import { CLASSES, MOBS } from '../js/gamedata.js';
+import { HeroSprite, drawMob } from '../js/sprites.js';
+const g = document.getElementById('g');
+const heroes = CLASSES.map((c, i) => { const s = new HeroSprite(c.key, 'n' + i, 200); const d = document.createElement('div'); d.className = 'c'; d.append(s.canvas, c.ko); g.append(d); return s; });
+const q = new URLSearchParams(location.search);
+const from = +(q.get('from') || 0);
+for (const m of MOBS.slice(from, from + 30)) { const cv = document.createElement('canvas'); cv.width = cv.height = 168; drawMob(cv.getContext('2d'), 168, 168, m); const d = document.createElement('div'); d.className = 'c'; d.append(cv, m.ko); g.append(d); }
+const t0 = performance.now();
+const fixed = q.get('t');
+function loop() { const t = fixed != null ? +fixed : (performance.now() - t0) / 1000; heroes.forEach((s, i) => s.draw(t, { atk: i % 3 === 0 ? (t * 0.8 + i * 0.1) % 1 : -1, flip: i % 2 === 1 })); if (fixed == null) requestAnimationFrame(loop); }
+loop();
+</script>

@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240">
+<g id="back" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#55297a" d="M68 99 Q45 119 37 158 L25 203 Q49 197 62 211 L87 199 L112 213 L130 194 Q117 151 122 111Z"/>
+<path fill="#ff6ad5" d="M66 117 Q52 155 43 190 L62 184 L78 196 L90 173 L107 193 Q98 147 108 113Z"/>
+<path fill="#2a1340" d="M57 82 Q48 108 60 131 L78 119 L94 127 L118 102 L114 78Z"/>
+</g>
+<g id="body" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#2a1340" d="M71 184 L69 213 L88 216 L94 185Z"/>
+<path fill="#2a1340" d="M102 184 L106 215 L125 215 L123 181Z"/>
+<path fill="#55297a" d="M69 207 Q78 204 88 211 L94 216 L94 222 L61 222 Q58 213 69 207Z"/>
+<path fill="#55297a" d="M108 208 Q118 205 128 211 L138 217 L138 222 L104 222 L102 215Z"/>
+<path fill="#7a3fa8" d="M72 106 Q58 109 54 126 L48 150 Q52 160 67 158 L79 137Z"/>
+<path fill="#55297a" d="M54 136 L49 150 Q54 158 66 156 L71 141Z"/>
+<path fill="#ffd9b8" d="M52 153 Q47 161 53 168 Q60 173 67 166 L69 156Z"/>
+<path fill="#7a3fa8" d="M76 105 L112 105 Q123 122 120 145 L136 196 Q107 209 64 196 L75 151 Q67 124 76 105Z"/>
+<path fill="#55297a" d="M80 138 Q80 164 69 193 Q84 198 95 198 L102 151Z"/>
+<path fill="#ff6ad5" d="M98 113 L109 112 L105 153 L119 200 L106 201 L95 154Z"/>
+<path fill="#2a1340" d="M73 145 Q96 151 121 143 L123 155 Q95 163 71 156Z"/>
+<polygon fill="#f0dcff" points="99,147 107,153 100,162 93,154"/>
+<path fill="#7a3fa8" d="M112 111 Q125 113 129 125 L140 142 Q139 154 126 157 L112 140 Q105 126 112 111Z"/>
+<path fill="#55297a" d="M118 136 L129 130 L140 142 L132 155 L124 153Z"/>
+<path fill="#f0dcff" d="M130 137 L140 142 L138 154 L126 154Z"/>
+</g>
+<g id="head" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#7a3fa8" d="M49 69 Q45 37 68 24 Q96 9 124 29 Q148 43 149 75 L142 105 L122 120 L74 116 L51 98Z"/>
+<path fill="#55297a" d="M65 30 Q45 64 61 96 L79 112 L68 115 L50 98 Q39 61 56 39Z"/>
+<path fill="#f0dcff" d="M60 37 Q42 38 39 23 Q36 16 40 10 Q43 25 62 23 L72 28Z"/>
+<path fill="#7a3fa8" d="M123 29 Q141 32 146 15 Q153 24 146 35 Q140 44 130 42Z"/>
+<path fill="#2a1340" d="M70 45 Q99 27 126 46 Q141 61 140 83 Q141 107 119 117 L81 112 Q59 100 59 77 Q59 57 70 45Z"/>
+<path fill="#ffd9b8" d="M82 48 Q105 37 125 55 Q134 65 134 76 L145 85 Q147 91 137 94 Q133 112 113 116 Q88 119 75 102 Q64 90 68 72 Q71 56 82 48Z"/>
+<path fill="#7a3fa8" d="M68 73 Q66 48 91 41 Q110 36 126 51 L131 66 Q107 64 96 53 Q89 72 68 80Z"/>
+<path fill="#55297a" d="M69 71 Q81 63 85 51 L96 53 Q87 73 69 80Z"/>
+<ellipse fill="#2a1340" cx="101" cy="82" rx="5" ry="11"/>
+<ellipse fill="#2a1340" cx="126" cy="80" rx="4" ry="10"/>
+<ellipse fill="#ffffff" cx="102" cy="77" rx="2.5" ry="3.5"/>
+<ellipse fill="#ffffff" cx="127" cy="75" rx="2" ry="3"/>
+<ellipse fill="#ff6ad5" cx="88" cy="97" rx="7" ry="3"/>
+<ellipse fill="#ff6ad5" cx="134" cy="96" rx="5" ry="3"/>
+<path fill="none" d="M112 100 Q119 105 124 98"/>
+<path fill="#7a3fa8" d="M55 89 Q62 108 82 112 L100 122 L79 127 L58 113Z"/>
+<path fill="#f0dcff" d="M100 122 L111 116 L119 123 L109 133Z"/>
+</g>
+<g id="weapon" data-pivot="136,150" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path fill="#55297a" d="M127 193 L151 84 L158 86 L135 195 Q130 200 127 193Z"/>
+<path fill="#ff6ad5" d="M145 109 L151 83 L158 85 L152 111Z"/>
+<path fill="#f0dcff" d="M145 89 L162 93 L165 83 L148 79Z"/>
+<path fill="#7a3fa8" d="M149 83 Q132 72 139 55 L146 62 Q142 72 152 76 L165 78 Q175 74 174 62 L181 58 Q187 82 165 88Z"/>
+<circle fill="#85204f" cx="159" cy="57" r="19"/>
+<path fill="#55297a" d="M143 65 Q156 75 171 62 Q170 77 157 76 Q148 76 143 65Z"/>
+<ellipse fill="#ff6ad5" cx="153" cy="50" rx="5" ry="6"/>
+<path fill="#f0dcff" d="M156 35 L163 25 L168 37 L162 42Z"/>
+<path fill="#ffd9b8" d="M130 141 Q135 137 140 142 L144 145 Q148 148 145 152 L141 158 Q136 162 130 157 L126 153 Q123 148 127 144Z"/>
+<path fill="none" d="M136 145 L142 148"/>
+</g>
+</svg>

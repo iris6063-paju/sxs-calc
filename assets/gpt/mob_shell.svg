@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+<g id="body" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M139 157 Q159 158 164 176 L173 180 Q177 188 168 188 H145 Q136 185 137 177Z" fill="#b5694a"/>
+<path d="M81 158 Q92 163 87 176 L92 181 Q94 188 85 188 H61 Q53 185 58 179 L65 166Z" fill="#e0a27f"/>
+<path d="M62 98 Q49 80 52 62 Q51 53 59 52 Q68 52 67 62 L70 91Z" fill="#b5694a"/>
+<path d="M37 110 Q24 91 27 78 Q25 68 34 67 Q43 67 42 77 L48 101Z" fill="#e0a27f"/>
+<path d="M107 94 Q83 86 63 98 Q51 105 35 111 Q17 116 16 135 Q15 151 34 156 Q48 159 58 171 Q69 183 94 179 L128 173 Q147 155 133 127Z" fill="#b5694a"/>
+<path d="M18 137 Q29 149 48 145 Q60 144 69 156 Q80 168 104 163 L125 157 L128 173 Q100 184 79 179 Q65 179 56 168 Q48 158 34 156 Q17 152 18 137Z" fill="#7a3f28"/>
+<path d="M24 139 Q43 143 56 134 Q66 127 74 135 Q83 143 77 154 Q71 165 57 156 Q49 150 36 152 Q25 151 24 139Z" fill="#e0a27f"/>
+<path d="M80 146 Q62 125 66 96 Q69 64 92 40 Q113 19 144 25 Q176 31 184 66 Q192 101 177 132 Q162 162 133 170 Q104 176 80 146Z" fill="#b5694a"/>
+<path d="M156 31 Q185 48 186 79 Q192 116 170 145 Q150 173 122 171 Q99 167 88 154 Q123 164 150 140 Q178 111 176 81 Q174 52 156 31Z" fill="#7a3f28"/>
+<path d="M83 115 Q73 91 87 65 Q103 35 132 37 Q158 38 168 60 Q178 84 165 108 Q152 133 127 135 Q103 137 93 120 Q82 102 92 84 Q102 65 120 65 Q139 64 148 79 Q158 95 146 108 Q134 121 121 112 Q110 105 115 94 Q119 85 128 89 Q135 92 131 99" fill="none"/>
+<path d="M88 61 Q98 44 115 41" fill="none" stroke="#e0a27f" stroke-width="8"/>
+<path d="M100 149 Q109 155 120 155" fill="none" stroke="#e0a27f" stroke-width="7"/>
+<ellipse cx="58" cy="65" rx="13" ry="17" fill="#ffffff"/>
+<ellipse cx="32" cy="80" rx="13" ry="17" fill="#ffffff"/>
+<ellipse cx="54" cy="67" rx="4" ry="7" fill="#2a1b14"/>
+<ellipse cx="28" cy="82" rx="4" ry="7" fill="#2a1b14"/>
+<path d="M45 51 L62 55 M20 65 L36 69" fill="none"/>
+<path d="M28 122 Q34 129 42 122" fill="none"/>
+<ellipse cx="51" cy="119" rx="6" ry="4" fill="#ff9aa8"/>
+<path d="M148 18 L152 28 L163 31 L154 38 L154 49 L145 42 L134 45 L138 34 L132 25 L143 26Z" fill="#ffd24a"/>
+</g>
+</svg>

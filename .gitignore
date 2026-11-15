@@ -1,0 +1,8 @@
+# build output (made by tools/build_site.mjs on Render)
+public/
+node_modules/
+# local-only files
+.claude/
+js/*.report.txt
+assets/gpt/_raw/
+*.log

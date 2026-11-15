@@ -1,0 +1,12 @@
+{
+  "name": "소드 x 스태프 전투 계산기",
+  "short_name": "SxS 계산기",
+  "description": "스탯과 전투스킬로 승리 확률을 시뮬레이션하는 비공식 팬 도구",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#161513",
+  "theme_color": "#1b1a18",
+  "lang": "ko",
+  "icons": [{ "src": "assets/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

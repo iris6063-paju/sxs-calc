@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>소드 x 스태프 전투 계산기 · 승률 시뮬레이터</title>
+<meta name="description" content="소드 x 스태프(Sword x Staff) 비공식 전투 계산기. 직업·공격·방어·생명·속도·전투스킬을 넣으면 몬테카를로 시뮬레이션으로 승리 확률을 계산합니다. 1:1, 다대일, 다대다, 몹·층 프리셋 지원.">
+<meta name="theme-color" content="#1b1a18">
+<meta property="og:title" content="소드 x 스태프 전투 계산기">
+<meta property="og:description" content="스탯과 전투스킬로 승리 확률을 계산하는 비공식 팬 도구">
+<meta property="og:type" content="website">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="spark" aria-hidden="true">✻</span>
+    <div>
+      <h1>소드 x 스태프 <em>전투 계산기</em></h1>
+      <p>스탯과 전투스킬로 승리 확률을 시뮬레이션하는 비공식 팬 도구</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <div class="seg" id="modeSeg" role="tablist" aria-label="전투 모드">
+      <button data-mode="pve" role="tab">몹 전투 <small>PvE</small></button>
+      <button data-mode="pvp" role="tab">대전 <small>PvP</small></button>
+    </div>
+    <button class="ghost" id="shareBtn" title="현재 구성을 링크로 복사">링크 복사</button>
+    <button class="ghost" id="resetBtn" title="예시 구성으로 되돌리기">초기화</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="team team-a" id="teamA" aria-label="아군 팀"></section>
+
+  <section class="center">
+    <div class="stage" id="stageWrap">
+      <canvas id="stage" aria-label="3D 전투 장면"></canvas>
+      <div class="hud">
+        <div class="hud-bar a"><b>아군</b><i><s id="hpA"></s></i></div>
+        <div class="hud-mid"><span id="roundTag">대기 중</span></div>
+        <div class="hud-bar b"><b>상대</b><i><s id="hpB"></s></i></div>
+      </div>
+      <div class="banner" id="banner" hidden></div>
+      <div class="stage-ctl">
+        <div class="seg small" id="speedSeg" aria-label="재생 속도">
+          <button data-speed="1">×1</button><button data-speed="2">×2</button><button data-speed="4">×4</button>
+        </div>
+        <button class="chip" id="pauseBtn">일시정지</button>
+        <button class="chip" id="skipBtn">건너뛰기</button>
+        <button class="chip" id="zoomIn" title="확대" aria-label="확대">＋</button>
+        <button class="chip" id="zoomOut" title="축소" aria-label="축소">－</button>
+        <button class="chip" id="viewBtn" title="카메라를 처음 위치로">시점 초기화</button>
+      </div>
+      <div class="stage-hint"><strong id="winTag" class="win-tag" hidden></strong><span>드래그: 회전 · ＋/－: 확대</span></div>
+    </div>
+
+    <div class="runbar">
+      <button class="run" id="runBtn"><span>▶</span> 승률 계산</button>
+      <label>시뮬 횟수
+        <select id="runsSel"><option value="300">300회 (빠름)</option><option value="1000" selected>1,000회</option><option value="3000">3,000회</option><option value="10000">10,000회 (정밀)</option></select>
+      </label>
+      <label id="capLabel">라운드 제한 <input type="number" id="capInp" min="1" max="200" step="1"></label>
+      <label id="mobCoefLabel" title="몹 스킬의 공격력 계수(공개 자료 없음, 기본 100% 가정)">몹 스킬 계수 <input type="number" id="mobCoefInp" min="10" max="500" step="5"> %</label>
+      <label id="balLabel" class="check" title="균형의 미: 캐릭터가 받는 피해 ×0.2, 12라운드부터 매 라운드 +10%p · 치유/보호막 감소"><input type="checkbox" id="balChk"> PvP 전장 보정</label>
+    </div>
+
+    <div class="results" id="results"></div>
+
+    <details class="notes" id="notes">
+      <summary>계산 근거 · 한계</summary>
+      <div class="notes-body">
+        <h3>전투 규칙 (커뮤니티 검증 자료 기반)</h3>
+        <ul>
+          <li><b>행동 순서</b> — 속도 시계: 행동 간격 = 100000 ÷ √(속도). 상대보다 턴을 2배로 받으려면 속도 4배가 필요합니다. 한 라운드는 생존한 전원이 한 번씩 행동한 분량입니다.</li>
+          <li><b>턴 · 스킬 순번</b> — 최대 4칸 이동 후, 준비된 전투스킬을 <u>슬롯 1→4 순서대로 모두</u> 시전합니다(기본 공격 없음). 순번을 바꾸면 약화·끌어당김 뒤에 주력기를 쓰는 식의 연계가 달라집니다. 쿨다운은 자신의 턴 기준(쿨 n턴 = n+1턴마다 1회)이며 「초기 쿨 없음」이 아닌 스킬은 쿨다운 상태로 시작합니다. 각 스킬 아래 시간 태그에 시전 주기가 표시됩니다.</li>
+          <li><b>보주(비법)</b> — 패시브 4칸. 능력치 증가, 타격 시 추가 피해·상태이상, 피격·막기 반격, 조건부 피해 증감, 보호막·버티기 등 77종을 반영합니다(나머지는 ⚠ 표시).</li>
+          <li><b>판타몬</b> — 지원 스킬(캐릭터의 피해 스킬에 따라붙는 추가 공격·보호막·회복·강화)과, 성체일 때 에너지(턴당 +50, 피격당 +6)가 차면 실체화해 자신의 공격·방어·생명·속도로 함께 싸우는 것을 반영합니다. 판타몬은 승패 판정 인원에 포함되지 않습니다.</li>
+          <li><b>피해</b> — (공격×계수 + 고정값) × 공격÷(공격+방어) × 원소 배율 × (1+피해 증가)÷(1+피해 감소) × 막기/치명 × 레벨 보정.</li>
+          <li><b>판정 순서</b> — 실명 → 회피 → 막기 → 치명. 막힌 공격은 치명이 뜨지 않습니다. 막기 확률 = 막기 확률 − 상대 명중, 막기 시 피해 ÷ max(1.5, 1+막기 효율−명중). 치명 확률 = 5% + 치명 확률 − 상대 치명 저항, 치명 배율 = max(1.3, 1+치명 피해−치명 저항).</li>
+          <li><b>원소 배율</b> — (1 + 친화÷기준 + 숙련÷기준) ÷ (1 + 가호÷기준 + 저항÷기준). 기준값은 레벨별 표를 사용합니다.</li>
+          <li><b>레벨 보정</b> — 레벨 차 1당 4%, 최대 4레벨(16%). 높으면 곱하고 낮으면 나눕니다.</li>
+          <li><b>PvP 전장 보정</b> — 캐릭터가 받는 피해 ×0.2, 12라운드부터 매 라운드 +10%p(19라운드에 원상복구 후 계속 증가), 치유·보호막은 12라운드부터 라운드당 −20%p(최저 20%), 기절·빙결·속박·광란 확률 1/3.</li>
+          <li><b>시간 초과</b> — PvE는 라운드 제한 안에 못 잡으면 패배, PvP는 생존 인원 → 평균 잔여 체력 비율 순으로 판정합니다.</li>
+        </ul>
+        <h3>추정·단순화한 부분</h3>
+        <ul>
+          <li>몹 스킬의 계수와 쿨다운은 공개 자료가 없어 <b>턴당 스킬 1개, 계수 100%</b>(다단 히트는 균등 분할)로 가정했습니다. 「몹 스킬 계수」로 조정하세요.</li>
+          <li>지속 피해(침식·중독)는 턴당 공격력 25%로 추정했습니다. 소환수·분신·설치물·화상 지대·넉백 충돌·공포·열상 등은 반영하지 않습니다(해당 스킬에 ⚠ 표시).</li>
+          <li>배치는 5칸 폭 진형(근접 전열·원거리 후열)을 자동으로 사용하고, 대상 선정은 「많이 맞히는 위치 → 짧은 이동 → 낮은 체력 비율」 순서입니다.</li>
+          <li>길드 정복(길드 보스)과 신수의 시련은 피해량 경쟁 콘텐츠라 승률 대신 「아군 평균 총 피해」를 보세요. 길드 보스의 전용 전장 효과는 반영하지 않습니다.</li>
+          <li>보주의 고정 수치(레벨 비례)와 판타몬 지원 스킬 일부는 근사값입니다. 등급(랭크) 보정, 서버 일수에 따른 PvP 스킬 보정은 포함하지 않습니다. 캐릭터 정보 창의 최종 수치를 넣어 주세요.</li>
+          <li>결과는 무작위 시뮬레이션의 추정치이며 ± 값은 95% 신뢰구간입니다. 게임 패치에 따라 달라질 수 있습니다.</li>
+        </ul>
+      </div>
+    </details>
+  </section>
+
+  <section class="team team-b" id="teamB" aria-label="상대 팀"></section>
+</main>
+
+<footer class="foot">
+  <p>비공식 팬 제작 도구이며 게임 개발사·퍼블리셔와 무관합니다. 수치는 커뮤니티 자료(<a href="https://www.purrwikimania.com/combat/" target="_blank" rel="noopener">Purrwikimania</a>, <a href="https://keripo.com/2026/10/sword-x-staff-damage-formula-datamined/" target="_blank" rel="noopener">Keripo 데미지 공식 정리</a>)를 참고했습니다. 스킬·몹 한글 이름은 비공식 번역입니다.</p>
+  <p>캐릭터·몹 그림: GPT 6.1 sol로 생성한 SVG를 레이어 분리·재채색·애니메이션 · 보조 실루엣: <a href="https://game-icons.net" target="_blank" rel="noopener">game-icons.net</a> (CC BY 3.0) · 한국판 명칭 대조: <a href="https://metahub.wiki/swordxstaff/ko/" target="_blank" rel="noopener">소드X스태프허브</a> · 3D: three.js (MIT)</p>
+</footer>
+<div class="modal" id="picker" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pkTitle">
+    <header><b id="pkTitle">스킬 선택</b><input type="text" id="pkSearch" placeholder="이름 검색 (한글 · 영문)" autocomplete="off"><button class="icon" id="pkClose" aria-label="닫기">✕</button></header>
+    <div class="chips" id="pkCls"></div>
+    <div class="pk-grid" id="pkGrid"></div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

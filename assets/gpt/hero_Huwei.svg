@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240">
+<g id="back" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M78 116 Q58 125 52 151 L29 204 Q51 199 64 211 L91 194 L114 202 L113 127Z" fill="#2f5fae"/>
+<path d="M78 132 Q72 168 54 193 L67 190 L82 198 L98 183 L100 135Z" fill="#33415c"/>
+<path d="M79 120 Q63 148 55 170" fill="none"/>
+</g>
+<g id="body" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M79 177 L99 179 L97 207 L77 208Z" fill="#8fa6c9"/>
+<path d="M106 179 L124 177 L131 206 L109 209Z" fill="#8fa6c9"/>
+<path d="M81 185 L96 186 L94 205 L82 206Z" fill="#33415c"/>
+<path d="M114 185 L125 184 L130 205 L118 207Z" fill="#33415c"/>
+<path d="M77 204 Q88 201 98 207 L99 221 L68 221 Q65 211 77 204Z" fill="#8fa6c9"/>
+<path d="M109 205 Q122 200 133 207 L142 215 L141 221 L108 221Z" fill="#8fa6c9"/>
+<path d="M69 215 L98 215 L99 221 L68 221Z" fill="#33415c"/>
+<path d="M109 215 L140 215 L141 221 L108 221Z" fill="#33415c"/>
+<path d="M75 126 Q61 125 57 139 L58 159 L77 164 L87 139Z" fill="#8fa6c9"/>
+<path d="M78 121 Q101 115 120 124 L127 159 L120 181 Q99 189 77 178 L74 151Z" fill="#8fa6c9"/>
+<path d="M82 132 Q94 126 112 131 L116 149 Q98 158 82 148Z" fill="#e3ebf5"/>
+<path d="M79 154 Q99 164 124 153 L122 171 Q101 181 77 169Z" fill="#33415c"/>
+<path d="M77 169 Q99 176 123 168 L126 181 L112 188 L101 179 L88 188 L74 181Z" fill="#8fa6c9"/>
+<rect x="94" y="164" width="15" height="12" rx="3" fill="#e3ebf5"/>
+<path d="M119 127 Q132 126 136 140 L133 155 L119 157 L112 142Z" fill="#8fa6c9"/>
+<path d="M119 145 L132 143 L139 151 L133 163 L121 159Z" fill="#33415c"/>
+<path d="M113 127 Q126 119 134 132 L137 141 Q126 148 113 140Z" fill="#e3ebf5"/>
+<path d="M42 145 L63 136 L84 147 L80 178 Q75 194 62 204 Q46 193 41 177Z" fill="#3f7fd9"/>
+<path d="M63 143 L77 150 L74 176 Q70 188 62 195 L62 177Z" fill="#2f5fae"/>
+<path d="M57 146 L67 146 L67 158 L78 158 L77 168 L67 168 L66 189 L59 194 L57 168 L46 168 L45 158 L57 158Z" fill="#e3ebf5"/>
+</g>
+<g id="head" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M83 40 Q70 26 82 15 Q97 8 111 18 Q124 29 117 46 L101 52Z" fill="#3f7fd9"/>
+<path d="M88 17 Q103 22 100 43 L115 45 Q122 27 110 19 Q101 13 88 17Z" fill="#2f5fae"/>
+<path d="M54 82 Q49 51 71 38 Q94 23 119 39 Q140 51 140 82 L135 106 Q119 124 88 121 Q60 116 54 82Z" fill="#8fa6c9"/>
+<path d="M59 65 Q65 39 90 38 L99 44 Q72 47 69 70Z" fill="#e3ebf5"/>
+<path d="M62 79 Q71 66 95 64 L128 66 Q139 73 138 86 L144 94 L138 101 Q134 121 111 124 Q88 125 74 111Z" fill="#ffd9b8"/>
+<path d="M63 75 L75 76 L79 103 L90 113 L82 124 Q60 120 56 98 L54 78Z" fill="#8fa6c9"/>
+<path d="M59 87 L67 89 L72 109 L81 116 L77 121 Q61 115 58 101Z" fill="#33415c"/>
+<path d="M60 72 Q93 55 136 68 L139 78 Q105 68 72 83 L58 85Z" fill="#e3ebf5"/>
+<path d="M95 51 L98 63" fill="none"/>
+<ellipse cx="101" cy="91" rx="5" ry="10" fill="#2a1b14"/>
+<ellipse cx="126" cy="88" rx="4.5" ry="9" fill="#2a1b14"/>
+<ellipse cx="100" cy="87" rx="1.1" ry="2" fill="#e3ebf5" stroke="#e3ebf5"/>
+<ellipse cx="125" cy="84" rx="1" ry="1.8" fill="#e3ebf5" stroke="#e3ebf5"/>
+<ellipse cx="91" cy="104" rx="5" ry="2.5" fill="#f4b6a5" stroke="#f4b6a5"/>
+<ellipse cx="133" cy="101" rx="3" ry="2" fill="#f4b6a5" stroke="#f4b6a5"/>
+<path d="M112 105 Q117 110 122 104" fill="none"/>
+<circle cx="66" cy="86" r="5" fill="#e3ebf5"/>
+</g>
+<g id="weapon" data-pivot="135,151" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M137 135 L148 79 L165 55 L170 84 L148 139Z" fill="#e3ebf5"/>
+<path d="M165 55 L160 84 L143 137 L148 139 L170 84Z" fill="#8fa6c9"/>
+<path d="M130 137 L140 135 L151 139 L159 138 L159 147 L148 149 L135 144 L127 144Z" fill="#3f7fd9"/>
+<path d="M136 145 L146 148 L140 169 L131 166Z" fill="#33415c"/>
+<path d="M134 148 Q127 144 125 152 Q124 160 132 163 L138 162 Q143 161 143 155 Q142 150 138 151Z" fill="#ffd9b8"/>
+<path d="M130 165 L141 168 L140 175 L130 173Z" fill="#8fa6c9"/>
+</g>
+</svg>

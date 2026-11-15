@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+<g id="body" stroke="#2a1b14" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="M108 93C85 77 79 29 101 17C121 10 136 53 123 91Z" fill="#ffffff" fill-opacity=".65"/>
+<path d="M123 94C124 62 157 24 176 35C195 50 159 88 132 102Z" fill="#ffffff" fill-opacity=".65"/>
+<path d="M107 35L116 78M167 48L138 82" fill="none"/>
+<path d="M151 123L187 135L155 152Z" fill="#ffd24a"/>
+<path d="M111 153L126 173L123 185L139 185L142 173L130 150Z" fill="#7a3f28"/>
+<path d="M80 151L75 175L62 180L62 186L84 186L94 155Z" fill="#b5694a"/>
+<path d="M103 99C126 84 154 94 165 115C175 138 158 160 135 164C113 168 96 151 93 131Z" fill="#b5694a"/>
+<path d="M124 96C132 116 135 142 125 163L141 162C151 141 148 113 141 96Z" fill="#7a3f28"/>
+<path d="M156 105C163 120 164 139 156 153C167 145 172 130 165 115Z" fill="#7a3f28"/>
+<path d="M100 133C106 149 113 156 125 157L127 144C115 145 109 139 105 128Z" fill="#e0a27f"/>
+<path d="M95 104C79 108 75 130 85 145C94 158 112 151 118 138C123 124 113 107 104 104Z" fill="#7a3f28"/>
+<path d="M91 131C94 119 105 116 114 122L119 135L104 143Z" fill="#b5694a"/>
+<path d="M84 134L65 146L48 141L43 151L65 160L91 148Z" fill="#b5694a"/>
+<path d="M61 57C50 42 48 32 53 23M83 54C82 37 89 24 99 20" fill="none"/>
+<ellipse cx="52" cy="23" rx="7" ry="8" fill="#ffd24a"/>
+<ellipse cx="100" cy="20" rx="7" ry="8" fill="#ffd24a"/>
+<path d="M89 56C75 45 52 49 39 62C31 70 28 81 25 90L14 98L25 108C26 127 44 143 65 143C91 144 108 124 107 101C108 81 102 66 89 56Z" fill="#b5694a"/>
+<path d="M28 108C34 126 50 133 67 130C88 126 96 111 96 92C110 118 93 143 65 143C44 143 26 127 28 108Z" fill="#7a3f28"/>
+<path d="M29 105C30 118 42 130 58 131C69 131 76 125 76 117C76 108 64 102 51 101Z" fill="#e0a27f"/>
+<path d="M40 78C47 70 60 70 69 78L65 98C61 108 47 109 41 99Z" fill="#ffffff"/>
+<ellipse cx="48" cy="91" rx="6" ry="10" fill="#2a1b14"/>
+<path d="M36 75L70 81" fill="none"/>
+<path d="M79 83L88 88" fill="none"/>
+<path d="M35 116Q45 124 55 114" fill="none"/>
+<path d="M50 118L48 125L42 120Z" fill="#ffffff"/>
+<ellipse cx="77" cy="110" rx="7" ry="4" fill="#ff9aa8"/>
+<path d="M82 63L88 73L99 75L90 82L91 93L81 87L71 91L74 80L67 72L78 72Z" fill="#ffd24a"/>
+</g>
+</svg>
