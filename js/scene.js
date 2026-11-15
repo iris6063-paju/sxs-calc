@@ -1,8 +1,9 @@
 // 3D diorama: a floating forest island, a Claude-Code-style terminal monolith, and paper standees that replay a fight.
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
-import { HeroSprite, SheetSprite, sheetSpriteFor, sheetAnimLen, drawMob, drawPet, EL } from './sprites.js';
-import { sheet, sheetImg } from './sheets.js';
+import { HeroSprite, SheetSprite, sheetSpriteFor, sheetAnimLen, drawMob, drawPet, EL, mobArtSlug, mobPalette, petArtSlug, petPalette } from './sprites.js';
+import { sheet, sheetImg, designOf } from './sheets.js';
+import { buildModel, animate as animToon, setMood, flash as flashToon, stateLen as toonLen, toonSpec, toonIdForMob, toonMat, OUTLINE } from './toon.js';
 
 /* class effects from the SD sheets (index into each sheet's 4 effect pictures) by how a skill is used */
 const FXU = {
@@ -125,14 +126,15 @@ export function createStage(canvas) {
 
   /* island */
   const world = new THREE.Group(); scene.add(world);
-  const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.92, metalness: 0, ...o });
+  const std = (color, o = {}) => toonMat(color, { flatShading: !!o.flatShading }); // cel shading for the whole diorama
+  const ink = (mesh) => { mesh.add(new THREE.Mesh(mesh.geometry, OUTLINE)); return mesh; }
   const wob = (a) => 1 + 0.05 * Math.sin(a * 3 + 0.6) + 0.035 * Math.sin(a * 7 + 1.9) + 0.02 * Math.sin(a * 13);
   const top = new THREE.CylinderGeometry(20, 20.4, 1.2, 72, 1);
   { const p = top.attributes.position; for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); const k = wob(Math.atan2(z, x)); p.setX(i, x * k); p.setZ(i, z * k); } top.computeVertexNormals(); }
   const grass = new THREE.Mesh(top, std(0x86c45c)); grass.position.y = -0.6; grass.receiveShadow = true; world.add(grass);
   const under = new THREE.CylinderGeometry(20.2, 2.4, 17, 44, 7);
   { const p = under.attributes.position, col = []; for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i); const a = Math.atan2(z, x), k = wob(a) * (1 + (R() - 0.5) * 0.16 * (y < 8 ? 1 : 0)); p.setX(i, x * k); p.setZ(i, z * k); const tt = (y + 8.5) / 17; const c = new THREE.Color().setHSL(0.07 + 0.02 * R(), 0.32, 0.16 + 0.22 * tt + 0.05 * R()); col.push(c.r, c.g, c.b); } under.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); under.computeVertexNormals(); }
-  const rock = new THREE.Mesh(under, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true })); rock.position.y = -9.7; world.add(rock);
+  const rock = new THREE.Mesh(under, toonMat(0xffffff, { vertexColors: true, flatShading: true })); rock.position.y = -9.7; world.add(rock);
 
   /* arena tiles */
   const cells = [];
@@ -162,13 +164,13 @@ export function createStage(canvas) {
   function tree(x, z, s = 1, kind) {
     const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(s);
     const h = 1.5 + R() * 1.4;
-    const tr = new THREE.Mesh(trunkGeo, trunkMat); tr.scale.y = h; tr.position.y = h / 2; tr.castShadow = true; g.add(tr);
+    const tr = ink(new THREE.Mesh(trunkGeo, trunkMat)); tr.scale.y = h; tr.position.y = h / 2; tr.castShadow = true; g.add(tr);
     const crown = new THREE.Group(); crown.position.y = h; g.add(crown);
     if (kind === 'pine' || (kind == null && R() < 0.45)) {
-      for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(coneGeo, pineMat[i & 1]); const k = 1.05 - i * 0.24; c.scale.set(k, 1, k); c.position.y = -0.25 + i * 0.72; c.castShadow = true; crown.add(c); }
+      for (let i = 0; i < 3; i++) { const c = ink(new THREE.Mesh(coneGeo, pineMat[i & 1])); const k = 1.05 - i * 0.24; c.scale.set(k, 1, k); c.position.y = -0.25 + i * 0.72; c.castShadow = true; crown.add(c); }
     } else {
       const mat = leafMats[R() < 0.8 ? Math.floor(R() * 4) : 4 + Math.floor(R() * 2)];
-      for (let i = 0; i < 3; i++) { const b = new THREE.Mesh(blobGeo, mat); const k = 0.95 - i * 0.16; b.scale.set(k * (0.9 + R() * 0.3), k * 0.85, k * (0.9 + R() * 0.3)); b.position.set((R() - 0.5) * 0.9, 0.35 + i * 0.5, (R() - 0.5) * 0.9); b.rotation.set(R() * 3, R() * 3, R() * 3); b.castShadow = true; crown.add(b); }
+      for (let i = 0; i < 3; i++) { const b = ink(new THREE.Mesh(blobGeo, mat)); const k = 0.95 - i * 0.16; b.scale.set(k * (0.9 + R() * 0.3), k * 0.85, k * (0.9 + R() * 0.3)); b.position.set((R() - 0.5) * 0.9, 0.35 + i * 0.5, (R() - 0.5) * 0.9); b.rotation.set(R() * 3, R() * 3, R() * 3); b.castShadow = true; crown.add(b); }
     }
     g.rotation.y = R() * 6.28; sways.push([crown, R() * 6.28, 0.5 + R() * 0.5]);
     world.add(g); return g;
@@ -184,7 +186,7 @@ export function createStage(canvas) {
     spots.push([x, z]); tree(x, z, 0.95 + R() * 0.75);
   }
   const rockGeo = new THREE.IcosahedronGeometry(1, 0), rockMat = [std(0x9a9a92, { flatShading: true }), std(0x7f837c, { flatShading: true }), std(0xb3ad9c, { flatShading: true })];
-  function boulder(x, z, s) { const m = new THREE.Mesh(rockGeo, rockMat[Math.floor(R() * 3)]); m.position.set(x, s * 0.35, z); m.scale.set(s * (0.8 + R() * 0.5), s * (0.5 + R() * 0.4), s * (0.8 + R() * 0.5)); m.rotation.set(R() * 3, R() * 3, R() * 3); m.castShadow = m.receiveShadow = true; world.add(m); return m; }
+  function boulder(x, z, s) { const m = ink(new THREE.Mesh(rockGeo, rockMat[Math.floor(R() * 3)])); m.position.set(x, s * 0.35, z); m.scale.set(s * (0.8 + R() * 0.5), s * (0.5 + R() * 0.4), s * (0.8 + R() * 0.5)); m.rotation.set(R() * 3, R() * 3, R() * 3); m.castShadow = m.receiveShadow = true; world.add(m); return m; }
   for (let i = 0; i < 26; i++) { const a = R() * 6.283, r = 9.8 + R() * 9, x = Math.cos(a) * r, z = Math.sin(a) * r; if (!inArena(x, z, 0.8) && !(z < -7 && Math.abs(x) < 4.6)) boulder(x, z, 0.35 + R() * 0.7); }
   const tuft = new THREE.InstancedMesh(new THREE.ConeGeometry(0.07, 0.42, 4), std(0x5fa648), 900);
   const flowerHead = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.09, 0), std(0xffffff), 260);
@@ -199,7 +201,7 @@ export function createStage(canvas) {
   tuft.count = nt; flowerHead.count = nf; world.add(tuft, flowerHead);
   // mushrooms
   const capGeo = new THREE.SphereGeometry(0.2, 10, 6, 0, 6.3, 0, 1.6), stemGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.22, 6), capMat = std(0xe2483c), stemMat = std(0xfff3dc);
-  for (let i = 0; i < 14; i++) { const [tx, tz] = spots[Math.floor(R() * spots.length)]; const x = tx + (R() - 0.5) * 1.8, z = tz + (R() - 0.5) * 1.8; if (inArena(x, z, 0.3)) continue; const s = 0.8 + R() * 0.9; const st = new THREE.Mesh(stemGeo, stemMat); st.position.set(x, 0.11 * s, z); st.scale.setScalar(s); const cp = new THREE.Mesh(capGeo, capMat); cp.position.set(x, 0.2 * s, z); cp.scale.setScalar(s); cp.castShadow = true; world.add(st, cp); }
+  for (let i = 0; i < 14; i++) { const [tx, tz] = spots[Math.floor(R() * spots.length)]; const x = tx + (R() - 0.5) * 1.8, z = tz + (R() - 0.5) * 1.8; if (inArena(x, z, 0.3)) continue; const s = 0.8 + R() * 0.9; const st = new THREE.Mesh(stemGeo, stemMat); st.position.set(x, 0.11 * s, z); st.scale.setScalar(s); const cp = ink(new THREE.Mesh(capGeo, capMat)); cp.position.set(x, 0.2 * s, z); cp.scale.setScalar(s); cp.castShadow = true; world.add(st, cp); }
 
   /* pond + waterfall */
   const water = new THREE.Mesh(new THREE.CircleGeometry(3, 28), new THREE.MeshStandardMaterial({ color: 0x4bb8e8, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.88 }));
@@ -212,7 +214,7 @@ export function createStage(canvas) {
     const stream = new THREE.Mesh(new THREE.PlaneGeometry(1.7, edge - Math.hypot(13.5, 6.5) - 2.2), new THREE.MeshStandardMaterial({ color: 0x4bb8e8, roughness: 0.15, transparent: true, opacity: 0.88 })); stream.rotation.x = -Math.PI / 2; stream.rotation.z = -Math.atan2(dir.x, dir.z); const mid = (edge + Math.hypot(13.5, 6.5) + 2.2) / 2; stream.position.set(dir.x * mid, 0.035, dir.z * mid); world.add(stream); }
 
   /* clouds + islets + fireflies */
-  const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true, fog: false });
+  const cloudMat = toonMat(0xffffff, { flatShading: true, fog: false });
   const clouds = [];
   for (let i = 0; i < 9; i++) { const g = new THREE.Group(); const n = 3 + Math.floor(R() * 3); for (let j = 0; j < n; j++) { const b = new THREE.Mesh(blobGeo, cloudMat); b.scale.set(2.2 + R() * 2, 1.2 + R() * 0.8, 1.8 + R() * 1.4); b.position.set(j * 2.4 - n * 1.2, R() * 0.8, R() * 1.5); g.add(b); } const a = R() * 6.283, r = 36 + R() * 34; g.position.set(Math.cos(a) * r, 4 + R() * 18 - 6, Math.sin(a) * r); g.userData = { a, r, sp: 0.006 + R() * 0.01 }; clouds.push(g); scene.add(g); }
   const islets = [];
@@ -233,17 +235,17 @@ export function createStage(canvas) {
   const banners = [];
   [[-9.6, 0], [9.6, 1]].forEach(([x, t]) => [-6.4, 6.4].forEach((z) => {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 3.4, 6), std(0x5b4636)); pole.position.set(x, 1.7, z); pole.castShadow = true;
-    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.5, 6, 1), new THREE.MeshStandardMaterial({ color: TEAM[t], side: THREE.DoubleSide, roughness: 0.8 })); cloth.position.set(x + (t ? -0.6 : 0.6), 2.55, z); cloth.castShadow = true;
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.5, 6, 1), toonMat(TEAM[t], { side: THREE.DoubleSide })); cloth.position.set(x + (t ? -0.6 : 0.6), 2.55, z); cloth.castShadow = true;
     world.add(pole, cloth); banners.push([cloth, R() * 6]);
   }));
 
   /* Claude-Code-style terminal monolith */
   const term = new Terminal();
   const tg = new THREE.Group(); tg.position.set(0, 0, -10.6); tg.scale.setScalar(1.04); world.add(tg);
-  const plinth = new THREE.Mesh(new THREE.BoxGeometry(8.2, 1.0, 2.6), std(0x8d9087, { flatShading: true })); plinth.position.y = 0.5; plinth.castShadow = plinth.receiveShadow = true; tg.add(plinth);
+  const plinth = ink(new THREE.Mesh(new THREE.BoxGeometry(8.2, 1.0, 2.6), std(0x8d9087, { flatShading: true }))); plinth.position.y = 0.5; plinth.castShadow = plinth.receiveShadow = true; tg.add(plinth);
   const moss = new THREE.Mesh(new THREE.BoxGeometry(8.3, 0.14, 2.7), std(0x6fae4f)); moss.position.y = 1.03; tg.add(moss);
   const body = new THREE.Mesh(new THREE.BoxGeometry(8.0, 5.3, 0.7), std(0x262422, { roughness: 0.55 })); body.position.set(0, 3.9, 0); body.castShadow = true; tg.add(body);
-  const bezel = new THREE.Mesh(new THREE.BoxGeometry(8.3, 5.6, 0.5), std(0x3a3733, { roughness: 0.6 })); bezel.position.set(0, 3.9, -0.14); bezel.castShadow = true; tg.add(bezel);
+  const bezel = ink(new THREE.Mesh(new THREE.BoxGeometry(8.3, 5.6, 0.5), std(0x3a3733, { roughness: 0.6 }))); bezel.position.set(0, 3.9, -0.14); bezel.castShadow = true; tg.add(bezel);
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 4.69), new THREE.MeshBasicMaterial({ map: term.tex, toneMapped: false })); screen.position.set(0, 3.95, 0.36); tg.add(screen);
   const led = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), new THREE.MeshBasicMaterial({ color: 0xd97757 })); led.position.set(3.7, 1.42, 0.37); tg.add(led);
   const keys = textTexture(512, 160); { const c = keys.ctx; c.fillStyle = '#2b2927'; c.fillRect(0, 0, 512, 160); for (let r = 0; r < 4; r++) for (let k = 0; k < 14; k++) { c.fillStyle = r === 3 && k > 3 && k < 10 ? '#55514b' : (k + r) % 9 === 0 ? '#d97757' : '#4a4641'; c.beginPath(); c.roundRect(10 + k * 35.3, 10 + r * 37, 29, 30, 5); c.fill(); } }
@@ -265,6 +267,31 @@ export function createStage(canvas) {
     const mob = m.kind === 'mob' ? MOB.get(m.key) : pet ? { ty: 0 } : null;
     const h = mob ? (mob.ty === 2 ? 2.5 : mob.ty === 1 ? 1.75 : pet ? 1.3 : 1.38) : 2.05, w = mob ? h : h / 1.2;
     let tex;
+    // cel-shaded 3D model (GPT-designed spec) when one exists for this hero design / monster kind
+    let spec = null, tscale = 1, recolor = null;
+    if (m.kind === 'hero') { u.design = designOf(m.cls); spec = u.design && toonSpec(u.design); }
+    else if (mob) {
+      const md = pet || MOB.get(m.key), id = toonIdForMob(md.en, pet ? petArtSlug(pet) : mobArtSlug(md));
+      spec = id && toonSpec(id);
+      if (spec) {
+        const uniq = id.startsWith('boss_');
+        if (!uniq) { const p = pet ? petPalette(pet) : mobPalette(md); recolor = { MAIN: p[0], LIGHT: p[1], DARK: p[2] }; }
+        tscale = pet ? 0.62 : uniq ? 1.7 : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
+      }
+    }
+    if (spec) {
+      u.toon = buildModel(spec, { recolor }); u.style = spec.style || 'sword';
+      u.toon.root.scale.setScalar(tscale); u.yaw = m.team ? -1.0 : 1.0; u.yawT = u.yaw;
+      u.mat = new THREE.MeshBasicMaterial(); u.card = new THREE.Mesh(new THREE.BufferGeometry(), u.mat); u.tex = null; u.h = Math.max(1, u.toon.h * tscale);
+      u.an = { st: 'idle', t0: 0 }; u.lastHit = -9;
+      const big = mob && mob.ty === 2 ? 1.8 : 1;
+      const base = new THREE.Mesh(baseGeo, toonMat(TEAM[m.team])); base.position.y = 0.06; base.scale.set(big, 0.6, big); base.receiveShadow = true; base.add(new THREE.Mesh(baseGeo, OUTLINE));
+      u.barS = null; u.bar = textTexture(256, 76);
+      u.barS = new THREE.Sprite(new THREE.SpriteMaterial({ map: u.bar.tex, transparent: true, depthTest: false, toneMapped: false })); u.barS.scale.set(2.1, 0.62, 1); u.barS.position.y = u.h + 0.4; u.barS.renderOrder = 5;
+      g.add(base, u.toon.root, u.barS); g.position.set(wx(m.y), 0, wz(m.x));
+      if (m.out) { g.visible = false; u.alive = false; u.hidden = true; }
+      drawBar(u); unitsG.add(g); return u;
+    }
     if (mob) {
       const tk = pet ? 'pet' + m.petId : m.key;
       let e = mobTex.get(tk);
@@ -293,7 +320,10 @@ export function createStage(canvas) {
   window.addEventListener('sxs-art', () => { for (const e of mobTex.values()) e.draw(); fxTex.clear(); for (const u of units) if (u.sheet) { u.sprite.key = ''; } });
   /** sheet frames face left: our team (left side) is mirrored to face the enemy */
   function flipOf(u) { return u.sprite && u.sprite.facesLeft ? u.m.team === 0 : u.m.team === 1; }
-  function setAnim(u, st) { if (u.sheet) u.an = { st, t0: animT }; }
+  function setAnim(u, st) { if (u.an) u.an = { st, t0: animT }; }
+  const angDiff = (a, b) => { let d = a - b; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; };
+  /** the SD design whose effect pictures a hero uses (3D toon or sheet sprite) */
+  const fxDesign = (u) => (u && u.design && sheet(u.design) ? u.design : null);
   /** battle mood for the expression icons */
   const CTRL = ['stun', 'freeze', 'immob', 'frenzy', 'taunt'];
   function moodOf(u) {
@@ -331,7 +361,7 @@ export function createStage(canvas) {
     if (ev.on) { if (e) { if (!ev.u) e.c++; e.n = ev.n || 0; e.d = ev.d || 0; e.at = u.tn; e.b = ev.b; } else m.set(ev.k, { c: 1, n: ev.n || 0, d: ev.d || 0, at: u.tn, b: ev.b }); }
     else if (e && --e.c <= 0) m.delete(ev.k);
   }
-  function disposeUnits() { for (const u of units) { unitsG.remove(u.g); u.card.geometry.dispose(); u.mat.dispose(); u.bar.tex.dispose(); if (u.sprite) u.tex.dispose(); } units = []; }
+  function disposeUnits() { for (const u of units) { unitsG.remove(u.g); u.card.geometry.dispose(); u.mat.dispose(); u.bar.tex.dispose(); if (u.sprite) u.tex.dispose(); if (u.toon) { u.toon.mats.forEach((m) => m.dispose()); if (u.toon.face) u.toon.face.tex.dispose(); } } units = []; }
   function setRoster(meta) { disposeUnits(); units = meta.map(makeUnit); ring.visible = false; }
 
   /* fx pools */
@@ -406,11 +436,12 @@ export function createStage(canvas) {
       case 'turn': { flushCast(); const u = units[ev.u]; u.tn++; ring.visible = true; ring.position.x = u.g.position.x; ring.position.z = u.g.position.z; ring.material.color.set(u.m.team ? 0xffb3a8 : 0xa8ccff); if (ev.r !== p.round) { p.round = ev.r; p.hooks.onRound && p.hooks.onRound(ev.r); } return 0.07; }
       case 'move': {
         const u = units[ev.u]; u.gx = ev.x; u.gy = ev.y; u.tw = { x0: u.g.position.x, z0: u.g.position.z, x1: wx(ev.y), z1: wz(ev.x), k: 0, d: ev.pull ? 0.2 : 0.26, hop: ev.leap ? 1.5 : ev.pull ? 0.15 : 0.45 };
-        if (u.sheet && !ev.pull) {
+        if (!ev.pull) {
           setAnim(u, 'move');
+          if (u.toon) u.yawT = Math.atan2(u.tw.x1 - u.tw.x0, u.tw.z1 - u.tw.z0);
           // leaping skills: the class dash effect along the path (돌진 / 질주 베기 / 방패 돌진)
-          const U = FXU[u.sprite.d] || {};
-          if (ev.leap && U.dash != null) spawnFx(u.sprite.d, U.dash, new THREE.Vector3((u.tw.x0 + u.tw.x1) / 2, 0.9, (u.tw.z0 + u.tw.z1) / 2), 1.3, { flip: u.tw.x1 < u.tw.x0, dur: 0.4 });
+          const fd = fxDesign(u), U = FXU[fd] || {};
+          if (fd && ev.leap && U.dash != null) spawnFx(fd, U.dash, new THREE.Vector3((u.tw.x0 + u.tw.x1) / 2, 0.9, (u.tw.z0 + u.tw.z1) / 2), 1.3, { flip: u.tw.x1 < u.tw.x0, dur: 0.4 });
         }
         return ev.pull ? 0.08 : 0.24;
       }
@@ -423,10 +454,13 @@ export function createStage(canvas) {
         term.line(`R${p.round} ${uname(u.m)} ▸ ${ev.n}${first ? ' → ' + uname(first.m) + (ev.tg.length > 1 ? ` 외 ${ev.tg.length - 1}` : '') : ''}`, '#e8e4d8');
         const aoe = ev.sh !== 'S' || ev.tg.length > 1;
         const cen = () => (ev.sh === 'T' || ev.sh === 'TQ' ? new THREE.Vector3(wx(ev.ay), 0, wz(ev.ax)) : new THREE.Vector3(ev.tg.reduce((s, i) => s + units[i].g.position.x, 0) / ev.tg.length, 0, ev.tg.reduce((s, i) => s + units[i].g.position.z, 0) / ev.tg.length));
-        if (u.sheet && !ev.pet) {
-          // SD sheet hero: attack frames for single strikes, skill frames for area / support skills, plus the class effects
+        if (!ev.pet) {
           setAnim(u, ev.sup || aoe ? 'skill' : 'attack');
-          const d = u.sprite.d, U = FXU[d] || {};
+          if (u.toon && first && !ev.sup) u.yawT = Math.atan2(first.g.position.x - u.g.position.x, first.g.position.z - u.g.position.z);
+        }
+        if (fxDesign(u) && !ev.pet) {
+          // SD design hero: attack motion for single strikes, skill motion for area / support skills, plus the class effects
+          const d = fxDesign(u), U = FXU[d] || {};
           if (ev.sup) {
             if (U.heal != null) for (const i of ev.tg.slice(0, 4)) spawnFx(d, U.heal, head(units[i]), 1.25, { dur: 0.7 });
             if (U.circle != null) spawnFx(d, U.circle, u.g.position, 2.6, { flat: true, dur: 1.1 });
@@ -464,7 +498,7 @@ export function createStage(canvas) {
         else if (ev.k === 5) { popNum('면역', '#9fe7ff', head(t)); if (c) c.miss++; }
         else {
           t.hit = 1; t.lastHit = animT; t.bigHit = ev.d > t.m.hpMax * 0.12;
-          if (t.sheet && t.an.st !== 'attack' && t.an.st !== 'skill' && ev.d > 0) setAnim(t, 'hit');
+          if ((t.sheet || t.toon) && t.an.st !== 'attack' && t.an.st !== 'skill' && ev.d > 0) setAnim(t, 'hit');
           const col = ev.k === 1 ? '#ffd23f' : ev.k === 2 ? '#b9c4cf' : ev.k === 4 ? '#c59bff' : '#ffffff';
           popNum((ev.k === 2 ? '🛡' : '') + fmt(ev.d) + (ev.k === 1 ? '!' : ''), col, head(t), ev.k === 1);
           if (c) { c.dmg += ev.d; c.n++; if (ev.k === 1) c.crit++; if (ev.k === 2) c.block++; }
@@ -480,7 +514,7 @@ export function createStage(canvas) {
         const u = units[ev.u]; u.alive = false; u.fall = 0.001; u.barS.visible = false; term.line(`  ✝ ${uname(u.m)} 쓰러짐`, '#8f8b80');
         // finishing blow by an SD-sheet hero: its finisher effect on the fallen unit
         const src = p.cur && units[p.cur.src];
-        if (src && src.sheet && src.m.team !== u.m.team) { const U = FXU[src.sprite.d] || {}; if (U.finish != null) spawnFx(src.sprite.d, U.finish, head(u), 1.7, { dur: 0.6, flip: u.g.position.x < src.g.position.x }); }
+        if (fxDesign(src) && src.m.team !== u.m.team) { const U = FXU[fxDesign(src)] || {}; if (U.finish != null) spawnFx(fxDesign(src), U.finish, head(u), 1.7, { dur: 0.6, flip: u.g.position.x < src.g.position.x }); }
         return 0.18;
       }
       case 'skip': { const u = units[ev.u]; popNum('행동 불가', '#9fd2ff', head(u)); return 0.2; }
@@ -518,6 +552,7 @@ export function createStage(canvas) {
       u.hp = m.hpMax; u.sh = 0; u.alive = !m.out; u.hidden = !!m.out; u.g.visible = !m.out;
       u.fall = 0; u.atk = -1; u.hit = 0; u.tw = null; u.lunge = null; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1);
       u.barS.visible = true; u.sts.clear(); u.tn = 0;
+      if (u.toon) { u.yawT = u.m.team ? -1.0 : 1.0; u.yaw = u.yawT; }
     }
   }
   function applySilent(ev, p) {
@@ -571,7 +606,22 @@ export function createStage(canvas) {
     animT += a;
     for (const u of units) {
       const g = u.g;
-      if (u.tw) { const w = u.tw; w.k = Math.min(1, w.k + a / w.d); const k = w.k * w.k * (3 - 2 * w.k); g.position.x = w.x0 + (w.x1 - w.x0) * k; g.position.z = w.z0 + (w.z1 - w.z0) * k; g.position.y = Math.sin(Math.PI * w.k) * w.hop; if (w.k >= 1) { u.tw = null; g.position.y = 0; } }
+      if (u.tw) { const w = u.tw; w.k = Math.min(1, w.k + a / w.d); const k = w.k * w.k * (3 - 2 * w.k); g.position.x = w.x0 + (w.x1 - w.x0) * k; g.position.z = w.z0 + (w.z1 - w.z0) * k; g.position.y = Math.sin(Math.PI * w.k) * w.hop * (u.toon ? 0.5 : 1); if (w.k >= 1) { u.tw = null; g.position.y = 0; } }
+      if (u.toon) {
+        // cel-shaded 3D unit: face the action (blended a little toward the camera so faces stay readable), bone animation by state
+        if (u.an.st === 'idle' && !u.tw) { const toward = topView ? u.yawT : u.yawT * 0.72; u.yaw += angDiff(toward, u.yaw) * Math.min(1, dt * 5); }
+        else u.yaw += angDiff(u.yawT, u.yaw) * Math.min(1, dt * 12);
+        u.toon.root.rotation.y = u.yaw;
+        let st = u.an.st, el = animT - u.an.t0;
+        if ((st === 'attack' || st === 'skill' || st === 'hit') && el >= toonLen(st)) { u.an = { st: 'idle', t0: animT }; st = 'idle'; el = 0; }
+        if (st === 'move' && !u.tw && el > 0.25) { u.an = { st: 'idle', t0: animT }; st = 'idle'; el = 0; }
+        if (u.fall > 0) u.fall = Math.min(1, u.fall + a / 0.5);
+        animToon(u.toon, st, el, tAll, { style: u.style, dead: u.fall });
+        flashToon(u.toon, u.hit > 0 ? u.hit : 0); if (u.hit > 0) u.hit = Math.max(0, u.hit - a / 0.3);
+        const md = moodOf(u); setMood(u.toon, md === 'focus' || md === 'cast' ? md : md);
+        u.barS.position.set(0, u.h + 0.4, 0);
+        continue;
+      }
       let lx = 0, lz = 0, tilt = 0;
       if (u.atk >= 0) { u.atk += a / 0.5; const k = Math.sin(Math.PI * Math.min(1, Math.max(0, (u.atk - 0.2) / 0.6))); if (u.lunge && !u.sprite) { lx = u.lunge.x * k * 0.55; lz = u.lunge.z * k * 0.55; tilt = k * 0.28 * (u.lunge.x >= 0 ? -1 : 1); } else if (u.lunge) { lx = u.lunge.x * k * 0.25; lz = u.lunge.z * k * 0.25; } if (u.atk >= 1) { u.atk = -1; u.lunge = null; } }
       if (u.hit > 0) { u.hit = Math.max(0, u.hit - a / 0.3); lx += Math.sin(u.hit * 40) * 0.07 * u.hit; if (!u.sprite) u.mat.color.setRGB(1, 1 - 0.6 * u.hit, 1 - 0.6 * u.hit); }

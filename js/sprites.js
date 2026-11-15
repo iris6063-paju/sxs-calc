@@ -59,7 +59,9 @@ const MOB_ART = [
 ];
 const PET_ART = { Falko: 'eagle', Boaro: 'boar', Mandragora: 'plant', Zeioletus: 'spirit', Terragon: 'dino', Sylvaerie: 'spirit', Kels: 'fish', Armopi: 'turtle', Herbote: 'plant', Nyxarchon: 'dragon', Aegiswing: 'eagle', Pandarial: 'bear', Chomusuke: 'fox', 'Cabbage Dog': 'hound', Prismora: 'spirit', 'Luminarch Steed': 'deer', Yoldra: 'dragon', Hexitty: 'fox', Mumpkin: 'ghost' };
 export const mobArtSlug = (mob) => (mob.art ? mob.art : (MOB_ART.find(([re]) => re.test(mob.en)) || [0, null])[1]);
-function mobPalette(mob) {
+export const petArtSlug = (pet) => PET_ART[pet.en] || 'spirit';
+export const petPalette = (pet) => mobPalette({ en: pet.en, hue: Math.round(hash(pet.en) * 360) });
+export function mobPalette(mob) {
   const m = MOB_TINT.find(([re]) => re.test(mob.en));
   const h = Math.round(mob.hue != null ? mob.hue : m ? m[1] : 18 + hash(mob.en) * 26), s = /rock|golem|geocrusher|stone|mech/i.test(mob.en) ? 12 : 58;
   return [`hsl(${h}, ${s}%, 52%)`, `hsl(${h}, ${s}%, 74%)`, `hsl(${(h + 345) % 360}, ${s + 6}%, 32%)`];

@@ -4,6 +4,7 @@ import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, re
 import { createStage, GROUND_LIST } from './scene.js';
 import { ST_KO } from './status.js';
 import { loadSheets, designOf, sheet, sheetURL, faceIndex } from './sheets.js';
+import { loadToon } from './toon.js';
 import { renderAvatar, EL } from './sprites.js';
 import { loadArt } from './art.js';
 
@@ -876,5 +877,5 @@ renderAll();
 term.line('> 팀을 구성하고 「승률 계산」을 누르세요', '#9b978b');
 loadArt().then(() => { drawAvatars(); if (!running && !stage.isPlaying()) showRoster(); });
 // SD class sheets (sprites, faces, effects): the first auto-run waits for them (at most 4 s)
-const sheetsP = loadSheets().then(() => { if (!running && !stage.isPlaying()) renderAll(); else drawAvatars(); });
+const sheetsP = Promise.all([loadSheets(), loadToon()]).then(() => { if (!running && !stage.isPlaying()) renderAll(); else drawAvatars(); });
 if (state.teams[0].length && state.teams[1].length) Promise.race([sheetsP, new Promise((r) => setTimeout(r, 4000))]).then(() => setTimeout(run, 300));

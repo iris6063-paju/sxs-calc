@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Toon model viewer</title>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.min.js" } }</script>
+<style>body{margin:0;background:#9fd3ee;font:13px sans-serif}#ui{position:fixed;left:8px;top:8px;display:flex;gap:4px;flex-wrap:wrap;z-index:2}button{padding:4px 10px}canvas{display:block}</style>
+</head><body><div id="ui"></div><canvas id="c"></canvas>
+<script type="module">
+// Dev viewer for assets/toon specs: ?ids=knight,boar  (all states cycle with the buttons)
+import * as THREE from 'three';
+import { OrbitControls } from '../vendor/OrbitControls.js';
+import { buildModel, animate, setMood, stateLen } from '../js/toon.js';
+const cv = document.getElementById('c'), R = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+R.setPixelRatio(Math.min(2, devicePixelRatio)); R.setSize(innerWidth, innerHeight); R.shadowMap.enabled = true; R.outputColorSpace = THREE.SRGBColorSpace;
+const S = new THREE.Scene(); S.background = new THREE.Color(0x9fd3ee);
+const cam = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 200); const dist = +(new URLSearchParams(location.search).get('dist') || 15); cam.position.set(0, dist * 0.3, dist);
+const ctl = new OrbitControls(cam, cv); ctl.target.set(0, 1.4, 0);
+S.add(new THREE.HemisphereLight(0xe6f6ff, 0x6f9050, 1.1)); const sun = new THREE.DirectionalLight(0xfff1d6, 2.2); sun.position.set(6, 12, 8); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16 }); S.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshToonMaterial({ color: 0x9bcf6f })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; S.add(ground);
+const q = new URLSearchParams(location.search), ids = (q.get('ids') || 'knight').split(',');
+const models = [];
+const N = ids.length, cols = Math.min(N, +(q.get('cols') || 6)), gap = +(q.get('gap') || 2.6);
+await Promise.all(ids.map(async (id, i) => {
+  const spec = await (await fetch(`../assets/toon/${id}.json?` + Date.now())).json();
+  const m = buildModel(spec, {}); const sc = +(q.get('scale') || 1) * (spec.kind === 'hero' ? 1 : (spec.viewScale || 1));
+  m.root.scale.setScalar(sc);
+  const holder = new THREE.Group(); holder.add(m.root); holder.position.set(((i % cols) - (cols - 1) / 2) * gap, 0, -Math.floor(i / cols) * gap * 1.2); holder.rotation.y = +(q.get('yaw') || 0.5); S.add(holder);
+  m.style = spec.style; models.push(m);
+}));
+let st = 'idle', t0 = performance.now() / 1000, mood = 'base';
+const ui = document.getElementById('ui');
+for (const s of ['idle', 'move', 'attack', 'skill', 'hit', 'dead']) { const b = document.createElement('button'); b.textContent = s; b.onclick = () => { st = s; t0 = performance.now() / 1000; }; ui.appendChild(b); }
+for (const md of ['base', 'joy', 'angry', 'hit', 'down', 'focus']) { const b = document.createElement('button'); b.textContent = '😀' + md; b.onclick = () => { mood = md; models.forEach((m) => setMood(m, md)); }; ui.appendChild(b); }
+window.__viewer = { setState: (s) => { st = s; t0 = performance.now() / 1000; } };
+function tick() {
+  requestAnimationFrame(tick);
+  const t = performance.now() / 1000, el = t - t0;
+  for (const m of models) { const s2 = st === 'dead' ? 'idle' : st; let e = el; if (s2 === 'attack' || s2 === 'skill' || s2 === 'hit') e = el % (stateLen(s2) + 0.5); animate(m, s2, e, t, { style: m.style, dead: st === 'dead' ? Math.min(1, el / 0.5) : 0 }); }
+  ctl.update(); R.render(S, cam);
+}
+tick();
+addEventListener('resize', () => { R.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); });
+</script></body></html>

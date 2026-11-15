@@ -5,6 +5,7 @@ node_modules/
 .claude/
 js/*.report.txt
 assets/gpt/_raw/
+assets/toon/_raw/
 # the user's full SD asset sheets stay local; only the cut-out sprites in assets/sheets are published
 art_src/
 *.log
