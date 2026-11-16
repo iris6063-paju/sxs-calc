@@ -1,6 +1,6 @@
 // UI: team builder (skills, charms, Fantomon), encounter presets, Monte Carlo runner and results.
 import { CLASSES, SKILLS, MAPS, RANKS, MAXLV } from './gamedata.js';
-import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH } from './engine.js';
+import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH, rankGap, rankGroup } from './engine.js';
 import { createStage, GROUND_LIST } from './scene.js';
 import { ST_KO } from './status.js';
 import { loadSheets, designOf, sheet, sheetURL, faceIndex } from './sheets.js';
@@ -19,7 +19,8 @@ const TYPE_KO = ['일반', '정예', '보스'];
 // stat / status names follow the Korean client's wording (skill descriptions, KR resources)
 const ADV = [['critRate', '치명타율 %'], ['critDmg', '치명타 대미지 %'], ['critRes', '치명타 저항 %'], ['blockRate', '막기율 %'], ['blockEff', '막기 대미지 저항 %'], ['acc', '명중 %'],
   ['dmgBoost', '대미지 보너스 %'], ['dmgRes', '대미지 저항 %'], ['dodge', '회피 %'], ['effHit', '효과 적중 %'], ['effRes', '효과 저항 %'], ['mastery', '원소 마스터리'],
-  ['phyMastery', '물리 마스터리'], ['aff', '원소 친화력'], ['res', '원소 저항'], ['phyRes', '물리 저항'], ['aegis', '원소 가호']];
+  ['phyMastery', '물리 마스터리'], ['aff', '원소 친화력'], ['res', '원소 저항'], ['phyRes', '물리 저항'], ['aegis', '원소 가호'],
+  ['pveAdd', 'PvE 대미지 보너스 %'], ['pveRes', 'PvE 대미지 저항 %']];
 const EFF_KO = { abreak: '방어력 감소', weak: '약화', slow: '감속', stun: '스턴', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명', cold: '냉기', wet: '습윤', dot: '침식', riven: '막기율 감소', sigil: '낙인', vuln: '취약', randDebuff: '랜덤 디버프', kb: '넉백' };
 const effName = (e) => (e.k === 'kb' ? `넉백 ${e.n || 1}칸${e.side ? '(옆으로)' : ''}` : (e.k === 'dot' && e.el && e.el !== 'dark' ? (e.el === 'fire' ? '작열' : '지속 대미지') : EFF_KO[e.k] || e.k) + (e.v && ['abreak', 'weak', 'slow'].includes(e.k) ? ` ${e.v >= 0.3 ? 2 : 1}` : ''));
 const MODE_KO = { fantasia: '환상계단', dungeon: '일일 던전', conquest: '길드 토벌 (길드 보스 460층)', crucible: '신수 시련', raid: '혼돈 침공 (혼돈의 폭군 레이드)' };
@@ -80,18 +81,27 @@ function demo() {
 }
 const b64e = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const b64d = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
+// setups saved before the monsters' elemental stats were added carry 14-number stat blocks: swap in the current
+// block of the same floor / tier (same key and the same HP, ATK, DEF, SPD) so the saved fight gets them too
+function upgradeFix(key, fix) {
+  const same = (a) => Array.isArray(a) && a.length > 14 && a[0] === fix[0] && a[1] === fix[1] && a[2] === fix[2] && a[3] === fix[3];
+  const m = MOB.get(key); if (m && same(m.st)) return m.st;
+  for (const md of ENC) for (const g of md.groups) if (g.st) for (let i = 0; i < g.fights.length; i++) { const f = g.fights[i]; for (let j = 1, ui = 0; j < f.length; j += 4, ui++) if (f[j] === key && same(g.st[i] && g.st[i][ui])) return g.st[i][ui]; }
+  return fix;
+}
 function sanitize(s) {
   if (!s || !Array.isArray(s.teams) || s.teams.length !== 2) return null;
   const d = demo();
   const out = { ...d, ...s, v: 2, roundCap: { ...d.roundCap, ...(s.roundCap || {}) }, preset: { ...d.preset, ...(s.preset && s.preset.mode ? s.preset : {}) } };
   out.mode = out.mode === 'pvp' ? 'pvp' : 'pve';
+  out.prank = typeof s.prank === 'string' && /^[A-Za-z0-9]{0,16}$/.test(s.prank) ? s.prank : '';
   out.ground = GROUND_LIST.some(([k]) => k === s.ground) ? s.ground : 'forest';
   const cellOf = (c) => (Array.isArray(c) && c.length === 2 && c.every((v) => Number.isInteger(v)) ? [c[0], c[1]] : undefined);
   const four =(arr, ok) => { const a = (Array.isArray(arr) ? arr : []).slice(0, 4).map((x) => (x && ok(x) ? x : null)); while (a.length < 4) a.push(null); return a; };
   out.teams = s.teams.map((t) => (Array.isArray(t) ? t : []).filter((u) => u && (u.kind === 'mob' ? MOB.has(u.key) : CLS.has(u.cls))).map((u) => {
     if (u.kind === 'mob') {
       const m = { uid: u.uid || uid(), kind: 'mob', key: u.key, level: +u.level || 1, count: Math.max(1, Math.min(20, +u.count || 1)), sr: u.sr || MOB.get(u.key).sr };
-      if (Array.isArray(u.fix) && u.fix.length === 14 && u.fix.every((x) => typeof x === 'number' && isFinite(x))) m.fix = u.fix;
+      if (Array.isArray(u.fix) && [14, 20, 28].includes(u.fix.length) && u.fix.every((x) => typeof x === 'number' && isFinite(x))) m.fix = u.fix.length === 14 ? upgradeFix(u.key, u.fix) : u.fix;
       if (u.uws) m.uws = 1;
       if (cellOf(u.cell)) m.cell = cellOf(u.cell);
       return m;
@@ -112,7 +122,7 @@ let saveT = 0, rosterT = 0, lastRes = null, lastSetup = null, running = false;
 
 function toSetup() {
   return {
-    mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100, pvEst: state.pvEst !== false,
+    mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100, pvEst: state.pvEst !== false, rank: state.prank || '',
     teams: state.teams.map((t) => t.map((u) => (u.kind === 'mob' ? { kind: 'mob', uid: u.uid, key: u.key, level: u.level, count: u.count, sr: u.sr, fix: u.fix, uws: u.uws, cell: u.cell }
       : { kind: 'hero', uid: u.uid, name: u.name, cls: u.cls, level: u.level, atk: u.atk, def: u.def, hp: u.hp, spd: u.spd, ...u.adv, skills: u.skills, charms: u.charms, pet: u.pet, cell: u.cell }))),
   };
@@ -394,7 +404,13 @@ function mobHtml(u) {
       <div class="grid2">${fld('레벨', 'level', u.level, `min="1" max="2000" step="0.1" ${fixed ? 'readonly title="층·단계에 고정된 능력치입니다. 다른 층은 전투 불러오기에서 고르세요."' : ''}`)}${fld('수량', 'count', u.count, 'min="1" max="20"')}</div>
       ${fixed ? '<div class="note" style="margin:6px 0 0">층·단계 기준 고정 능력치 (게임 자료로 계산)</div>' : ''}
       ${u.uws ? '<div class="note" style="margin:4px 0 0">길드 토벌 보스 효과 United We Stand: 처음 3턴 동안 받는 대미지 99% 감소</div>' : ''}
-      <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}</div>
+      ${(() => { // PvE rank gap for this monster against the party rank picked in the settings
+        if (!state.prank || state.mode === 'pvp') return '';
+        const mr = rankGroup(mob.map ? MAP.get(mob.map).sr : u.sr || mob.sr), g = rankGap(state.prank, mr, !!mob.map);
+        const f = (x) => (x >= 1 ? '×' : '÷') + (Math.round((x >= 1 ? x : 1 / x) * 100) / 100).toLocaleString('ko-KR');
+        return `<div class="note" style="margin:4px 0 0">랭크 차이 보정: ${g === 1 ? '같은 랭크 — 보정 없음' : `내 대미지 ${f(g)}, 몹 대미지 ${f(1 / g)}`}</div>`;
+      })()}
+      <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}${st.ele ? (() => { const e = st.ele, a = Object.values(e.aff), g = Object.values(e.aeg), one = (v) => (v.every((x) => x === v[0]) ? fmt(v[0]) : `${fmt(Math.min(...v))}~${fmt(Math.max(...v))}`); return `${a.some(Boolean) ? `<span>원소 친화력 ${one(a)}</span><span>원소 가호 ${one(g)}</span>` : ''}${e.mast ? `<span>원소·물리 마스터리 ${fmt(e.mast)}</span><span>원소·물리 저항 ${fmt(e.eres)}</span>` : ''}`; })() : ''}</div>
       ${mob.raid ? `<div class="note" style="margin:4px 0 0">레이드 보스 · 몸체 5×5 · 이동력 ${mob.raid.move}칸 · ${mob.raid.rounds}라운드. 섬멸의 발톱(9×3)은 게임 자료에 대미지 계수가 없어 뺐습니다.</div>` : mob.kit ? `<div class="note" style="margin:4px 0 0">몸체 ${mob.sz}×${mob.sz} · 스킬은 게임 자료의 타격 구역을 한 타씩 처리합니다(넉백으로 밀린 대상이 다음 타격 범위에 다시 들어가면 또 맞음). 계수 조정(「몹 스킬 계수」)은 적용되지 않습니다.</div>` : ''}
       <div class="sec"><span>${mob.kit ? '스킬 (게임 자료 · 준비된 스킬을 순서대로 모두 사용)' : `스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)`}</span></div>${sk}${pvHtml}
     </div></article>`;
@@ -538,6 +554,7 @@ function syncSettings() {
   $('#balLabel').hidden = state.mode !== 'pvp';
   const hasMob = state.teams.some((t) => t.some((u) => u.kind === 'mob'));
   $('#mobCoefLabel').hidden = !hasMob;
+  $('#rankSel').value = state.prank || ''; $('#rankLabel').hidden = !hasMob || state.mode === 'pvp';
   $('#pvLabel').hidden = !hasMob || !state.teams.some((t) => t.some((u) => u.kind === 'mob' && (MOB.get(u.key).pv || []).some((id) => MOB_PV[id] && MOB_PV[id].est)));
 }
 function setMode(mode, keep) {
@@ -555,6 +572,7 @@ $('#modeSeg').addEventListener('click', (e) => { const b = e.target.closest('but
 $('#runsSel').addEventListener('change', (e) => { state.runs = +e.target.value; touch(true); });
 $('#capInp').addEventListener('change', (e) => { state.roundCap[state.mode] = Math.max(1, Math.min(200, Math.round(+e.target.value || 15))); e.target.value = state.roundCap[state.mode]; touch(true); });
 $('#mobCoefInp').addEventListener('change', (e) => { state.mobCoef = Math.max(10, Math.min(500, +e.target.value || 100)); e.target.value = state.mobCoef; renderTeam(0); renderTeam(1); touch(true); });
+$('#rankSel').addEventListener('change', (e) => { state.prank = e.target.value || ''; renderTeam(1); touch(true); });
 $('#balChk').addEventListener('change', (e) => { state.pvpBalance = e.target.checked; touch(true); });
 $('#pvChk').addEventListener('change', (e) => { state.pvEst = e.target.checked; renderTeam(0); renderTeam(1); touch(true); });
 $('#resetBtn').addEventListener('click', () => { state = demo(); openSet.clear(); lastRes = null; $('#results').innerHTML = ''; $('#winTag').hidden = true; renderAll(); touch(); toast('예시 구성으로 되돌렸습니다'); });
@@ -737,7 +755,7 @@ function fieldChips(setup) {
   if (setup.mode === 'pvp' && setup.pvpBalance !== false) { c.push(['균형의 미 · 캐릭터 대상 대미지 ×0.2', 'PvP 전장 효과 (Beauty of Balance)']); c.push(['12라운드부터 라운드마다 대미지 +10%p · 치유·실드 감소', 'PvP 전장 효과 (Swift Resolution)']); }
   if (setup.teams.some((t) => t.some((u) => u.uws))) c.push(['United We Stand · 보스가 첫 3턴 받는 대미지 −99%', '길드 토벌 층 효과']);
   c.push([`라운드 제한 ${setup.roundCap}R`, '한 라운드 = 생존한 전원이 한 번씩 행동']);
-  if (setup.teams.some((t) => t.some((u) => u.kind === 'mob'))) { if (setup.mobCoef !== 1) c.push([`몹 스킬 계수 ${Math.round(setup.mobCoef * 100)}%`, '']); if (setup.pvEst === false) c.push(['몹 비전 추정값 꺼짐', '']); }
+  if (setup.teams.some((t) => t.some((u) => u.kind === 'mob'))) { if (setup.mobCoef !== 1) c.push([`몹 스킬 계수 ${Math.round(setup.mobCoef * 100)}%`, '']); if (setup.pvEst === false) c.push(['몹 비전 추정값 꺼짐', '']); if (setup.rank && setup.mode !== 'pvp') { const o = [...$('#rankSel').options].find((x) => x.value === setup.rank); c.push([`내 랭크 ${o ? o.text : setup.rank} · 랭크 차이 보정`, '']); } }
   return c.map(([t, title]) => `<span class="fchip" title="${esc(title)}">${t}</span>`).join('');
 }
 function playSeed(setup, seed) {

@@ -2,7 +2,7 @@
 // Pure module: runs in the page, in a Web Worker and in Node.
 import { LV, FLAT, RANK_Q, RANK_R, SKILLS, MOBS, CURVES, MAPS, MAXLV, CLASSES } from './gamedata.js';
 
-import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV } from './gamedata2.js';
+import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV, RANK_BASE } from './gamedata2.js';
 export { MOB_PV };
 
 // official Korean client names / descriptions + extra tables
@@ -37,9 +37,17 @@ export function rngFrom(seed) {
 
 /* ───────── data helpers ───────── */
 /** precomputed stat block (guild conquest floors, Hieromon tiers, mobs without a shipped curve) → mobStats() shape */
+const ELS = ['wind', 'water', 'fire', 'light', 'dark'];
+/** monster elemental stats: mastery / resistance (elemental, physical), affinity / aegis per element */
+const eleOf = (mast, pmast, eres, pres, add, red) => ({ mast, pmast, eres, pres, aff: Object.fromEntries(ELS.map((e, i) => [e, add[i] || 0])), aeg: Object.fromEntries(ELS.map((e, i) => [e, red[i] || 0])) });
 export function stFrom(a, level) {
   const b = LV.eres[lvi(level)] || 1;
-  return { hp: a[0], atk: a[1], def: a[2], spd: a[3], critRate: a[4], critDmg: a[5], critRes: a[6], blockRate: a[7], blockEff: a[8], acc: a[9], dmgBoost: a[10], dmgRes: a[11], effHit: (a[12] / b) * 100, effRes: (a[13] / b) * 100 };
+  const st = { hp: a[0], atk: a[1], def: a[2], spd: a[3], critRate: a[4], critDmg: a[5], critRes: a[6], blockRate: a[7], blockEff: a[8], acc: a[9], dmgBoost: a[10], dmgRes: a[11], effHit: (a[12] / b) * 100, effRes: (a[13] / b) * 100 };
+  // 28-number blocks carry the elemental stats, 20-number ones one affinity / aegis for all five elements
+  // (older 14-number blocks, e.g. saved setups, leave them at 0)
+  if (a.length >= 28) st.ele = eleOf(a[14], a[15], a[16], a[17], a.slice(18, 23), a.slice(23, 28));
+  else if (a.length >= 20) st.ele = eleOf(a[14], a[15], a[16], a[17], Array(5).fill(a[18]), Array(5).fill(a[19]));
+  return st;
 }
 export function mobStats(key, level, sr) {
   const mob = MOB.get(key);
@@ -56,7 +64,23 @@ export function mobStats(key, level, sr) {
     blockRate: get('BlockPercent') / 100, blockEff: (get('BlockValuePercent') + (x.BlockValuePercent || 0)) / 100, acc: get('BlockAvoidPercent') / 100,
     // Effect Hit / Effect RES are flat: percent = value ÷ Base Effect RES of the level
     dmgBoost: get('DmgAddPercent') / 100, dmgRes: get('DmgReducePercent') / 100, effHit: (get('EffectRate') / (LV.eres[lvi(level)] || 1)) * 100, effRes: (get('EffectDodge') / (LV.eres[lvi(level)] || 1)) * 100,
+    ele: eleOf(get('ElementMaster'), get('KongFuMaster'), get('ElementResistance'), get('KongFuResistance'),
+      ELS.map((e) => get(e[0].toUpperCase() + e.slice(1) + 'DamageAdd') || get('EleAdd')), ELS.map((e) => get(e[0].toUpperCase() + e.slice(1) + 'DamageReduce') || get('EleRed'))),
   };
+}
+/* PvE rank gap (BattleFormulaHandler.DamageRankOffsetDamage): 1 + |a − b| from this table, the higher rank deals ×,
+   the lower ÷; Fantasia Ascent applies a second table on top (both from the game's enemy data) */
+export const RANK_ORDER = ['Norank', 'Blackiron', 'Bronze', 'Silver', 'Gold', 'Saint', 'Legend', 'Angel', 'Godtouched1', 'Godtouched2', 'Godtouched3', 'Demigod1', 'Demigod2', 'Demigod3'];
+const RANK_DMG = { Norank: 0, Blackiron: 0.7, Bronze: 0.7, Silver: 0.7, Gold: 15, Saint: 95, Legend: 300, Angel: 700, Godtouched1: 900, Godtouched2: 1500, Godtouched3: 2000, Demigod1: 2500, Demigod2: 3000, Demigod3: 3500 };
+const DEMON_DMG = { Silver: 0.4, Gold: 1, Saint: 1, Legend: 1, Angel: 1, Godtouched1: 1, Godtouched2: 1, Godtouched3: 1, Demigod1: 1, Demigod2: 1, Demigod3: 1 };
+/** sub-rank key → rank group ('Saint1' → 'Saint', 'Godtouched1_3' → 'Godtouched1') */
+export const rankGroup = (sr) => (!sr ? null : /^(Godtouched\d|Demigod\d)/.test(sr) ? /^(Godtouched\d|Demigod\d)/.exec(sr)[1] : sr.replace(/\d+$/, ''));
+export function rankGap(ra, rb, demon) {
+  if (!ra || !rb || ra === rb) return 1;
+  const oa = RANK_ORDER.indexOf(ra), ob = RANK_ORDER.indexOf(rb); if (oa < 0 || ob < 0) return 1;
+  let n = 1 + Math.abs((RANK_DMG[ra] || 0) - (RANK_DMG[rb] || 0));
+  if (demon) n *= 1 + Math.abs((DEMON_DMG[ra] || 0) - (DEMON_DMG[rb] || 0));
+  return oa > ob ? n : 1 / n;
 }
 export function heroBase(level) {
   const l = lvi(level);
@@ -77,9 +101,9 @@ function rankScale(level) { return level > 220 ? 1500 : level > 190 ? 150 : leve
 const skillReach = (s) => { const t = s.tg; if (!t) return 0; return (s.leap || 0) + (t.t === 'S' ? t.r : t.t === 'T' || t.t === 'TQ' ? t.r + t.ar : t.t === 'F' ? t.h : t.r || 0); };
 
 /* ───────── setup → prepared template ───────── */
-const PCT = ['critRate', 'critDmg', 'critRes', 'blockRate', 'blockEff', 'acc', 'dmgBoost', 'dmgRes', 'effHit', 'effRes', 'dodge'];
+const PCT = ['critRate', 'critDmg', 'critRes', 'blockRate', 'blockEff', 'acc', 'dmgBoost', 'dmgRes', 'effHit', 'effRes', 'dodge', 'pveAdd', 'pveRes'];
 const RAW = ['mastery', 'phyMastery', 'aff', 'res', 'phyRes', 'aegis'];
-export const HERO_DEFAULTS = { critRate: 5, critDmg: 50, critRes: 0, blockRate: 5, blockEff: 100, acc: 0, dmgBoost: 0, dmgRes: 0, effHit: 0, effRes: 0, dodge: 0, mastery: 0, phyMastery: 0, aff: 0, res: 0, phyRes: 0, aegis: 0 };
+export const HERO_DEFAULTS = { critRate: 5, critDmg: 50, critRes: 0, blockRate: 5, blockEff: 100, acc: 0, dmgBoost: 0, dmgRes: 0, effHit: 0, effRes: 0, dodge: 0, pveAdd: 0, pveRes: 0, mastery: 0, phyMastery: 0, aff: 0, res: 0, phyRes: 0, aegis: 0 };
 
 function buildHero(d, opts) {
   const u = { kind: 'hero', name: d.name || '캐릭터', cls: d.cls, level: Math.max(1, +d.level || 1), move: 4, ref: d.uid };
@@ -180,7 +204,7 @@ function buildPet(d, owner) {
   return u;
 }
 function buildMob(key, level, opts, sr, fix, uws) {
-  const mob = MOB.get(key), st = Array.isArray(fix) && fix.length === 14 ? stFrom(fix, level) : mobStats(key, level, sr);
+  const mob = MOB.get(key), st = Array.isArray(fix) && fix.length >= 14 ? stFrom(fix, level) : mobStats(key, level, sr);
   if (!st) throw new Error(`${mob.ko}: 이 레벨·랭크의 능력치 자료가 없습니다`);
   // body size: Hieromon (신수 시련) 4×4 / 5×5 from the game data (mob.sz); other bosses have no public body
   // data and stand on 2×2 (assumption: the game's dash text names bodies "larger than 4 grids", so 4-cell bodies exist)
@@ -189,6 +213,17 @@ function buildMob(key, level, opts, sr, fix, uws) {
   u.atk = st.atk; u.def = st.def; u.hpMax = st.hp; u.spd = st.spd;
   for (const k of PCT) u[k] = (st[k] || 0) / 100;
   for (const k of RAW) u[k] = 0;
+  // the monster's own elemental stats (game curves): mastery / resistance, affinity / aegis per element;
+  // physical hits use the mean of the five (Damage(): ElementType None / Physical)
+  if (st.ele) {
+    const e = st.ele, mean = (o) => ELS.reduce((s, k) => s + (o[k] || 0), 0) / 5;
+    u.mastery = e.mast || 0; u.phyMastery = e.pmast || 0; u.res = e.eres || 0; u.phyRes = e.pres || 0;
+    u.affEl = { ...e.aff, phy: mean(e.aff) }; u.aegisEl = { ...e.aeg, phy: mean(e.aeg) };
+  }
+  // the elemental formula divides by the side's own rank bases: the monster's sub-rank when it has one
+  const sub = mob.map ? MAP.get(mob.map).sr : sr || mob.sr;
+  if (sub && RANK_BASE && RANK_BASE[sub]) { u.bMas = RANK_BASE[sub][0]; u.bAff = RANK_BASE[sub][1]; }
+  u.rk = rankGroup(sub); u.demon = !!mob.map; // Fantasia Ascent: the second rank table
   const mc = opts.mobCoef != null ? opts.mobCoef : 1;
   // boss kit (Hieromon, raid boss): the game's own hit configs, coefficients (per hit) and cooldowns; the opening
   // cooldown is CD + 1. Summons are not simulated.
@@ -303,7 +338,8 @@ export function prepare(setup) {
   units.forEach((u, i) => { u.id = i; });
   for (const u of units) { if (u.ownerRef) { u.owner = u.ownerRef.id; delete u.ownerRef; } if (u.petRef) { u.petI = u.petRef.id; delete u.petRef; } }
   const pvp = setup.mode === 'pvp';
-  return { units, pvp, balance: pvp && setup.pvpBalance !== false, roundCap: Math.max(1, +setup.roundCap || (pvp ? 100 : 15)) };
+  // prank: the party's rank group for the PvE rank gap (null = same rank as each monster, no gap)
+  return { units, pvp, balance: pvp && setup.pvpBalance !== false, roundCap: Math.max(1, +setup.roundCap || (pvp ? 100 : 15)), prank: !pvp && RANK_ORDER.includes(setup.rank) ? setup.rank : null };
 }
 
 /* ───────── battle ───────── */
@@ -426,14 +462,23 @@ export function simulate(P, seed, log) {
   function elemMult(a, t, el) {
     const la = lvi(a.level), lt = lvi(t.level);
     const phy = el === 'phy';
-    const off = 1 + (a.aff + (a.affEl[el] || 0)) / LV.aff[lt] + (phy ? a.phyMastery : a.mastery) / LV.mas[lt];
-    const de = 1 + t.aegis / LV.aff[la] + (phy ? t.phyRes : t.res) / LV.mas[la];
+    // affinity / mastery over the target's bases, aegis / resistance over the attacker's (a monster uses its sub-rank bases)
+    const off = 1 + (a.aff + (a.affEl[el] || 0)) / (t.bAff || LV.aff[lt]) + (phy ? a.phyMastery : a.mastery) / (t.bMas || LV.mas[lt]);
+    const de = 1 + (t.aegis + (t.aegisEl ? t.aegisEl[el] || 0 : 0)) / (a.bAff || LV.aff[la]) + (phy ? t.phyRes : t.res) / (a.bMas || LV.mas[la]);
     let m = off / de;
     if (t.er && t.er[el]) m *= 1 + t.er[el];
     if (el === 'water' && t.cold) m *= 1 + 0.05 * t.cold;
     return m;
   }
-  function levelOffset(a, t) { const g = Math.floor(a.level) - Math.floor(t.level); const f = 1 + 0.04 * Math.min(4, Math.abs(g)); return g > 0 ? f : g < 0 ? 1 / f : 1; }
+  // level gap: 4% a level up to 4 levels, 16% for 5–20 levels, 10% beyond 20 (the game's level offset table);
+  // PvE also applies the rank gap (party rank set in the setup; a monster's rank comes from its sub-rank)
+  function levelOffset(a, t) {
+    const g = Math.floor(a.level) - Math.floor(t.level), ag = Math.abs(g);
+    let f = g ? 1 + (ag > 20 ? 0.1 : 0.04 * Math.min(4, ag)) : 1;
+    f = g > 0 ? f : g < 0 ? 1 / f : 1;
+    if (!P.pvp && P.prank) { const ra = a.kind === 'mob' ? a.rk : P.prank, rb = t.kind === 'mob' ? t.rk : P.prank; f *= rankGap(ra, rb, a.demon || t.demon); }
+    return f;
+  }
 
   /** raw damage application incl. shields; returns HP damage dealt */
   function applyDamage(a, t, d, o) {
@@ -610,7 +655,9 @@ export function simulate(P, seed, log) {
     if (em <= 0) { if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d: 0, k: 5, hp: t.hp, sh: t.shield, el }); return 0; } // element immunity (비전)
     let d = (o.base != null ? o.base : atk * coef + flat) * (atk / (atk + def));
     d *= em;
-    d *= (1 + a.dmgBoost + a.bDmg + boost) / (1 + t.dmgRes);
+    // PvE Bonus DMG (against a monster) / PvE DMG RES (from a monster): the character screen's MonsterDmgAdd/ReduceScale
+    const pveA = !P.pvp && t.kind === 'mob' ? a.pveAdd || 0 : 0, pveR = !P.pvp && a.kind === 'mob' ? t.pveRes || 0 : 0;
+    d *= (1 + a.dmgBoost + a.bDmg + boost + pveA) / (1 + t.dmgRes + pveR);
     d *= (1 + t.vuln + t.sigil) * t.red * redX;
     const acc = a.acc + (a.bAcc || 0) + (o.acc || 0);
     let kind = 0;

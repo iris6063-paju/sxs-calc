@@ -7,6 +7,7 @@ import { PV } from './passives.mjs';
 import { PFX } from './pets_fx.mjs';
 import { RAID } from './raid.mjs';
 import { KIT_KO, KIT_STATE, KIT_SKIP } from './bosskits.mjs';
+import { RANK_BASE } from './rankbases.mjs';
 import { moveAndSize, mobExtras } from './skilltext.mjs';
 
 const [, , DL, DL2, OUT] = process.argv;
@@ -242,7 +243,9 @@ if (fs.existsSync(petsPath)) {
 const eidx = J('enemies_index.json'), esk = J('enemy_skills.json');
 const have = new Set(fs.readdirSync(DL));
 const curveFile = {}; for (const f of ['0', '1', '2', '3', '4', '5', '6', 'st']) if (have.has(`curve_${f}.json`)) curveFile[f] = J(`curve_${f}.json`);
-const KEEP = ['MaxHp', 'Attack', 'Defence', 'Speed', 'CritRatePercent', 'CritPowerPercent', 'CritAvoidPercent', 'BlockPercent', 'BlockValuePercent', 'BlockAvoidPercent', 'DmgAddPercent', 'DmgReducePercent', 'EffectRate', 'EffectDodge'];
+// monster elemental stats (Damage(): affinity / aegis per element, mastery / resistance) ride along with the rest
+const ELX = ['ElementMaster', 'KongFuMaster', 'ElementResistance', 'KongFuResistance', 'WindDamageAdd', 'WaterDamageAdd', 'FireDamageAdd', 'LightDamageAdd', 'DarkDamageAdd', 'WindDamageReduce', 'WaterDamageReduce', 'FireDamageReduce', 'LightDamageReduce', 'DarkDamageReduce'];
+const KEEP = ['MaxHp', 'Attack', 'Defence', 'Speed', 'CritRatePercent', 'CritPowerPercent', 'CritAvoidPercent', 'BlockPercent', 'BlockValuePercent', 'BlockAvoidPercent', 'DmgAddPercent', 'DmgReducePercent', 'EffectRate', 'EffectDodge', ...ELX];
 const CURVES2 = {}, RPG = {}, MOBS2 = [], seenMob = new Set();
 const baseData = fs.existsSync(path.join(path.dirname(OUT), 'gamedata.js')) ? fs.readFileSync(path.join(path.dirname(OUT), 'gamedata.js'), 'utf8') : '';
 const baseCurves = new Set([...baseData.matchAll(/"(\d{3,5})":\{"lo":/g)].map((m) => m[1]));
@@ -266,6 +269,11 @@ function ensureCurve(cls) {
   const cf = curveFile[eidx.classFile[cls]], cv = cf && cf[cls]; if (!cv) return false;
   const hi = Math.min(cv.hi, 380), rows = cv.r.slice(0, hi - cv.lo + 1), out = { lo: cv.lo, hi, c: {}, v: {} };
   cv.k.forEach((k, i) => { if (!KEEP.includes(k)) return; const col = rows.map((r) => (r ? r[i] : 0)); if (col.every((x) => x === col[0])) { if (col[0]) out.c[k] = col[0]; } else out.v[k] = col; });
+  // the five per-element columns are usually identical: keep one (EleAdd / EleRed) when they are
+  for (const [kind, name] of [['DamageAdd', 'EleAdd'], ['DamageReduce', 'EleRed']]) {
+    const ks = ['Wind', 'Water', 'Fire', 'Light', 'Dark'].map((e) => e + kind);
+    for (const part of ['c', 'v']) { if (!ks.every((k) => k in out[part])) continue; const first = JSON.stringify(out[part][ks[0]]); if (ks.every((k) => JSON.stringify(out[part][k]) === first)) { out[part][name] = out[part][ks[0]]; for (const k of ks) delete out[part][k]; } }
+  }
   CURVES2[cls] = out; return true;
 }
 /* exact enemy stats the client's way (BattleFormulaHandler.CalcMonsterBattleProps), used where we ship no curve */
@@ -290,8 +298,12 @@ function exactStats(def, level, sr) {
   const g = (k) => v[k] || 0;
   // same layout as engine mobStats(): hp, atk, def, spd, then percents ×100
   // EffectRate / EffectDodge are flat values (converted with the level's Base Effect RES in the engine), the rest are percent ×100
+  // 28 numbers: the 14 above, then the 14 elemental ones (ELX order, raw values); 20 when the five elements share
+  // one affinity and one aegis (the usual case): mastery ×4, affinity, aegis
+  const ex = ELX.map(g), add = ex.slice(4, 9), red = ex.slice(9, 14);
+  const tail = add.every((x) => x === add[0]) && red.every((x) => x === red[0]) ? [...ex.slice(0, 4), add[0], red[0]] : ex;
   return [g('MaxHp'), g('Attack'), g('Defence'), g('Speed'), g('CritRatePercent') / 100, g('CritPowerPercent') / 100, g('CritAvoidPercent') / 100, g('BlockPercent') / 100,
-    g('BlockValuePercent') / 100, g('BlockAvoidPercent') / 100, g('DmgAddPercent') / 100, g('DmgReducePercent') / 100, g('EffectRate'), g('EffectDodge')].map((x) => +x.toFixed(2));
+    g('BlockValuePercent') / 100, g('BlockAvoidPercent') / 100, g('DmgAddPercent') / 100, g('DmgReducePercent') / 100, g('EffectRate'), g('EffectDodge'), ...tail].map((x) => +x.toFixed(2));
 }
 /* boss kits from the game data (purrwikimania.com simulator data assets/duel.json `bosses`, see tools/bosskits.mjs):
    every hit config with its cells ([sideways, forward], game frame), knockback / pull, statuses, random strikes, leaps and gates */
@@ -449,6 +461,7 @@ export const FLAT2 = ${JSON.stringify(FLAT2)};
 export const CHARMS = ${JSON.stringify(CHARMS)};
 export const PETS = ${JSON.stringify(PETS)};
 export const MOBS2 = ${JSON.stringify(MOBS2)};
+export const RANK_BASE = ${JSON.stringify(RANK_BASE)};
 export const CURVES2 = ${JSON.stringify(CURVES2)};
 export const RPG = ${JSON.stringify(RPG)};
 export const ENC = ${JSON.stringify(ENC)};

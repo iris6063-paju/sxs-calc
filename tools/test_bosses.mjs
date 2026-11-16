@@ -71,5 +71,14 @@ function casts(P, r, bid) {
   let best = 0, cur = null; for (const e of r.events) { if (e.e === 'cast') cur = e.u === mid ? { n: 0 } : null; else if (e.e === 'turn') { if (cur) best = Math.max(best, cur.n); cur = null; } else if (e.e === 'hit' && cur && e.a === mid && e.k !== 3) cur.n++; }
   ok(best >= 4, `Magma Fiend's casts land up to ${best} strikes`);
 }
+// 5) monster elemental stats (game curves) and the PvE rank gap
+{
+  const O = byName('Yamata no Orochi'), b = heroBase(O.lv);
+  const party = [0, 1, 2].map((i) => ({ kind: 'hero', uid: 'e' + i, cls: 'Zhanshi', level: O.lv, atk: b.atk * 3, def: b.def * 3, hp: b.hp * 1e4, spd: b.spd, skills: [{ id: 10000, rank: 6 }] }));
+  const mobDmg = (fix, rank) => { const P = prepare({ mode: 'pve', roundCap: 5, rank, teams: [party, [{ kind: 'mob', uid: 'o', key: O.k, level: O.lv, sr: O.sr, count: 1, fix }]] }); let s = 0; for (const e of simulate(P, 3, true).events) if (e.e === 'hit' && P.units[e.a].kind === 'mob') s += e.d; return s; };
+  const old = mobDmg(O.st.slice(0, 14)), now = mobDmg(O.st), low = mobDmg(O.st, 'Gold');
+  ok(O.st.length >= 20 && now / old > 1.5, `Master Orochi's water attacks carry its affinity / mastery: ×${(now / old).toFixed(2)} against 14-number stats`);
+  ok(Math.abs(low / now - 81) < 0.5, `party rank Champion against a Master monster: monster DMG ×${(low / now).toFixed(1)} (1 + |95 − 15|)`);
+}
 console.log(bad ? `FAILURES: ${bad}` : 'all boss kit tests passed');
 process.exit(bad ? 1 : 0);

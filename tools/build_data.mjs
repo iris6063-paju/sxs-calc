@@ -372,8 +372,21 @@ const CURVES = {};
 const MOBS = [];
 const MAPS = [];
 const mobIndex = new Map();
-const KEEP = ['MaxHp', 'Attack', 'Defence', 'Speed', 'CritRatePercent', 'CritPowerPercent', 'CritAvoidPercent', 'BlockPercent', 'BlockValuePercent', 'BlockAvoidPercent', 'DmgAddPercent', 'DmgReducePercent', 'EffectRate', 'EffectDodge'];
+// monster elemental stats (affinity / aegis per element, mastery / resistance) for the PvE damage formula
+const KEEP = ['MaxHp', 'Attack', 'Defence', 'Speed', 'CritRatePercent', 'CritPowerPercent', 'CritAvoidPercent', 'BlockPercent', 'BlockValuePercent', 'BlockAvoidPercent', 'DmgAddPercent', 'DmgReducePercent', 'EffectRate', 'EffectDodge',
+  'ElementMaster', 'KongFuMaster', 'ElementResistance', 'KongFuResistance', 'WindDamageAdd', 'WaterDamageAdd', 'FireDamageAdd', 'LightDamageAdd', 'DarkDamageAdd', 'WindDamageReduce', 'WaterDamageReduce', 'FireDamageReduce', 'LightDamageReduce', 'DarkDamageReduce'];
 let droppedSkills = 0, keptSkills = 0;
+// the five per-element columns are usually identical: keep one (EleAdd / EleRed) when they are
+function foldEle(out) {
+  for (const [kind, name] of [['DamageAdd', 'EleAdd'], ['DamageReduce', 'EleRed']]) {
+    const ks = ['Wind', 'Water', 'Fire', 'Light', 'Dark'].map((e) => e + kind);
+    for (const part of ['c', 'v']) {
+      if (!ks.every((k) => k in out[part])) continue;
+      const first = JSON.stringify(out[part][ks[0]]);
+      if (ks.every((k) => JSON.stringify(out[part][k]) === first)) { out[part][name] = out[part][ks[0]]; for (const k of ks) delete out[part][k]; }
+    }
+  }
+}
 const passiveUnparsed = {};
 for (const [mid, file, ko, en, sr, rankKo] of MAP_DEF) {
   const d = J(file);
@@ -393,6 +406,7 @@ for (const [mid, file, ko, en, sr, rankKo] of MAP_DEF) {
         const col = rows.map((row) => (row ? row[i] : 0));
         if (col.every((x) => x === col[0])) { if (col[0] !== 0) out.c[k] = col[0]; } else out.v[k] = col;
       });
+      foldEle(out);
       CURVES[cls] = out;
       log('curve', cls, `lv ${cv.lo}-${cv.hi}`, 'const', JSON.stringify(out.c), 'varying', Object.keys(out.v).join(','));
     }
