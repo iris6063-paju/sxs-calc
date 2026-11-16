@@ -185,13 +185,14 @@ function buildMob(key, level, opts, sr, fix, uws) {
   // body size: Hieromon (신수 시련) 4×4 / 5×5 from the game data (mob.sz); other bosses have no public body
   // data and stand on 2×2 (assumption: the game's dash text names bodies "larger than 4 grids", so 4-cell bodies exist)
   const sz = mob.sz || (mob.ty === 2 ? 2 : 1);
-  const u = { kind: 'mob', name: mob.ko, key, level, move: mob.raid ? mob.raid.move : 4, sz, big: sz > 1, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null, uws: !!uws, raid: !!mob.raid };
+  const u = { kind: 'mob', name: mob.ko, key, level, move: mob.raid ? mob.raid.move : 4, sz, big: sz > 1, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null, uws: !!uws, raid: !!mob.raid, kit: !!mob.kit };
   u.atk = st.atk; u.def = st.def; u.hpMax = st.hp; u.spd = st.spd;
   for (const k of PCT) u[k] = (st[k] || 0) / 100;
   for (const k of RAW) u[k] = 0;
   const mc = opts.mobCoef != null ? opts.mobCoef : 1;
-  // raid boss: the game's own coefficients (per hit) and cooldowns; the opening cooldown is CD + 1
-  if (mob.raid) u.skills = mob.sk.map((s) => ({ s: { ...s, kind: 'dmg' }, n: { coef: s.rc, flat: 0 }, cd: s.cd || 0, init: (s.cd || 0) + 1 }));
+  // boss kit (Hieromon, raid boss): the game's own hit configs, coefficients (per hit) and cooldowns; the opening
+  // cooldown is CD + 1. Summons are not simulated.
+  if (mob.kit) u.skills = mob.sk.filter((s) => !s.sum).map((s) => ({ s: { ...s, kind: 'kit' }, n: { coef: s.c, flat: 0 }, cd: s.cd || 0, init: (s.cd || 0) + 1 }));
   else u.skills = mob.sk.map((s, i) => ({ s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 }));
   compileMobPassives(u, mob, mc, opts.pvEst !== false);
   return u;
@@ -206,7 +207,7 @@ function compileMobPassives(u, mob, mc, est) {
     if (!p || p.k === 'none' || (p.est && !est)) continue;
     switch (p.k) {
       case 'er': u.er = { ...(u.er || {}), ...p.er }; break;
-      case 'counter': ch.hurt.push({ p: p.p, el: p.el, by: 'atk', range: p.r, coef: mc, flat: 0, aoe: p.aoe || 0 }); anyCh = true; break;
+      case 'counter': ch.hurt.push({ p: p.p, el: p.el, by: 'atk', range: p.r, coef: p.c != null ? p.c : mc, flat: 0, aoe: p.aoe || 0 }); anyCh = true; break;
       case 'venom': ch.procs.push({ on: 'hit', p: 1, el: p.el, ar: 0, opt: { eff: [{ k: 'dot', el: 'dark', p: p.p, t: p.t }] }, coef: mc, flat: 0 }); anyCh = true; break;
       case 'dot': ch.inflicts.push({ p: p.p, e: { k: 'dot', el: p.el, t: p.t } }); anyCh = true; break;
       case 'move': u.move = p.v; break;
@@ -223,6 +224,40 @@ const fpLo = (n) => -Math.floor((n - 1) / 2);
 const FP = {};
 for (let n = 1; n <= 5; n++) { FP[n] = []; for (let dy = fpLo(n); dy < fpLo(n) + n; dy++) for (let dx = fpLo(n); dx < fpLo(n) + n; dx++) FP[n].push([dx, dy]); }
 export const fpOf = (u) => FP[u.sz] || FP[1];
+/* boss-kit geometry (game frame, y up): Pos2d.LookDirection, the client's turn() of a hit cell, and per-skill entries
+   (one per aim offset and facing) with an index from a covered offset to the entries that reach it */
+const kitKey = (x, y) => (x + 64) * 256 + (y + 64);
+const turnC = (c, dir, flip) => { const x = flip ? -c[0] : c[0], y = c[1]; return dir === 'U' ? [x, y] : dir === 'D' ? [-x, -y] : dir === 'L' ? [-y, x] : [y, -x]; };
+const lookDir = (dx, dy) => (!dx && !dy ? 'U' : dx > 0 ? (dy > dx ? 'U' : dy < -dx ? 'D' : 'R') : (dy > -dx ? 'U' : dy < dx ? 'D' : 'L'));
+const KITGEO = new WeakMap();
+// cells cast from the caster turn about the centre of its body: a 4×4 body (−1..2) turns about (½, ½), otherwise
+// facing down or left would open a gap between the body and the area (the data's aim rings are centred the same way)
+const turnB = (c, dir, flip, co) => { if (!co) return turnC(c, dir, flip); const t = turnC([c[0] - co, c[1] - co], dir, flip); return [t[0] + co, t[1] + co]; };
+function kitGeo(s, co = 0) {
+  let byCo = KITGEO.get(s.h); if (!byCo) KITGEO.set(s.h, (byCo = {}));
+  let G = byCo[co]; if (G) return G;
+  const entries = [], byOff = new Map();
+  const all = s.h.some((h) => h.r == null && h.c === -1), aimed = s.h.some((h) => !h.s);
+  let ar = 1;
+  for (const h of s.h) if (!h.s && h.c >= 0) for (const [x, y] of s.sets[h.c]) ar = Math.max(ar, Math.abs(x) + Math.abs(y));
+  for (const g of s.rnd || []) if (!g.s) for (const [x, y] of g.pool) ar = Math.max(ar, Math.abs(x) + Math.abs(y));
+  for (const r of s.rng) {
+    const rx = r[0] - co, dir = lookDir(rx, r[1] - co);
+    for (const flip of rx === 0 ? [false, true] : [rx < 0]) {
+      // a random strike's own cells sit around its picked pool cell, so only the pool counts for planning
+      const cells = s.h.map((h) => (h.c === -1 ? 'ALL' : s.sets[h.c].map((c) => turnB(c, dir, flip, h.s && h.r == null ? co : 0))));
+      const pools = (s.rnd || []).map((g) => g.pool.map((c) => turnB(c, dir, flip, g.s ? co : 0)));
+      const keys = new Set();
+      s.h.forEach((h, i) => { if (h.r == null && cells[i] !== 'ALL') for (const [x, y] of cells[i]) keys.add(kitKey(x + (h.s ? 0 : r[0]), y + (h.s ? 0 : r[1]))); });
+      (s.rnd || []).forEach((g, gi) => { for (const [x, y] of pools[gi]) keys.add(kitKey(x + (g.s ? 0 : r[0]), y + (g.s ? 0 : r[1]))); });
+      const ei = entries.length; entries.push({ r, dir, flip, dep: rx === 0, cells, pools, keys });
+      for (const k of keys) { let l = byOff.get(k); if (!l) byOff.set(k, (l = [])); l.push(ei); }
+    }
+  }
+  G = { entries, byOff, all, aimed, ar, entryHas: (ei, dx, dy) => entries[ei].keys.has(kitKey(dx, dy)) };
+  byCo[co] = G;
+  return G;
+}
 /** where a unit may be placed before the fight (inside the drawn board): x columns, y rows per team */
 export const CELL_BOX = { x: [4, 16], y: [[3, 9], [11, 17]] };
 const okCell = (c, ti) => Array.isArray(c) && Number.isInteger(c[0]) && Number.isInteger(c[1]) && c[0] >= CELL_BOX.x[0] && c[0] <= CELL_BOX.x[1] && c[1] >= CELL_BOX.y[ti][0] && c[1] <= CELL_BOX.y[ti][1];
@@ -283,7 +318,7 @@ export function simulate(P, seed, log) {
   const ev = log ? [] : null;
   const U = P.units.map((t) => ({
     ...t, hp: t.hpMax, alive: !t.out, st: [], turnNo: 0, next: 0, pool: 0,
-    cds: t.skills.map((k) => k.init), shield: 0,
+    cds: t.skills.map((k) => k.init), shield: 0, flip: t.team === 1, awoke: 0, elState: null, infN: 0, tideN: 0,
     mAtk: 1, aAtk: 0, mDef: 1, aDef: 0, mSpd: 1, aSpd: 0, bBlock: 0, bCrit: 0, bDmg: 0, red: 1, vuln: 0, cold: 0, riven: 0, sigil: 0, wet: 0, blind: 0, moveAdd: 0, dodgeB: 0, bAcc: 0,
     dmg: 0, taken: 0, healed: 0, kills: 0, lastAil: -9, ailStreak: 0,
     casts: 0, eye: 0, stone: 0, marks: 0, lossAcc: 0, supTurn: -1, supN: 0, petStk: 0, undyingUsed: false, above50: true, voidUsed: false, energy: 0, reactCast: -1,
@@ -291,12 +326,13 @@ export function simulate(P, seed, log) {
   const B = { U, pvp: P.pvp, round: 1, pvpScale: 1, healScale: 1, castId: 0, over: false, winner: -1, now: 0 };
   for (const u of U) if (!u.out) setOcc(u, u.id);
   const aliveCount = [0, 0];
+  const proxU = U.filter((u) => u.mp && u.mp.prox); // units with an on-enter proximity passive
   for (const u of U) if (!u.pet) aliveCount[u.team]++;
   // monster passive stat multipliers: Cloud Veil stacks (ATK), Mettle of Trial stacks (ATK & DEF)
   const mettleF = (u) => { const m = u.mp && u.mp.mettle && u.mp.mettle[0]; return m ? 1 + m.v * Math.min(m.max, Math.floor((1 - u.hp / u.hpMax) / m.per + 1e-9)) : 1; };
   const eAtk = (u) => Math.max(1, (u.atk * u.mAtk + u.aAtk) * (u.ch && u.ch.atkSh && u.shield > 0 ? 1 + u.ch.atkSh : 1) * (u.cloudN ? 1 + u.cloudN * u.cloudV : 1) * (u.mp ? mettleF(u) : 1));
   const eDef = (u) => Math.max(0, (u.def * u.mDef + u.aDef) * (u.mp ? mettleF(u) : 1));
-  const eSpd = (u) => Math.max(1, u.spd * u.mSpd + u.aSpd);
+  const eSpd = (u) => Math.max(1, (u.spd * u.mSpd + u.aSpd) * (u.mp ? mettleF(u) : 1)); // Mettle of Trial: ATK, DEF and SPD
   const interval = (u) => 100000 / Math.sqrt(eSpd(u) * rankScale(u.level));
   const free = (x, y) => x >= 0 && y >= 0 && x < W && y < H && occ[y * W + x] < 0;
   /* unit footprints: large monsters stand on 2×2 or 3×3 cells */
@@ -443,8 +479,11 @@ export function simulate(P, seed, log) {
   }
   /* ── monster passives (비전) ── */
   const foesOfT = (u, cx, cy, r) => U.filter((f) => f.alive && f.team !== u.team && dU(f, cx, cy) <= r);
-  function pvAoe(u, r, el, hits = 1, cx = u.x, cy = u.y) {
-    for (let h = 0; h < hits && !B.over && u.alive; h++) for (const f of foesOfT(u, cx, cy, r)) hit(u, f, (u.mc || 1) / hits, 0, el, { noProc: 1, noReact: 1 });
+  /** passive area damage: c = the trigger skill's coefficient per hit (game data), else the mob coefficient split over the hits;
+   *  around the caster the range counts from the edge of its body */
+  function pvAoe(u, r, el, hits = 1, cx = u.x, cy = u.y, c) {
+    const body = cx === u.x && cy === u.y && u.sz > 1;
+    for (let h = 0; h < hits && !B.over && u.alive; h++) for (const f of (body ? U.filter((f) => f.alive && f.team !== u.team && dUU(f, u) <= r) : foesOfT(u, cx, cy, r))) hit(u, f, c != null ? c : (u.mc || 1) / hits, 0, el, { noProc: 1, noReact: 1 });
   }
   function pvLabel(u, name) { if (ev) ev.push({ e: 'cast', u: u.id, n: name, el: 'none', tg: [], ax: u.x, ay: u.y, sh: 'B', sup: 1 }); }
   function mobPassiveHurt(t, hpDmg) {
@@ -466,7 +505,7 @@ export function simulate(P, seed, log) {
       const repl = t.raged && mp.cum.some((c) => c.phase && c.rep);
       while (t.cumAcc >= 0.15 * t.hpMax && t.alive && !B.over) {
         t.cumAcc -= 0.15 * t.hpMax;
-        for (const c of mp.cum) { if (c.phase ? !t.raged : repl) continue; pvLabel(t, c.name); pvAoe(t, c.r, c.el, c.hits); }
+        for (const c of mp.cum) { if (c.phase ? !t.raged : repl) continue; pvLabel(t, c.name); pvAoe(t, c.r, c.el, c.hits, t.x, t.y, c.c); }
       }
     }
     if (mp.rejuv) { const r = mp.rejuv[0]; t.rjAcc = (t.rjAcc || 0) + hpDmg; while (t.rjAcc >= r.th * t.hpMax) { t.rjAcc -= r.th * t.hpMax; t.rjLeft = r.t; } }
@@ -555,7 +594,11 @@ export function simulate(P, seed, log) {
     if (dg > 0 && rnd() < dg) { if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d: 0, k: 3, hp: t.hp, sh: t.shield, el }); return 0; }
     const atk = eAtk(a); let def = eDef(t), boost = o.boost || 0, redX = 1;
     if (a.pierceUntil != null && a.pierceUntil >= a.turnNo && a.mp && a.mp.pierce) def *= 1 - a.mp.pierce[0].v;
-    if (t.drN > 0) redX *= Math.max(0.05, 1 - t.drN * t.drV);
+    // stacking DMG reduction (StatusDmgReducePer): the game divides by 1 + the total (Field Guard 50 × 1.5% → ÷1.75)
+    if (t.drN > 0) redX /= 1 + t.drN * t.drV;
+    // Dual Surge (Yoldra): Inferno +4% DMG dealt per Fire cast, Tideform +4% DMG reduction per Water cast
+    if (a.infN) boost += a.infN * a.mp.dualSurge[0].v;
+    if (t.tideN) redX /= 1 + t.tideN * t.mp.dualSurge[0].v;
     if (t.strataN === 0 && t.strataV) redX *= 1 + t.strataV;
     if (a.ch) {
       const c = a.ch;
@@ -580,6 +623,11 @@ export function simulate(P, seed, log) {
     d = Math.max(1, Math.floor(d));
     const dealt = applyDamage(a, t, d, { doom: o.doom, kind, el, ls: (o.ls || 0) + (o.noProc ? 0 : (a.lsAll || 0) + (a.sipN ? a.sipN * a.sipV : 0)) });
     if (!o.noProc && t.mp) mobPassiveStacks(t);
+    // Element Shift (Yoldra): Fire technique DMG flips Frostchill → Blazing, Water technique DMG flips it back
+    if (!o.noProc && t.alive && t.mp && t.mp.elShift) {
+      const cur = t.elState || 'frost';
+      if ((cur === 'frost' && el === 'fire') || (cur === 'blaze' && el === 'water')) { t.elAcc = (t.elAcc || 0) + dealt; if (t.elAcc >= t.hpMax * t.mp.elShift[0].th) { t.elAcc = 0; t.elState = cur === 'frost' ? 'blaze' : 'frost'; pvLabel(t, `${t.mp.elShift[0].name} · ${t.elState === 'blaze' ? '작열' : '서리'}`); } }
+    }
     if (!o.noProc) onDealt(a, t, kind, el);
     if (!o.noReact && t.alive && a.alive) onHurt(a, t, kind, d);
     // Light Sword Array: one counter per incoming cast
@@ -736,8 +784,11 @@ export function simulate(P, seed, log) {
   /** kind: 1 leap, 'dash' | 'kb' | 'retreat' for skill movement (shown differently in the replay) */
   function moveTo(u, x, y, leap) {
     if (x === u.x && y === u.y) return;
+    // Trial by Fire (Flamoenix): an enemy that comes within range of the body is struck
+    const prox = proxU.length ? proxU.filter((f) => f.alive && f.team !== u.team && dUU(u, f) > f.mp.prox[0].r) : null;
     setOcc(u, -1); u.x = x; u.y = y; setOcc(u, u.id);
     if (ev) ev.push({ e: 'move', u: u.id, x, y, leap: leap === 1 || leap === true ? 1 : 0, ...(typeof leap === 'string' ? { [leap]: 1 } : {}) });
+    if (prox) for (const f of prox) if (u.alive && !B.over && dUU(u, f) <= f.mp.prox[0].r) { const p = f.mp.prox[0]; pvLabel(f, p.name); hit(f, u, p.c, 0, p.el, { noProc: 1, noReact: 1 }); }
   }
   /** DIRS index that points from the unit toward a target */
   const aimDir = (u, t) => { if (!t) return u.team ? 2 : 0; const dx = t.x - u.x, dy = t.y - u.y; return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : dy >= 0 ? 0 : 2; };
@@ -781,6 +832,102 @@ export function simulate(P, seed, log) {
     }
   }
 
+  /* ── boss kits from the game data: hit configs played one by one (tools/bosskits.mjs) ──
+     cells are [sideways, forward] in the game's frame (y up = our +y); the aim offsets in s.rng are not turned,
+     the facing follows the aim (Pos2d.LookDirection) and x flips when the aim is to the left, as the client does */
+  function kitUsable(u, s) {
+    if (!u.awoke && u.hp <= u.hpMax * 0.5) u.awoke = 1; // Primal Awakening / Rampage Reboot: for good, the first time HP reaches 50%
+    const g = s.gate;
+    if (g) {
+      if (g.turn != null) { if (u.turnNo < g.turn) return false; }
+      else { const sh = u.hp / u.hpMax, met = g.le ? sh <= g.hp : sh >= g.hp; if (met !== !!g.on) return false; }
+    }
+    if (s.state === 'awake' && !u.awoke) return false;
+    if (s.state === 'pre' && u.awoke) return false;
+    if ((s.state === 'frost' || s.state === 'blaze') && (u.elState || 'frost') !== s.state) return false;
+    return true;
+  }
+  const kitCo = (u) => (u.sz > 1 && u.sz % 2 === 0 ? 0.5 : 0);
+  function kitPlan(u, s, pool) {
+    const G = kitGeo(s, kitCo(u)), foes = foesOf(u); if (!foes.length) return null;
+    const NE = G.entries.length, cnt = new Int32Array(NE), mark = new Int32Array(NE); let stamp = 0;
+    let best = null;
+    for (const [dx, dy, d] of DIAMOND) {
+      if (d > pool) break;
+      if (best && d > best.d && best.n >= foes.length) break;
+      const x = u.x + dx, y = u.y + dy;
+      if (d && !fits(u, x, y)) continue;
+      const touched = [];
+      if (G.all) { for (let i = 0; i < NE; i++) { cnt[i] = foes.length; touched.push(i); } }
+      else {
+        cnt.fill(0);
+        for (const f of foes) { stamp++; for (const [fx, fy] of fpOf(f)) { const list = G.byOff.get(kitKey(f.x + fx - x, f.y + fy - y)); if (list) for (const ei of list) if (mark[ei] !== stamp) { mark[ei] = stamp; if (!cnt[ei]) touched.push(ei); cnt[ei]++; } } }
+      }
+      for (const ei of touched) {
+        const e = G.entries[ei], n = cnt[ei];
+        if (e.dep && e.flip !== !!u.flip) continue;
+        const ax = x + e.r[0], ay = y + e.r[1];
+        if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
+        const o = occ[ay * W + ax], onFoe = o >= 0 && U[o].alive && U[o].team !== u.team ? 1 : 0;
+        if (s.tk === 'e' && !onFoe) continue;
+        if (s.tk === 's' && !fits(u, ax, ay)) continue;
+        // more targets, then an aim on an enemy (a hit anchored on the aim, e.g. Void Singularity's pull), then less walking
+        if (!best || n > best.n || (n === best.n && (onFoe > best.f || (onFoe === best.f && d < best.d)))) best = { n, d, x, y, ei, f: onFoe };
+      }
+    }
+    if (!best) return null;
+    return { x: best.x, y: best.y, walk: best.d, ei: best.ei, n: best.n };
+  }
+  function kitCast(u, k, pl) {
+    const s = k.s, G = kitGeo(s, kitCo(u)), e = G.entries[pl.ei];
+    B.castId++; u.casts++;
+    if (pl.x !== u.x || pl.y !== u.y) moveTo(u, pl.x, pl.y);
+    if (!e.dep) u.flip = e.flip;
+    const ax = u.x + e.r[0], ay = u.y + e.r[1];
+    if (s.leap) { // Phoenix Dive / Starbreak Impact: the caster lands on the aimed cell (or the nearest free one)
+      let c = null; for (const [ddx, ddy] of DIAMOND) { if (fits(u, ax + ddx, ay + ddy)) { c = [ax + ddx, ay + ddy]; break; } }
+      if (c) moveTo(u, c[0], c[1], 1);
+    }
+    const foes0 = foesOf(u);
+    const inCells = (cells, bx, by) => { const out = []; for (const [cx, cy] of cells) { const x = bx + cx, y = by + cy; if (x < 0 || y < 0 || x >= W || y >= H) continue; const o = occ[y * W + x]; if (o >= 0) { const t = U[o]; if (t.alive && t.team !== u.team && !out.includes(t)) out.push(t); } } return out; };
+    if (ev) ev.push({ e: 'cast', u: u.id, n: s.ko || s.en, el: s.el, tg: (G.all ? foes0 : foes0.filter((f) => fpOf(f).some(([fx, fy]) => G.entryHas(pl.ei, f.x + fx - pl.x, f.y + fy - pl.y)))).map((t) => t.id), ax, ay, sh: G.aimed ? 'T' : 'A', ar: G.ar });
+    if (u.mp && u.mp.dualSurge && s.c > 0) { const m = u.mp.dualSurge[0]; if (s.el === 'fire') u.infN = Math.min(m.max, (u.infN || 0) + 1); else if (s.el === 'water') u.tideN = Math.min(m.max, (u.tideN || 0) + 1); }
+    const strike = (h, t) => {
+      if (!t.alive || B.over) return;
+      if (h.d !== 0 && s.c > 0) {
+        const mult = s.ex ? 1 + Math.min(s.ex.max, Math.floor((1 - t.hp / t.hpMax) / 0.05 + 1e-9) * s.ex.step) : 1;
+        hit(u, t, s.c, 0, s.el, { mult, acc: 0, boost: 0 });
+      }
+      if (!t.alive || B.over) return;
+      if (h.st) for (const [k2, p, dur] of h.st) tryStatus(u, t, { k: k2, p, t: dur }, s);
+      if (h.kb && (h.mp == null || rnd() < h.mp)) knockback(h.mt ? { x: ax, y: ay } : u, t, h.kb);
+      if (h.pull) pullTo(t, h.mt ? ax : u.x, h.mt ? ay : u.y);
+    };
+    const doneG = new Set();
+    for (let hi = 0; hi < s.h.length && !B.over && u.alive; hi++) {
+      const h = s.h[hi];
+      if (h.r != null) {
+        if (doneG.has(h.r)) continue; doneG.add(h.r);
+        // random strikes: one pick per hit config from the pool cells (with replacement), the first minHits on occupied cells
+        const g = s.rnd[h.r], bx = g.s ? u.x : ax, by = g.s ? u.y : ay;
+        const cellsAll = e.pools[h.r].map(([px, py]) => [bx + px, by + py]).filter(([x, y]) => x >= 0 && y >= 0 && x < W && y < H);
+        const subs = []; s.h.forEach((x, i) => { if (x.r === h.r) subs.push(i); });
+        for (let p = 0; p < g.n && !B.over; p++) {
+          const occNow = cellsAll.filter(([x, y]) => { const o = occ[y * W + x]; return o >= 0 && U[o].alive && U[o].team !== u.team; });
+          const need = p < g.min || !g.empty;
+          let from = need ? occNow : cellsAll;
+          if (!from.length) { if (need && cellsAll.length && g.empty) from = cellsAll; else continue; }
+          const c = from[Math.floor(rnd() * from.length)];
+          for (const si of subs) if ((s.h[si].pk || 0) === p) for (const t of inCells(e.cells[si], c[0], c[1])) strike(s.h[si], t);
+        }
+        continue;
+      }
+      // who a hit covers is decided when it lands: a target knocked back by the previous hit can be caught again
+      const ts = e.cells[hi] === 'ALL' ? foesOf(u) : inCells(e.cells[hi], h.s ? u.x : ax, h.s ? u.y : ay);
+      for (const t of ts) strike(h, t);
+    }
+  }
+
   /* ── casting ── */
   function castDamage(u, k, pl, pre) {
     const s = k.s, n = k.n;
@@ -819,6 +966,22 @@ export function simulate(P, seed, log) {
         for (const f of foesOf(u)) if (dU(f, c.x, c.y) <= 1) { const h = seen.get(f.id) || 0; one(f, n.coef, n.flat, Math.pow(1 - sp.decay, h)); seen.set(f.id, h + 1); }
       }
       for (const id of seen.keys()) afterHit(U[id]);
+    } else if (sp.k === 'scatter') {
+      // monster random strikes ("Randomly selects 12 grids within 5 grids ... within 1 grid of each, hitting at least 4 times"):
+      // picks with replacement from the cells in reach, the first `min` on cells whose strike reaches an enemy
+      const cells = [];
+      if (sp.from === 'aim') { for (const [dx, dy, d] of DIAMOND) { if (d > sp.R) break; const x = pl.ax + dx, y = pl.ay + dy; if (x >= 0 && y >= 0 && x < W && y < H) cells.push([x, y]); } }
+      else if (sp.fw) { const dir = pl.dir != null ? pl.dir : aimDir(u, targets[0]), tf = { t: 'F', w: sp.fw, h: sp.fh }; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (cellIn(tf, u.x, u.y, dir, x, y)) cells.push([x, y]); }
+      else for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const d = dAt(u, u.x, u.y, x, y); if (d >= 1 && d <= sp.R) cells.push([x, y]); }
+      const struck = new Set();
+      for (let p = 0; p < sp.n && !B.over && cells.length; p++) {
+        const foes = foesOf(u);
+        let pool = p < (sp.min || 0) ? cells.filter(([x, y]) => foes.some((f) => dU(f, x, y) <= sp.a)) : cells;
+        if (!pool.length) pool = cells;
+        const [x, y] = pool[Math.floor(rnd() * pool.length)];
+        for (const f of foes) if (dU(f, x, y) <= sp.a) { one(f, n.coef, n.flat, decay(f)); struck.add(f); }
+      }
+      for (const f of struck) afterHit(f);
     } else if (sp.k === 'rand') {
       const main = targets[0], cells = 2 * sp.r * sp.r + 2 * sp.r + 1, seen = new Map();
       // random strikes pick cells: a large unit is listed once per cell it covers in the area
@@ -982,7 +1145,12 @@ export function simulate(P, seed, log) {
   }
   function tryCast(u, i, pre) {
     const k = u.skills[i], s = k.s;
-    if (s.kind === 'dmg') {
+    if (s.kind === 'kit') {
+      const pl = kitPlan(u, s, pre ? 0 : u.pool);
+      if (!pl) return 0;
+      if (!pre) u.pool -= pl.walk;
+      kitCast(u, k, pl);
+    } else if (s.kind === 'dmg') {
       const pl = plan(u, s, pre ? 0 : u.pool, foesOf(u));
       if (!pl || !pl.targets.length) return 0;
       if (!pre) u.pool -= pl.walk;
@@ -1044,12 +1212,12 @@ export function simulate(P, seed, log) {
       if (!locked) {
         u.pool = has(u, 'immob') ? 0 : u.move + u.moveAdd;
         let cast = 0, waiting = 0;
-        if (u.kind === 'mob' && !u.raid) {
+        if (u.kind === 'mob' && !u.kit) {
           // monsters: one skill a turn, specials first (assumption)
-          for (let i = u.skills.length - 1; i >= 0 && !cast && !B.over; i--) if (u.cds[i] <= 0) { if (tryCast(u, i)) cast = 1; else waiting = 1; }
-        } else if (u.raid) {
-          // raid boss: every ready skill in its own order (as the recorded raids show); a gated skill waits for its turn
-          for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) { const s = u.skills[i].s; if (u.cds[i] > 0 || (s.gate && u.turnNo < s.gate)) continue; if (tryCast(u, i)) cast++; else waiting = 1; }
+          for (let i = u.skills.length - 1; i >= 0 && !cast && !B.over; i--) if (u.cds[i] <= 0 && !(u.skills[i].s.rage && !u.raged)) { if (tryCast(u, i)) cast = 1; else waiting = 1; } // "Activate [Rage] to enable this skill"
+        } else if (u.kit) {
+          // boss kit: every ready skill in its own order (as the recorded raids show), within its gate / state
+          for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) { const s = u.skills[i].s; if (u.cds[i] > 0 || !kitUsable(u, s)) continue; if (tryCast(u, i)) cast++; else waiting = 1; }
         } else {
           for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) if (u.cds[i] <= 0) { if (tryCast(u, i)) cast++; else if (u.skills[i].s.kind === 'dmg') waiting = 1; }
         }

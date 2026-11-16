@@ -2,6 +2,28 @@
 // Unit size and skill movement, read from the game's own wording.
 
 /** adds { multi, bigFirst, rep, dash, leap, retreat } and knockback effects to a parsed skill `o` */
+/** monster skills only: random strikes, pull wording, "Selects 1 grid", rage-only skills. Overrides the shape the
+ *  general parser picked when the text describes scattered strikes (they used to read as one hit on adjacent enemies). */
+export function mobExtras(d, o) {
+  let m;
+  const aoe = () => { const a = /within (?:a )?(\d+)[- ]grids? (?:square area )?of (?:each target|the target|its impact|it\b)/.exec(d); return a ? +a[1] : 0; };
+  const min = () => { const a = /hitting at least (\d+) times|(\d+) guaranteed hits|hits at least once/.exec(d); return a ? +(a[1] || a[2] || 1) : 0; };
+  let sc = null;
+  if ((m = /Randomly (?:selects|strikes|launches) (\d+) (?:grids|[a-z]+(?: [a-z]+)?) within (\d+) grids? of the caster/.exec(d)) || (m = /Selects (\d+) random grids within (\d+) grids? of the caster/.exec(d))) sc = { n: +m[1], R: +m[2], a: aoe(), from: 'self' };
+  else if ((m = /Randomly (?:selects|launches) (\d+) (?:grids|[a-z]+) within a (\d+)×(\d+) grid area in front of the caster/.exec(d))) sc = { n: +m[1], fw: +m[2], fh: +m[3], a: aoe(), from: 'self' };
+  else if ((m = /[Ss]elects a grid within (\d+) grids?[^.]*?[.,] (?:then )?[Rr]andomly deals [A-Za-z ]*DMG (\d+) times (?:with)?in (\d+) grids? of the target grid/.exec(d))) { sc = { n: +m[2], R: +m[3], a: 0, from: 'aim' }; o.tg = { t: 'T', r: +m[1], ar: +m[3] }; }
+  else if ((m = /Randomly deals [A-Za-z ]*DMG (\d+) times in an area within (\d+) grids? of the caster/.exec(d))) sc = { n: +m[1], R: +m[2], a: 0, from: 'self' };
+  if (sc) {
+    sc.min = /each selected enemy/.test(d) ? sc.n : min(); // "dealing ... once to each selected enemy": every pick is an enemy
+    o.sp = { k: 'scatter', ...sc };
+    o.hits = sc.n; // the mob coefficient is split over the strikes like any multi-hit mob skill
+    if (sc.from === 'self') o.tg = sc.fw ? { t: 'F', w: sc.fw, h: sc.fh + sc.a } : { t: 'A', r: sc.R + sc.a };
+  }
+  if ((m = /[Ss]elects (?:1|one) (?:grid|target) within (\d+) grids?/.exec(d)) && !sc) { const a = /within (\d+) grids? of the target/.exec(d); o.tg = { t: 'T', r: +m[1], ar: a ? +a[1] : 1 }; }
+  if (/pulls? them to (?:the front of )?the caster(?:'s location)?/.test(d)) o.pull = 'c';
+  else if (/pull(?:s|ing)? them to (?:the target grid|its center|the target's location)/.test(d)) o.pull = 'a';
+  if (/Activate \[Rage\]|in Rage(?:d)? state|Raged state/.test(d)) o.rage = 1;
+}
 export function moveAndSize(d, o) {
   let m;
   // large units: area hits land once per covered cell, ricochets may re-hit; some skills aim at large units first

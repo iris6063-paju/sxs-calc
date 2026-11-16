@@ -3,7 +3,7 @@
 // The downloaded pages are treated purely as data; nothing from them is executed.
 import fs from 'node:fs';
 import path from 'node:path';
-import { moveAndSize } from './skilltext.mjs';
+import { moveAndSize, mobExtras } from './skilltext.mjs';
 import { PARTS, FWD0 } from './hitparts.mjs';
 
 const [, , DL, OUT] = process.argv;
@@ -415,6 +415,7 @@ for (const [mid, file, ko, en, sr, rankKo] of MAP_DEF) {
         continue;
       }
       const p = parseText(desc);
+      mobExtras(desc.replace(/(\d)\s*[×x]\s*(\d)/g, '$1×$2'), p);
       const elm = /color:#[0-9a-f]{6}\\?">(Physical|Wind|Water|Fire|Light|Dark)</i.exec(e.d);
       if (!p.tg || !['S', 'A', 'Q', 'F', 'T', 'TQ'].includes(p.tg.t) || !elm) { droppedSkills++; log('mob skill dropped:', def.n, '/', e.n, '::', desc.slice(0, 120)); continue; }
       keptSkills++;

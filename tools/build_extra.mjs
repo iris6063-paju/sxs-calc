@@ -6,7 +6,8 @@ import path from 'node:path';
 import { PV } from './passives.mjs';
 import { PFX } from './pets_fx.mjs';
 import { RAID } from './raid.mjs';
-import { moveAndSize } from './skilltext.mjs';
+import { KIT_KO, KIT_STATE, KIT_SKIP } from './bosskits.mjs';
+import { moveAndSize, mobExtras } from './skilltext.mjs';
 
 const [, , DL, DL2, OUT] = process.argv;
 const J = (f) => JSON.parse(fs.readFileSync(path.join(DL, f), 'utf8'));
@@ -292,6 +293,52 @@ function exactStats(def, level, sr) {
   return [g('MaxHp'), g('Attack'), g('Defence'), g('Speed'), g('CritRatePercent') / 100, g('CritPowerPercent') / 100, g('CritAvoidPercent') / 100, g('BlockPercent') / 100,
     g('BlockValuePercent') / 100, g('BlockAvoidPercent') / 100, g('DmgAddPercent') / 100, g('DmgReducePercent') / 100, g('EffectRate'), g('EffectDodge')].map((x) => +x.toFixed(2));
 }
+/* boss kits from the game data (purrwikimania.com simulator data assets/duel.json `bosses`, see tools/bosskits.mjs):
+   every hit config with its cells ([sideways, forward], game frame), knockback / pull, statuses, random strikes, leaps and gates */
+const KITS = {};
+if (have.has('duel.json')) {
+  const duel = J('duel.json');
+  const ACT = { Frozen: 'freeze', Stun: 'stun', Restrict: 'immob', Confusion: 'frenzy', Blinding: 'blind' };
+  const ELM = { Physical: 'phy', None: 'phy', Wind: 'wind', Water: 'water', Fire: 'fire', Light: 'light', Dark: 'dark', Abyss: 'chaos' };
+  const TK = { Pos: 'p', Entity: 'e', EntityFollow: 'e', PosCanStand: 's' };
+  for (const b of Object.values(duel.bosses)) {
+    const gates = {}; for (const p of b.passives) for (const g of p.gates || []) gates[g.ec] = g;
+    const st = KIT_STATE[b.monster] || {}, sk = [];
+    for (const s of b.skills) {
+      const ec = s.ec || {}, r1 = (s.r && s.r['1']) || {}, hits = ec.hits || [];
+      if (ec.skillType === 'Buff' || KIT_SKIP.includes(s.id)) continue;
+      const c = +((r1.SkillAttack1 || 0) / 100).toFixed(4), summon = ec.skillType === 'Summon';
+      if (!summon && !c && !hits.some((h) => h.move || (h.on || []).length)) { log('KIT skip (no coefficient)', b.monster, s.name); continue; }
+      // identical cell sets are stored once per skill; a set covering most of the board is "the whole field"
+      const sets = [], setKey = new Map();
+      const setOf = (cells) => { const cs = cells && cells.length ? cells : [[0, 0]]; if (cs.length >= 380) return -1; const key = JSON.stringify(cs.map((c2) => c2.join(',')).sort()); if (!setKey.has(key)) { setKey.set(key, sets.length); sets.push(cs); } return setKey.get(key); };
+      const groups = [], gi = {};
+      const h2 = hits.map((h) => {
+        const o = { c: setOf(h.cells) };
+        if (h.onSource) o.s = 1;
+        if (h.type === 'None' || !c) o.d = 0;
+        if (h.move) { if (h.move.distance === -1 && h.move.towards) o.pull = 1; else if (h.move.distance > 0) o.kb = h.move.distance; if (h.move.dir === 'RelativeToTarget') o.mt = 1; if (h.move.chance != null && h.move.chance < 1) o.mp = h.move.chance; }
+        const es = (h.on || []).map((x) => { const m = duel.statuses[String(x.status)]; const k = m && ACT[m.action]; return k ? [k, +(+x.chance).toFixed(3), m.dur > 0 ? m.dur : 1] : null; }).filter(Boolean);
+        if (es.length) o.st = es;
+        if (h.rnd) { if (!(h.rnd.g in gi)) { gi[h.rnd.g] = groups.length; groups.push({ pool: h.rnd.cells, s: h.rnd.onSource ? 1 : 0, n: h.rnd.n, min: h.rnd.minHits || 0, empty: h.rnd.allowEmpty ? 1 : 0 }); } o.r = gi[h.rnd.g]; o.pk = h.pick || 0; }
+        return o;
+      });
+      const ko = KIT_KO[s.id] || [s.name, ''];
+      const out = { id: s.id, en: s.name, ko: ko[0], d: ko[1], el: ELM[ec.ele] || 'phy', c, cd: r1.CD || 0, tk: TK[ec.targetKind] || 'p', rng: ec.range && ec.range.length ? ec.range : [[0, 0]], sets, h: h2 };
+      if (groups.length) out.rnd = groups;
+      if ((ec.sourceMove || []).some((m) => m.towards && m.distance === -1)) out.leap = 1;
+      const g = gates[s.ecId];
+      if (g) { if (g.hp != null) out.gate = { hp: g.hp, le: g.rel === 'LE' || g.rel === 'LT' ? 1 : 0, on: g.active !== false ? 1 : 0 }; else if (g.round != null) out.gate = { turn: g.round }; }
+      for (const k of ['pre', 'awake', 'frost', 'blaze']) if ((st[k] || []).includes(s.id)) out.state = k;
+      if (s.id === 14436) out.ex = { step: 0.05, max: 0.5 }; // Loong's Fury: +5% per 5% HP the target lost, up to 50%
+      if (summon) out.sum = 1;
+      const ic = esk[s.id] && esk[s.id].i; if (ic) out.ic = ic;
+      sk.push(out);
+    }
+    KITS[b.monster] = sk;
+    log('KIT', b.monster, b.name, sk.map((x) => `${x.ko}(${x.h.length}h${x.cd ? ' cd' + x.cd : ''}${x.gate ? ' gate' : ''}${x.state ? ' ' + x.state : ''}${x.sum ? ' summon' : ''})`).join(', '));
+  }
+}
 // body sizes from the game data (GridTransformComponent.BodyRangeInfos, as purrwikimania.com ships it for its
 // Crucible and raid simulators): monster id → side of its square body. Other bosses have no public body data.
 const BODY = { 3703: 4, 3704: 4, 3708: 4, 3705: 5, 3706: 5, 3707: 5, 3803: 5 };
@@ -299,13 +346,16 @@ function addMob(key, def, sr, lv) {
   if (seenMob.has(key)) return; seenMob.add(key);
   const mob = { k: key, en: def.n, ko: KO_MOB2[def.n] || baseKo[def.n] || def.n, ty: /Boss|Hieromon/.test(def.t) ? 2 : def.t === 'Elite' ? 1 : 0, pg: def.pg, sr, lv, f: def.f.slice(0, 4), sk: [] };
   if (BODY[def.id]) mob.sz = BODY[def.id];
+  if (KITS[def.id]) { mob.sk = KITS[def.id]; mob.kit = 1; }
   if (mob.ko === def.n) log('NO KO', def.n);
   mob.ar = (ARCHE.find(([re]) => re.test(def.n)) || [0, 'brute'])[1];
   if (def.x && Object.keys(def.x).length) mob.x = def.x;
   for (const sid of def.sk) {
     const e = esk[Math.abs(sid)]; if (!e) continue; const desc = strip(e.d);
     if (sid < 0) { (mob.pv = mob.pv || []).push(-sid); const m = /takes (\d+)% less (\w+) DMG and (\d+)% higher (\w+) DMG/.exec(desc); if (m && EL[m[2]] && EL[m[4]]) mob.er = { [EL[m[2]]]: -m[1] / 100, [EL[m[4]]]: +m[3] / 100 }; continue; }
+    if (mob.kit) continue; // skills come from the game-data kit
     const p = parseText(desc), el = elOf(e.d);
+    mobExtras(desc.replace(/(\d)\s*[×x]\s*(\d)/g, '$1×$2').replace(/(\d) -(grid|row)/g, '$1-$2'), p);
     if (!p.tg || el === 'none') continue;
     mob.sk.push({ en: e.n, el, ic: e.i, ...p });
   }
@@ -364,8 +414,8 @@ for (const m of eidx.modes) {
 // Chaos Invasion raid: the Chaos Tyrant (5×5) at the ranks / levels the server can give it; exact stats per fight
 if (have.has('chaos_ci.json')) {
   const ci = J('chaos_ci.json'), def = Object.values(ci.defs).find((d) => d.id === RAID.monster);
-  if (def) {
-    const sk = RAID.skills.map((s) => { const e = esk[s.sid]; return { en: s.en, ko: s.ko, el: s.el, ic: e && e.i ? e.i : undefined, rc: s.c, hits: s.hits, cd: s.cd, ...(s.gate ? { gate: s.gate } : {}), tg: s.tg }; });
+  if (def && KITS[RAID.monster]) {
+    const sk = KITS[RAID.monster];
     const groups = [];
     for (const [sr, rko, lvs] of RAID.ranks) {
       const fights = [], st = [];
@@ -373,7 +423,7 @@ if (have.has('chaos_ci.json')) {
       if (fights.length) groups.push({ id: 'ct' + sr, ko: rko, en: sr, fights, st });
     }
     const s0 = exactStats(def, 130, 'Saint1');
-    MOBS2.push({ k: RAID.key, en: def.n, ko: RAID.ko, ty: 2, pg: def.pg, sr: 'Saint1', lv: 130, f: def.f.slice(0, 4), sk, sz: RAID.sz, raid: { move: RAID.move, rounds: RAID.rounds }, pv: RAID.pv, ar: 'golem', st: s0, fixed: 1 });
+    MOBS2.push({ k: RAID.key, en: def.n, ko: RAID.ko, ty: 2, pg: def.pg, sr: 'Saint1', lv: 130, f: def.f.slice(0, 4), sk, kit: 1, sz: RAID.sz, raid: { move: RAID.move, rounds: RAID.rounds }, pv: RAID.pv, ar: 'golem', st: s0, fixed: 1 });
     ENC.push({ id: 'raid', groups });
     log('enc raid', groups.map((g) => g.ko + ' ' + g.fights.length).join(', '), 'Saint1 L130 hp', s0[0], 'atk', s0[1]);
   }

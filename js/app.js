@@ -361,8 +361,24 @@ const mobSt = (u) => (u.fix ? stFrom(u.fix, u.level) : mobStats(u.key, u.level, 
 function mobHtml(u) {
   const mob = MOB.get(u.key), st = mobSt(u), open = openSet.has(u.uid), fixed = mobFixed(u);
   // raid boss skills carry the game's coefficient (per hit) and cooldown; ordinary mob skills use the assumed coefficient
-  const raidTags = (s) => (s.rc == null ? '' : s.gate ? tag(`${s.gate}번째 행동부터 · ${s.cd + 1}행동마다`) : s.cd ? tag(`${s.cd + 1}행동마다 · 첫 사용 ${s.cd + 1}번째 행동`) : tag('매 행동'));
-  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.ko || s.en)}</b>${s.ko ? ` <small class="en">${esc(s.en)}</small>` : ''}<div class="sum" style="margin:3px 0 0">${skillTags({ ...s, kind: 'dmg', cd: 0 }, s.rc != null ? { coef: s.rc } : null)}${raidTags(s)}</div></div></div></div>`).join('');
+  // boss kits (game data): coefficient per hit, hit count, knockback / pull / leap, statuses, timing and state
+  const kitTags = (s) => {
+    const el = EL[s.el] || EL.none, t = [`<span class="tag el" style="background:${el.c}">${el.ko}</span>`];
+    if (s.sum) return t.concat(tag('⚠ 소환 · 미반영', 'warn')).join('');
+    const dmgH = s.h.filter((h) => h.r == null && h.d !== 0).length + (s.rnd || []).reduce((a, g) => a + g.n, 0);
+    if (s.c > 0 && dmgH) t.push(tag(`${dmgH}타`), tag(`타당 ${+(s.c * 100).toFixed(2)}%`)); else t.push(tag('대미지 없음'));
+    if (s.rnd) t.push(tag(`무작위 ${s.rnd.map((g) => g.n).join('+')}회${s.rnd.some((g) => g.min) ? ` (최소 ${s.rnd.map((g) => g.min).join('+')})` : ''}`));
+    const kb = s.h.filter((h) => h.kb); if (kb.length) t.push(tag(`넉백 ${kb[0].kb}칸${kb.length > 1 ? ` ×${kb.length}` : ''}`));
+    if (s.h.some((h) => h.pull)) t.push(tag('끌어당김'));
+    if (s.leap) t.push(tag('도약'));
+    for (const h of s.h) for (const [k2, p] of h.st || []) t.push(tag(`${EFF_KO[k2] || k2} ${Math.round(p * 100)}%`));
+    if (s.ex) t.push(tag('잃은 생명 비례 대미지 +최대 50%'));
+    t.push(tag(s.cd ? `${s.cd + 1}행동마다 · 첫 사용 ${s.cd + 1}번째` : '매 행동'));
+    if (s.gate) t.push(tag(s.gate.turn != null ? `${s.gate.turn}번째 행동부터` : `생명 ${Math.round(s.gate.hp * 100)}% ${s.gate.le ? '이하' : '이상'}`));
+    if (s.state) t.push(tag({ pre: '각성 전', awake: '각성 후(생명 50% 이하)', frost: '서리 상태', blaze: '작열 상태' }[s.state]));
+    return t.join('');
+  };
+  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.ko || s.en)}</b>${s.ko ? ` <small class="en">${esc(s.en)}</small>` : ''}${s.h && s.d ? `<div class="desc" style="margin-top:2px">${esc(s.d)}</div>` : ''}<div class="sum" style="margin:3px 0 0">${s.h ? kitTags(s) : skillTags({ ...s, kind: 'dmg', cd: 0 }, null) + (s.sp && s.sp.k === 'scatter' ? tag(`무작위 ${s.sp.n}회${s.sp.min ? ` (최소 ${s.sp.min})` : ''}`) : '') + (s.rage ? tag('격노 상태 전용') : '')}</div></div></div></div>`).join('');
   const pvs = (mob.pv || []).map((id) => MOB_PV[id]).filter(Boolean);
   const pvBadge = (p) => (p.k === 'none' ? tag(`⚠ 미반영 · ${p.why || '효과 비공개'}`, 'warn') : p.est ? (state.pvEst !== false ? tag('추정 수치로 반영', 'est') : tag('추정값 꺼짐 · 미반영', 'warn')) : tag('반영', 'ok'));
   const pvHtml = pvs.length ? `<div class="sec"><span>비전 (패시브 ${pvs.length})</span></div>` + pvs.map((p) => `<div class="skill"><div class="mobsk">${p.i ? MOBSKILL_ICON({ ic: p.i, el: p.el || 'none' }) : '<span class="ico mob"><em>✦</em></span>'}<div><b>${esc(p.ko)}</b> <small class="en">${esc(p.en)}</small><div class="desc" style="margin-top:2px">${esc(p.d)}</div><div class="sum" style="margin:4px 0 0">${pvBadge(p)}</div></div></div></div>`).join('') : '';
@@ -379,8 +395,8 @@ function mobHtml(u) {
       ${fixed ? '<div class="note" style="margin:6px 0 0">층·단계 기준 고정 능력치 (게임 자료로 계산)</div>' : ''}
       ${u.uws ? '<div class="note" style="margin:4px 0 0">길드 토벌 보스 효과 United We Stand: 처음 3턴 동안 받는 대미지 99% 감소</div>' : ''}
       <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}</div>
-      ${mob.raid ? `<div class="note" style="margin:4px 0 0">레이드 보스 · 몸체 5×5 · 이동력 ${mob.raid.move}칸 · ${mob.raid.rounds}라운드. 섬멸의 발톱(9×3)은 게임 자료에 대미지 계수가 없어 뺐습니다.</div>` : ''}
-      <div class="sec"><span>${mob.raid ? '스킬 (준비된 스킬을 순서대로 모두 사용 · 게임 계수)' : `스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)`}</span></div>${sk}${pvHtml}
+      ${mob.raid ? `<div class="note" style="margin:4px 0 0">레이드 보스 · 몸체 5×5 · 이동력 ${mob.raid.move}칸 · ${mob.raid.rounds}라운드. 섬멸의 발톱(9×3)은 게임 자료에 대미지 계수가 없어 뺐습니다.</div>` : mob.kit ? `<div class="note" style="margin:4px 0 0">몸체 ${mob.sz}×${mob.sz} · 스킬은 게임 자료의 타격 구역을 한 타씩 처리합니다(넉백으로 밀린 대상이 다음 타격 범위에 다시 들어가면 또 맞음). 계수 조정(「몹 스킬 계수」)은 적용되지 않습니다.</div>` : ''}
+      <div class="sec"><span>${mob.kit ? '스킬 (게임 자료 · 준비된 스킬을 순서대로 모두 사용)' : `스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)`}</span></div>${sk}${pvHtml}
     </div></article>`;
 }
 function presetHtml() {
