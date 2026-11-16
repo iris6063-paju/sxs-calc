@@ -87,10 +87,11 @@ const BOSSES = {
   loong: 'Primordial Loong (태고의 용), a legendary boss: an ancient eastern dragon with a long serpentine body coiling in an S-curve (several body segments as bones), four short legs with golden claws, long whiskers, branching antlers, a flowing red mane, golden scales, a glowing pearl orb held near a claw, lightning sparks (glow)',
   mecha: 'Galactic Mecha (은하 메카), a legendary boss: a cosmic battle mech — white and navy armour plates with gold trim, a glowing cyan core in the chest, a star-shaped glowing visor, big shoulder cannons, floating thruster wing-fins with cyan glow, chunky armoured legs',
   yoldra: 'Yoldra (욜드라), a legendary boss: a twin-element dragon — the left half icy blue with crystal ice spikes, the right half crimson with flame spikes, large horns, membranous wings, a long spiked tail, glowing blue and orange eyes',
+  tyrant: 'Chaos Tyrant (혼돈의 폭군), the raid boss of Chaos Invasion (the attached image is its in-game icon: match its head): a towering demon overlord standing upright on two heavy armoured legs; a pale white bone mask face with vertical grooves and glowing violet eye slits, a dark iron crown of three tall blade spikes, HUGE curved black horns sweeping out and up with violet tips, a broad dark slate-and-purple armoured torso with a glowing violet chaos core, massive arms ending in long claws (glowing violet), a tattered dark mantle on its back, violet chaos energy wisps around it (glow). Menacing but cute-toy proportions (big head, chunky body)',
 };
 const jobs = [];
 for (const [d, [what, style]] of Object.entries(HEROES)) jobs.push({ id: d, kind: 'hero', prompt: HERO(d, what, style), images: [path.join(REF, d + '.png')] });
-for (const [k, what] of Object.entries(BOSSES)) jobs.push({ id: 'boss_' + k, kind: 'creature', prompt: CREATURE('boss_' + k, what, false, true), images: [] });
+for (const [k, what] of Object.entries(BOSSES)) { const ref = path.join(REF, 'boss_' + k + '.png'); jobs.push({ id: 'boss_' + k, kind: 'creature', prompt: CREATURE('boss_' + k, what, false, true), images: fs.existsSync(ref) ? [ref] : [] }); }
 for (const [k, what] of Object.entries(MOBS)) jobs.push({ id: 'mob_' + k, kind: 'creature', prompt: CREATURE('mob_' + k, what, true, false), images: [] });
 
 /* ── validation ── */

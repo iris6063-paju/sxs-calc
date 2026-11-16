@@ -13,7 +13,9 @@
   `js/gamedata.js` 의 수치는 이 사이트가 정리한 표에서 계산기에 필요한 부분(직업 18종의 전투스킬, 판타지아 등반 4개 지역)을 추려 변환한 것입니다.
 - **Purrwikimania 레이드 보스 시뮬레이터 자료** — https://www.purrwikimania.com/combat/boss
   신수 6종 · 혼돈의 폭군의 몸체 크기(게임의 BodyRangeInfos: 4×4 / 5×5), 다단 히트 스킬의 타격 구역(HitCfg 칸 목록, `tools/hitparts.mjs`),
-  큰 몸체의 규칙(가장 가까운 몸체 칸까지의 거리, 몸 전체가 들어가는 칸에만 서기, 넉백 · 끌어당김 면역)을 이 사이트의 시뮬레이터 자료(`assets/duel.json`)와 설명에서 확인했습니다. 수치만 옮겼고 코드는 쓰지 않았습니다.
+  큰 몸체의 규칙(가장 가까운 몸체 칸까지의 거리, 몸 전체가 들어가는 칸에만 서기, 넉백 · 끌어당김 면역)을 이 사이트의 시뮬레이터 자료(`assets/duel.json`)와 설명에서 확인했습니다.
+  혼돈 침공 레이드 보스 혼돈의 폭군의 스킬 계수 · 쿨다운 · 범위 · 비전(`tools/raid.mjs`)과 몬스터 정의(`/assets/enemies/chaos_ci.json`)도 같은 자료에서 옮겼습니다. 수치만 옮겼고 코드는 쓰지 않았습니다.
+  혼돈의 폭군 3D 모델은 게임 아이콘(`/assets/monsters/G_3803.png`, 저장소 미포함 참고 이미지)을 참고해 GPT 6.1 sol이 설계했습니다.
 - **Purrwikimania 결투 시뮬레이터** — https://www.purrwikimania.com/combat/duel
   배틀 화면 구성(행동 타임라인 · 한 행동씩 보기 · 전투 로그 · 전장 효과 표시 · 다시 볼 전투 고르기 · 시작 위치 지정)을 참고했습니다. 화면과 그림은 이 프로젝트에서 새로 만들었고, 그 사이트의 그림 · 코드는 쓰지 않았습니다.
 - **Keripo — "[Sword x Staff] Damage Formula (Datamined)"** — https://keripo.com/2026/10/sword-x-staff-damage-formula-datamined/

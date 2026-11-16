@@ -37,7 +37,7 @@ export async function loadToon() {
   window.dispatchEvent(new Event('sxs-art'));
 }
 export const toonSpec = (id) => SPECS.get(id) || null;
-const BOSS_RE = [[/Storm Griffin/i, 'boss_griffin'], [/Flamoenix|Phoenix/i, 'boss_phoenix'], [/Yamata no Orochi/i, 'boss_orochi'], [/Primordial Loong/i, 'boss_loong'], [/Galactic Mecha/i, 'boss_mecha'], [/Yoldra/i, 'boss_yoldra']];
+const BOSS_RE = [[/Storm Griffin/i, 'boss_griffin'], [/Flamoenix|Phoenix/i, 'boss_phoenix'], [/Yamata no Orochi/i, 'boss_orochi'], [/Primordial Loong/i, 'boss_loong'], [/Galactic Mecha/i, 'boss_mecha'], [/Yoldra/i, 'boss_yoldra'], [/Chaos Tyrant/i, 'boss_tyrant']];
 /** unique legendary bosses first, then the shared monster model of the art kind */
 export function toonIdForMob(en, slug) {
   const b = BOSS_RE.find(([re]) => re.test(en)); if (b && SPECS.has(b[1])) return b[1];

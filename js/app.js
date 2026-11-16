@@ -22,7 +22,7 @@ const ADV = [['critRate', '치명타율 %'], ['critDmg', '치명타 대미지 %'
   ['phyMastery', '물리 마스터리'], ['aff', '원소 친화력'], ['res', '원소 저항'], ['phyRes', '물리 저항'], ['aegis', '원소 가호']];
 const EFF_KO = { abreak: '방어력 감소', weak: '약화', slow: '감속', stun: '스턴', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명', cold: '냉기', wet: '습윤', dot: '침식', riven: '막기율 감소', sigil: '낙인', vuln: '취약', randDebuff: '랜덤 디버프', kb: '넉백' };
 const effName = (e) => (e.k === 'kb' ? `넉백 ${e.n || 1}칸${e.side ? '(옆으로)' : ''}` : (e.k === 'dot' && e.el && e.el !== 'dark' ? (e.el === 'fire' ? '작열' : '지속 대미지') : EFF_KO[e.k] || e.k) + (e.v && ['abreak', 'weak', 'slow'].includes(e.k) ? ` ${e.v >= 0.3 ? 2 : 1}` : ''));
-const MODE_KO = { fantasia: '환상계단', dungeon: '일일 던전', conquest: '길드 토벌 (길드 보스 460층)', crucible: '신수 시련' };
+const MODE_KO = { fantasia: '환상계단', dungeon: '일일 던전', conquest: '길드 토벌 (길드 보스 460층)', crucible: '신수 시련', raid: '혼돈 침공 (혼돈의 폭군 레이드)' };
 
 /* ───────── official skill icons (optional, user-supplied): assets/skills/skill_<id>.webp|png ───────── */
 // assets/skills/icons.json → { "ext": "webp" | "png" | "" }  (empty = no icon files supplied, built-in tiles are used)
@@ -59,7 +59,7 @@ const CATALOG = [
 const MOBSKILL_ICON = (s) => (s.ic ? `<span class="ico has-img mob" style="--c:${(EL[s.el] || EL.none).c}"><img src="assets/mobskills/${s.ic}.png" alt="" loading="lazy" onerror="this.parentNode.classList.remove('has-img');this.remove()"><b class="eldot"></b></span>` : '');
 const encMode = (id) => CATALOG.find((m) => m.id === id) || CATALOG[0];
 const encGroup = (mode, id) => mode.groups.find((g) => g.id === id) || mode.groups[0];
-const mobHome = (mob) => (mob.map ? `환상계단 · ${MAP.get(mob.map).ko}` : { 1: '일일 던전', 2: '길드 토벌', 3: '신수 시련' }[mob.k.split('|')[1]] || '기타');
+const mobHome = (mob) => (mob.map ? `환상계단 · ${MAP.get(mob.map).ko}` : { 1: '일일 던전', 2: '길드 토벌', 3: '신수 시련', 5: '혼돈 침공 레이드' }[mob.k.split('|')[1]] || '기타');
 
 /* ───────── state ───────── */
 function lineChain(clsKey) { const c = CLS.get(clsKey), baseKey = c.line[0] === 'W' ? 'Zhanshi' : 'Fashi'; return [c, ...CLASSES.filter((x) => x.tier < c.tier && (x.line === c.line || x.key === baseKey)).sort((a, b) => b.tier - a.tier)]; }
@@ -141,7 +141,7 @@ function shapeKo(tg) {
   if (!tg) return '';
   switch (tg.t) {
     case 'S': return tg.min ? `${tg.min}~${tg.r}칸 · 적 1명` : `${tg.r}칸 · 적 1명`;
-    case 'A': return `${tg.r}칸 범위 · 모든 적`;
+    case 'A': return tg.r >= 99 ? '전장의 모든 적' : `${tg.r}칸 범위 · 모든 적`;
     case 'Q': return `주변 ${tg.r}칸 정사각형`;
     case 'F': return `전방 ${tg.w}x${tg.h}칸`;
     case 'T': return `${tg.r}칸 내 위치 선택 · 주변 ${tg.ar}칸`;
@@ -360,7 +360,9 @@ const mobFixed = (u) => !!u.fix || !!MOB.get(u.key).fixed;
 const mobSt = (u) => (u.fix ? stFrom(u.fix, u.level) : mobStats(u.key, u.level, u.sr)) || { hp: 0, atk: 0, def: 0, spd: 0, critDmg: 0, blockEff: 0 };
 function mobHtml(u) {
   const mob = MOB.get(u.key), st = mobSt(u), open = openSet.has(u.uid), fixed = mobFixed(u);
-  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.en)}</b><div class="sum" style="margin:3px 0 0">${skillTags({ ...s, kind: 'dmg', cd: 0 }, null)}</div></div></div></div>`).join('');
+  // raid boss skills carry the game's coefficient (per hit) and cooldown; ordinary mob skills use the assumed coefficient
+  const raidTags = (s) => (s.rc == null ? '' : s.gate ? tag(`${s.gate}번째 행동부터 · ${s.cd + 1}행동마다`) : s.cd ? tag(`${s.cd + 1}행동마다 · 첫 사용 ${s.cd + 1}번째 행동`) : tag('매 행동'));
+  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.ko || s.en)}</b>${s.ko ? ` <small class="en">${esc(s.en)}</small>` : ''}<div class="sum" style="margin:3px 0 0">${skillTags({ ...s, kind: 'dmg', cd: 0 }, s.rc != null ? { coef: s.rc } : null)}${raidTags(s)}</div></div></div></div>`).join('');
   const pvs = (mob.pv || []).map((id) => MOB_PV[id]).filter(Boolean);
   const pvBadge = (p) => (p.k === 'none' ? tag(`⚠ 미반영 · ${p.why || '효과 비공개'}`, 'warn') : p.est ? (state.pvEst !== false ? tag('추정 수치로 반영', 'est') : tag('추정값 꺼짐 · 미반영', 'warn')) : tag('반영', 'ok'));
   const pvHtml = pvs.length ? `<div class="sec"><span>비전 (패시브 ${pvs.length})</span></div>` + pvs.map((p) => `<div class="skill"><div class="mobsk">${p.i ? MOBSKILL_ICON({ ic: p.i, el: p.el || 'none' }) : '<span class="ico mob"><em>✦</em></span>'}<div><b>${esc(p.ko)}</b> <small class="en">${esc(p.en)}</small><div class="desc" style="margin-top:2px">${esc(p.d)}</div><div class="sum" style="margin:4px 0 0">${pvBadge(p)}</div></div></div></div>`).join('') : '';
@@ -377,7 +379,8 @@ function mobHtml(u) {
       ${fixed ? '<div class="note" style="margin:6px 0 0">층·단계 기준 고정 능력치 (게임 자료로 계산)</div>' : ''}
       ${u.uws ? '<div class="note" style="margin:4px 0 0">길드 토벌 보스 효과 United We Stand: 처음 3턴 동안 받는 대미지 99% 감소</div>' : ''}
       <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}</div>
-      <div class="sec"><span>스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)</span></div>${sk}${pvHtml}
+      ${mob.raid ? `<div class="note" style="margin:4px 0 0">레이드 보스 · 몸체 5×5 · 이동력 ${mob.raid.move}칸 · ${mob.raid.rounds}라운드. 섬멸의 발톱(9×3)은 게임 자료에 대미지 계수가 없어 뺐습니다.</div>` : ''}
+      <div class="sec"><span>${mob.raid ? '스킬 (준비된 스킬을 순서대로 모두 사용 · 게임 계수)' : `스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)`}</span></div>${sk}${pvHtml}
     </div></article>`;
 }
 function presetHtml() {
@@ -465,7 +468,8 @@ function onTeamClick(ti, e) {
     if (state.mode !== 'pve') setMode('pve', true);
     toast(`${grp.ko} · ${grp.label(n)}`);
     if (mode.id === 'crucible' && state.roundCap.pve !== 10) { state.roundCap.pve = 10; toast('신수 시련은 10턴 제한이라 라운드 제한을 10으로 맞췄습니다'); }
-    if (mode.id === 'conquest' || mode.id === 'crucible') setTimeout(() => toast('대미지 경쟁 전투입니다 — 결과의 「아군 평균 총 대미지」를 보세요'), 2300);
+    if (mode.id === 'raid' && state.roundCap.pve !== 25) { state.roundCap.pve = 25; toast('혼돈의 폭군 레이드는 25라운드라 라운드 제한을 25로 맞췄습니다. 보스 랭크는 내 랭크와 같은 것을 고르세요'); }
+    if (mode.id === 'conquest' || mode.id === 'crucible' || mode.id === 'raid') setTimeout(() => toast('대미지 경쟁 전투입니다 — 결과의 「아군 평균 총 대미지」를 보세요'), 2300);
   } else return;
   renderTeam(ti); syncSettings(); touch();
 }

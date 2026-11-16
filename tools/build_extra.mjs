@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PV } from './passives.mjs';
 import { PFX } from './pets_fx.mjs';
+import { RAID } from './raid.mjs';
 import { moveAndSize } from './skilltext.mjs';
 
 const [, , DL, DL2, OUT] = process.argv;
@@ -359,6 +360,23 @@ for (const m of eidx.modes) {
   if (m.id === 'dungeons') for (const g of m.groups) { const [nm, df] = g.name.split(' · '); if (DUN_KO[nm]) addGroup('dungeon', g.id, g.file, `${DUN_KO[nm]} · ${DIFF_KO[df] || df}`, g.name); }
   if (m.id === 'conquest') for (const g of m.groups) addGroup('conquest', g.id, g.file, '길드 토벌', g.name, true);
   if (m.id === 'crucible') for (const g of m.groups) addGroup('crucible', g.id, g.file, { Apprentice: '견습', Elite: '정예', Expert: '숙련', Champion: '챔피언', Master: '마스터', Paragon: '패러곤', Saint: '세인트', Godtouched11: '에테리얼' }[g.name] || g.name, g.name, true);
+}
+// Chaos Invasion raid: the Chaos Tyrant (5×5) at the ranks / levels the server can give it; exact stats per fight
+if (have.has('chaos_ci.json')) {
+  const ci = J('chaos_ci.json'), def = Object.values(ci.defs).find((d) => d.id === RAID.monster);
+  if (def) {
+    const sk = RAID.skills.map((s) => { const e = esk[s.sid]; return { en: s.en, ko: s.ko, el: s.el, ic: e && e.i ? e.i : undefined, rc: s.c, hits: s.hits, cd: s.cd, ...(s.gate ? { gate: s.gate } : {}), tg: s.tg }; });
+    const groups = [];
+    for (const [sr, rko, lvs] of RAID.ranks) {
+      const fights = [], st = [];
+      for (const L of lvs) { const s = exactStats(def, L, sr); if (!s) continue; fights.push([RAID.ko, RAID.key, 1, L, sr]); st.push([s]); }
+      if (fights.length) groups.push({ id: 'ct' + sr, ko: rko, en: sr, fights, st });
+    }
+    const s0 = exactStats(def, 130, 'Saint1');
+    MOBS2.push({ k: RAID.key, en: def.n, ko: RAID.ko, ty: 2, pg: def.pg, sr: 'Saint1', lv: 130, f: def.f.slice(0, 4), sk, sz: RAID.sz, raid: { move: RAID.move, rounds: RAID.rounds }, pv: RAID.pv, ar: 'golem', st: s0, fixed: 1 });
+    ENC.push({ id: 'raid', groups });
+    log('enc raid', groups.map((g) => g.ko + ' ' + g.fights.length).join(', '), 'Saint1 L130 hp', s0[0], 'atk', s0[1]);
+  }
 }
 log('extra mobs', MOBS2.length, 'curves', Object.keys(CURVES2).join(','), 'rpg', JSON.stringify(RPG).length);
 // passives (비전) used by any shipped mob → Korean text + model + icon

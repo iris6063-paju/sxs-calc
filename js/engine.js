@@ -185,12 +185,14 @@ function buildMob(key, level, opts, sr, fix, uws) {
   // body size: Hieromon (신수 시련) 4×4 / 5×5 from the game data (mob.sz); other bosses have no public body
   // data and stand on 2×2 (assumption: the game's dash text names bodies "larger than 4 grids", so 4-cell bodies exist)
   const sz = mob.sz || (mob.ty === 2 ? 2 : 1);
-  const u = { kind: 'mob', name: mob.ko, key, level, move: 4, sz, big: sz > 1, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null, uws: !!uws };
+  const u = { kind: 'mob', name: mob.ko, key, level, move: mob.raid ? mob.raid.move : 4, sz, big: sz > 1, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null, uws: !!uws, raid: !!mob.raid };
   u.atk = st.atk; u.def = st.def; u.hpMax = st.hp; u.spd = st.spd;
   for (const k of PCT) u[k] = (st[k] || 0) / 100;
   for (const k of RAW) u[k] = 0;
   const mc = opts.mobCoef != null ? opts.mobCoef : 1;
-  u.skills = mob.sk.map((s, i) => ({ s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 }));
+  // raid boss: the game's own coefficients (per hit) and cooldowns; the opening cooldown is CD + 1
+  if (mob.raid) u.skills = mob.sk.map((s) => ({ s: { ...s, kind: 'dmg' }, n: { coef: s.rc, flat: 0 }, cd: s.cd || 0, init: (s.cd || 0) + 1 }));
+  else u.skills = mob.sk.map((s, i) => ({ s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 }));
   compileMobPassives(u, mob, mc, opts.pvEst !== false);
   return u;
 }
@@ -594,6 +596,7 @@ export function simulate(P, seed, log) {
   }
   function tryStatus(a, t, e, sk) {
     if (!t.alive) return;
+    if (t.mp && t.mp.immune && t.mp.immune.some((x) => x.st === e.k)) return; // e.g. Chaos Tyrant: immune to Frenzy
     let k = e.k, v = e.v;
     if (k === 'randDebuff') { const pick = [['weak', 0.3], ['abreak', 0.3], ['slow', 0.3]][Math.floor(rnd() * 3)]; k = pick[0]; v = pick[1]; }
     let p = e.p == null ? 1 : e.p;
@@ -641,10 +644,13 @@ export function simulate(P, seed, log) {
   const foesOf = (u) => { const tn = has(u, 'taunt'); if (tn && U[tn.src] && U[tn.src].alive) return [U[tn.src]]; const o = []; for (const f of U) if (f.alive && f.team !== u.team) o.push(f); return o; };
   const alliesOf = (u) => { const o = []; for (const f of U) if (f.alive && f.team === u.team) o.push(f); return o; };
   /** does one cell lie in a caster-anchored area (A / Q / F) */
-  function cellIn(tg, cx, cy, aim, x, y) {
+  /** distance from a caster standing at (x, y) to a cell: from the nearest cell of its body */
+  const dAt = (c, x, y, ax, ay) => { if (!(c && c.sz > 1)) return dist(x, y, ax, ay); let m = 99; for (const [dx, dy] of fpOf(c)) m = Math.min(m, Math.abs(x + dx - ax) + Math.abs(y + dy - ay)); return m; };
+  function cellIn(tg, cx, cy, aim, x, y, c) {
     const dx = x - cx, dy = y - cy;
     switch (tg.t) {
-      case 'A': return Math.abs(dx) + Math.abs(dy) <= tg.r && (dx || dy);
+      // "within N grids of the caster": a large caster measures from its body (Terra's Cry rings the Chaos Tyrant's 5×5)
+      case 'A': { const d = c && c.sz > 1 ? dAt(c, cx, cy, x, y) : Math.abs(dx) + Math.abs(dy); return d <= tg.r && d > 0; }
       case 'Q': return Math.max(Math.abs(dx), Math.abs(dy)) <= tg.r && (dx || dy);
       case 'F': { const d = DIRS[aim]; const fw = dx * d[0] + dy * d[1]; if (fw < 1 || fw > tg.h) return false; const lat = dx * -d[1] + dy * d[0]; return tg.w % 2 ? Math.abs(lat) <= (tg.w - 1) / 2 : lat >= 0 && lat < tg.w; }
       default: return false;
@@ -658,7 +664,7 @@ export function simulate(P, seed, log) {
     return n;
   }
   /** how many cells of a unit's footprint the area covers (0 = not hit) */
-  function inShape(tg, cx, cy, aim, f) { let n = 0; for (const [dx, dy] of fpOf(f)) if (cellIn(tg, cx, cy, aim, f.x + dx, f.y + dy)) n++; return n; }
+  function inShape(tg, cx, cy, aim, f, c) { let n = 0; for (const [dx, dy] of fpOf(f)) if (cellIn(tg, cx, cy, aim, f.x + dx, f.y + dy, c)) n++; return n; }
   const cellAim = (tg, ax, ay, x, y) => (tg.t === 'TQ' ? Math.max(Math.abs(x - ax), Math.abs(y - ay)) <= tg.ar : dist(x, y, ax, ay) <= tg.ar);
   function inAim(tg, ax, ay, f) { let n = 0; for (const [dx, dy] of fpOf(f)) if (cellAim(tg, ax, ay, f.x + dx, f.y + dy)) n++; return n; }
   function standCell(u, reach, pred) {
@@ -693,7 +699,7 @@ export function simulate(P, seed, log) {
         for (const [fx, fy] of fpOf(f)) for (const [ox, oy] of cand) {
           const ax = f.x + fx + ox, ay = f.y + fy + oy; if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
           const key = ay * W + ax; if (seen.has(key)) continue; seen.add(key);
-          const need = Math.max(0, dist(u.x, u.y, ax, ay) - tg.r); if (need > reach) continue;
+          const need = Math.max(0, dAt(u, u.x, u.y, ax, ay) - tg.r); if (need > reach) continue;
           let n = 0, big = 0; for (const g of foes) if (inAim(tg, ax, ay, g)) { n++; if (g.sz > 1) big = 1; }
           if (n) aims.push([n, need, ax, ay, big]);
         }
@@ -701,7 +707,7 @@ export function simulate(P, seed, log) {
       aims.sort((a, b) => bigF * (b[4] - a[4]) || b[0] - a[0] || a[1] - b[1]);
       for (let i = 0; i < aims.length && i < 6; i++) {
         const [, , ax, ay] = aims[i];
-        const cell = standCell(u, reach, (x, y) => dist(x, y, ax, ay) <= tg.r);
+        const cell = standCell(u, reach, (x, y) => dAt(u, x, y, ax, ay) <= tg.r);
         if (cell) { const cnt = new Map(); const targets = foes.filter((g) => { const k = inAim(tg, ax, ay, g); if (k) cnt.set(g.id, k); return k > 0; }); return { x: cell[0], y: cell[1], walk: Math.max(0, cell[2] - leap), targets, cnt, ax, ay }; }
       }
       return null;
@@ -715,7 +721,7 @@ export function simulate(P, seed, log) {
       if (d && !fits(u, x, y)) continue;
       for (let k = 0; k < dirs; k++) {
         let n = 0, big = 0;
-        for (const f of foes) if (inShape(tg, x, y, k, f)) { n++; if (f.sz > 1) big = 1; }
+        for (const f of foes) if (inShape(tg, x, y, k, f, u)) { n++; if (f.sz > 1) big = 1; }
         const score = n + (bigF && big ? 100 : 0);
         if (score > bestN) { bestN = score; best = [x, y, d, k]; }
       }
@@ -724,7 +730,7 @@ export function simulate(P, seed, log) {
     if (!best) return null;
     const [x, y, d, k] = best, cnt = new Map();
     // multi-hit count: one per game hit config touching the body (s.parts), else one per covered cell
-    const targets = foes.filter((f) => { const c = inShape(tg, x, y, k, f); if (c) cnt.set(f.id, s.parts ? partHits(s.parts, tg, x, y, k, f) || 1 : c); return c > 0; });
+    const targets = foes.filter((f) => { const c = inShape(tg, x, y, k, f, u); if (c) cnt.set(f.id, s.parts ? partHits(s.parts, tg, x, y, k, f) || 1 : c); return c > 0; });
     return { x, y, walk: Math.max(0, d - leap), targets, cnt, ax: x, ay: y, dir: k };
   }
   /** kind: 1 leap, 'dash' | 'kb' | 'retreat' for skill movement (shown differently in the replay) */
@@ -990,8 +996,10 @@ export function simulate(P, seed, log) {
   }
   function approach(u) {
     const foes = foesOf(u); if (!foes.length || u.pool <= 0) return;
-    const near = (x, y) => { let m = 1e9; for (const f of foes) { const d = dU(f, x, y); if (d < m) m = d; } return m; };
-    const want = Math.max(1, Math.min(...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => (k.s.tg.t === 'S' ? k.s.tg.r : 1)), 99));
+    // a large unit (raid boss) measures from its body and stops once its targeted skills reach
+    const big = u.sz > 1;
+    const near = (x, y) => { let m = 1e9; for (const f of foes) { const d = big ? Math.min(...fpOf(u).map(([dx, dy]) => dU(f, x + dx, y + dy))) : dU(f, x, y); if (d < m) m = d; } return m; };
+    const want = Math.max(1, Math.min(...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => (k.s.tg.t === 'S' || (big && k.s.tg.t === 'T') ? k.s.tg.r : 1)), 99));
     let best = null, bd = near(u.x, u.y);
     if (bd <= want) return;
     for (const [dx, dy, d] of DIAMOND) { if (d > u.pool) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue; const nd = near(x, y); if (nd < bd && nd >= 1) { bd = nd; best = [x, y]; } }
@@ -1018,6 +1026,10 @@ export function simulate(P, seed, log) {
       if (mp.regen) heal(u, u, u.hpMax * mp.regen[0].v);
       if (mp.rejuv && u.rjLeft > 0) { u.rjLeft--; heal(u, u, u.hpMax * mp.rejuv[0].v); }
       if (mp.startAoe) for (const s of mp.startAoe) pvAoe(u, s.r, s.el, 1);
+      // Chaos Tyrant: Chaos Power at the start of its 10th action (SPD and DMG dealt +20%, opens Terra's Cry)
+      if (mp.chaosPower) for (const c of mp.chaosPower) if (u.turnNo === c.turn) { pvLabel(u, c.name); addStatus(u, { k: 'spdUp', v: u.spd * c.spd, exp: 1e9, buff: true, nd: 1 }); addStatus(u, { k: 'dmgUp', v: c.dmg, exp: 1e9, buff: true, nd: 1 }); }
+      // End to Beginning: at the start of its 20th action every enemy's HP drops to zero (ignores invincibility)
+      if (mp.wipe) for (const c of mp.wipe) if (u.turnNo === c.turn) { pvLabel(u, c.name); for (const f of U) if (f.alive && f.team !== u.team && !B.over) { f.hp = 0; kill(f, u); } }
     }
     if (u.alive && !B.over && u.petI != null) {
       const p = U[u.petI];
@@ -1032,9 +1044,12 @@ export function simulate(P, seed, log) {
       if (!locked) {
         u.pool = has(u, 'immob') ? 0 : u.move + u.moveAdd;
         let cast = 0, waiting = 0;
-        if (u.kind === 'mob') {
+        if (u.kind === 'mob' && !u.raid) {
           // monsters: one skill a turn, specials first (assumption)
           for (let i = u.skills.length - 1; i >= 0 && !cast && !B.over; i--) if (u.cds[i] <= 0) { if (tryCast(u, i)) cast = 1; else waiting = 1; }
+        } else if (u.raid) {
+          // raid boss: every ready skill in its own order (as the recorded raids show); a gated skill waits for its turn
+          for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) { const s = u.skills[i].s; if (u.cds[i] > 0 || (s.gate && u.turnNo < s.gate)) continue; if (tryCast(u, i)) cast++; else waiting = 1; }
         } else {
           for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) if (u.cds[i] <= 0) { if (tryCast(u, i)) cast++; else if (u.skills[i].s.kind === 'dmg') waiting = 1; }
         }
