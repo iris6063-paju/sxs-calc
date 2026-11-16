@@ -32,8 +32,10 @@ const T = 1.2;                       // world size of one grid cell
 const wx = (gy) => (gy - 10) * T;    // grid row  → world x (team A on the left)
 const wz = (gx) => (gx - 10) * T;    // grid col  → world z
 // a unit's world position: 2×2 monsters are anchored on their low corner, so their centre is half a cell over
-const ux = (u, gy) => wx(gy + (u.m.sz === 2 ? 0.5 : 0));
-const uz = (u, gx) => wz(gx + (u.m.sz === 2 ? 0.5 : 0));
+// a body's centre sits half a cell off its anchor for even sizes (2×2 covers 0..1, 4×4 covers -1..2)
+const bodyOff = (u) => ((u.m.sz || 1) % 2 ? 0 : 0.5);
+const ux = (u, gy) => wx(gy + bodyOff(u));
+const uz = (u, gx) => wz(gx + bodyOff(u));
 const TEAM = [0x4d8dff, 0xff5d5d];
 const MONO = '"JetBrains Mono","D2Coding",Consolas,"Malgun Gothic",monospace';
 const SANS = '"Pretendard","Malgun Gothic","Apple SD Gothic Neo",sans-serif';
@@ -279,7 +281,8 @@ export function createStage(canvas) {
       if (spec) {
         const uniq = id.startsWith('boss_');
         if (!uniq) { const p = pet ? petPalette(pet) : mobPalette(md); recolor = { MAIN: p[0], LIGHT: p[1], DARK: p[2] }; }
-        tscale = pet ? 0.62 : uniq ? 2.0 : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
+        // Hieromon fill their 4×4 / 5×5 bodies
+        tscale = pet ? 0.62 : uniq ? (m.sz >= 5 ? 2.9 : m.sz === 4 ? 2.5 : 2.0) : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
       }
     }
     if (spec) {
@@ -287,7 +290,7 @@ export function createStage(canvas) {
       u.toon.root.scale.setScalar(tscale); u.yaw = m.team ? -1.0 : 1.0; u.yawT = u.yaw;
       u.mat = new THREE.MeshBasicMaterial(); u.card = new THREE.Mesh(new THREE.BufferGeometry(), u.mat); u.tex = null; u.h = Math.max(1, u.toon.h * tscale);
       u.an = { st: 'idle', t0: 0 }; u.lastHit = -9;
-      const big = m.sz === 3 ? 3.2 : m.sz === 2 ? 2.2 : 1; // the team disc covers the footprint
+      const big = m.sz > 1 ? m.sz + 0.2 : 1; // the team disc covers the footprint
       const base = new THREE.Mesh(baseGeo, toonMat(TEAM[m.team])); base.position.y = 0.06; base.scale.set(big, 0.6, big); base.receiveShadow = true; base.add(new THREE.Mesh(baseGeo, OUTLINE));
       u.barS = null; u.bar = textTexture(256, 76);
       u.barS = new THREE.Sprite(new THREE.SpriteMaterial({ map: u.bar.tex, transparent: true, depthTest: false, toneMapped: false })); u.barS.scale.set(2.1, 0.62, 1); u.barS.position.y = u.h + 0.4; u.barS.renderOrder = 5;

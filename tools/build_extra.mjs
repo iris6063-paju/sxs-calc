@@ -291,9 +291,13 @@ function exactStats(def, level, sr) {
   return [g('MaxHp'), g('Attack'), g('Defence'), g('Speed'), g('CritRatePercent') / 100, g('CritPowerPercent') / 100, g('CritAvoidPercent') / 100, g('BlockPercent') / 100,
     g('BlockValuePercent') / 100, g('BlockAvoidPercent') / 100, g('DmgAddPercent') / 100, g('DmgReducePercent') / 100, g('EffectRate'), g('EffectDodge')].map((x) => +x.toFixed(2));
 }
+// body sizes from the game data (GridTransformComponent.BodyRangeInfos, as purrwikimania.com ships it for its
+// Crucible and raid simulators): monster id → side of its square body. Other bosses have no public body data.
+const BODY = { 3703: 4, 3704: 4, 3708: 4, 3705: 5, 3706: 5, 3707: 5, 3803: 5 };
 function addMob(key, def, sr, lv) {
   if (seenMob.has(key)) return; seenMob.add(key);
   const mob = { k: key, en: def.n, ko: KO_MOB2[def.n] || baseKo[def.n] || def.n, ty: /Boss|Hieromon/.test(def.t) ? 2 : def.t === 'Elite' ? 1 : 0, pg: def.pg, sr, lv, f: def.f.slice(0, 4), sk: [] };
+  if (BODY[def.id]) mob.sz = BODY[def.id];
   if (mob.ko === def.n) log('NO KO', def.n);
   mob.ar = (ARCHE.find(([re]) => re.test(def.n)) || [0, 'brute'])[1];
   if (def.x && Object.keys(def.x).length) mob.x = def.x;

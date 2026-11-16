@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { moveAndSize } from './skilltext.mjs';
+import { PARTS, FWD0 } from './hitparts.mjs';
 
 const [, , DL, OUT] = process.argv;
 if (!DL || !OUT) { console.error('usage: node build_data.mjs <dl-dir> <out-file>'); process.exit(1); }
@@ -312,6 +313,8 @@ while ((sm = secRe.exec(skillsHtml))) {
     else if (s.c2 && !s.c) { s.c = s.c2; s.fm = s.fm2; delete s.c2; delete s.fm2; }
     else if (s.c2 && s.hits === 1) { delete s.c2; delete s.fm2; }
     for (const [k, v] of Object.entries(ov)) if (!['ko', 'bvKey', 'useC2'].includes(k)) s[k] = v;
+    // multi-hit on large targets: the game's hit configs (one hit per config that touches the body)
+    if (s.multi && PARTS[id]) { s.parts = PARTS[id].map((p) => p.map(([x, f]) => [x, f + (FWD0[id] || 0)])); }
     if (s.eff && !s.eff.length) delete s.eff;
     if (!s.kind) s.kind = s.c && s.tg ? 'dmg' : s.hv ? 'heal' : 'none';
     if (s.kind === 'heal' && !s.tg) s.tg = { t: 'allyLow', r: 7 };

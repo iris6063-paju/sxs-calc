@@ -11,6 +11,9 @@
   몹 스킬과 몹 · 보스 비전(패시브) 71종의 설명(`tools/passives.mjs` 의 전투 모델과 한국어 번역 이름은 이 설명을 바탕으로 이 프로젝트에서 만든 것입니다),
   판타몬 19종의 지원 · 실체화 스킬 · 비전 설명과 품질별 수치(`/pets`; `tools/pets_fx.mjs` 의 전투 모델과 한국어 번역도 이 프로젝트에서 만든 것입니다).
   `js/gamedata.js` 의 수치는 이 사이트가 정리한 표에서 계산기에 필요한 부분(직업 18종의 전투스킬, 판타지아 등반 4개 지역)을 추려 변환한 것입니다.
+- **Purrwikimania 레이드 보스 시뮬레이터 자료** — https://www.purrwikimania.com/combat/boss
+  신수 6종 · 혼돈의 폭군의 몸체 크기(게임의 BodyRangeInfos: 4×4 / 5×5), 다단 히트 스킬의 타격 구역(HitCfg 칸 목록, `tools/hitparts.mjs`),
+  큰 몸체의 규칙(가장 가까운 몸체 칸까지의 거리, 몸 전체가 들어가는 칸에만 서기, 넉백 · 끌어당김 면역)을 이 사이트의 시뮬레이터 자료(`assets/duel.json`)와 설명에서 확인했습니다. 수치만 옮겼고 코드는 쓰지 않았습니다.
 - **Purrwikimania 결투 시뮬레이터** — https://www.purrwikimania.com/combat/duel
   배틀 화면 구성(행동 타임라인 · 한 행동씩 보기 · 전투 로그 · 전장 효과 표시 · 다시 볼 전투 고르기 · 시작 위치 지정)을 참고했습니다. 화면과 그림은 이 프로젝트에서 새로 만들었고, 그 사이트의 그림 · 코드는 쓰지 않았습니다.
 - **Keripo — "[Sword x Staff] Damage Formula (Datamined)"** — https://keripo.com/2026/10/sword-x-staff-damage-formula-datamined/

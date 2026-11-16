@@ -182,8 +182,9 @@ function buildPet(d, owner) {
 function buildMob(key, level, opts, sr, fix, uws) {
   const mob = MOB.get(key), st = Array.isArray(fix) && fix.length === 14 ? stFrom(fix, level) : mobStats(key, level, sr);
   if (!st) throw new Error(`${mob.ko}: 이 레벨·랭크의 능력치 자료가 없습니다`);
-  // body size (assumption, no public data): bosses stand on 2×2 cells, Hieromon (신수 시련) on 3×3
-  const sz = mob.ty === 2 ? (String(key).endsWith('|3') ? 3 : 2) : 1;
+  // body size: Hieromon (신수 시련) 4×4 / 5×5 from the game data (mob.sz); other bosses have no public body
+  // data and stand on 2×2 (assumption: the game's dash text names bodies "larger than 4 grids", so 4-cell bodies exist)
+  const sz = mob.sz || (mob.ty === 2 ? 2 : 1);
   const u = { kind: 'mob', name: mob.ko, key, level, move: 4, sz, big: sz > 1, ty: mob.ty, er: mob.er || null, affEl: {}, healUp: 0, lsAll: 0, ch: null, uws: !!uws };
   u.atk = st.atk; u.def = st.def; u.hpMax = st.hp; u.spd = st.spd;
   for (const k of PCT) u[k] = (st[k] || 0) / 100;
@@ -214,8 +215,11 @@ function compileMobPassives(u, mob, mc, est) {
   if (Object.keys(mp).length) u.mp = mp;
   u.mc = mc;
 }
-/** footprint offsets from the anchor cell: 1×1, 2×2 (anchor = low corner) and 3×3 (anchor = centre) */
-const FP = { 1: [[0, 0]], 2: [[0, 0], [1, 0], [0, 1], [1, 1]], 3: [[-1, -1], [0, -1], [1, -1], [-1, 0], [0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] };
+/** footprint offsets from the anchor cell, n×n square from -floor((n-1)/2): 2×2 0..1, 3×3 -1..1, 4×4 -1..2, 5×5 -2..2
+ *  (the game's BodyRangeInfos use the same anchors for the 4×4 and 5×5 Hieromon) */
+const fpLo = (n) => -Math.floor((n - 1) / 2);
+const FP = {};
+for (let n = 1; n <= 5; n++) { FP[n] = []; for (let dy = fpLo(n); dy < fpLo(n) + n; dy++) for (let dx = fpLo(n); dx < fpLo(n) + n; dx++) FP[n].push([dx, dy]); }
 export const fpOf = (u) => FP[u.sz] || FP[1];
 /** where a unit may be placed before the fight (inside the drawn board): x columns, y rows per team */
 export const CELL_BOX = { x: [4, 16], y: [[3, 9], [11, 17]] };
@@ -243,8 +247,8 @@ export function prepare(setup) {
     const withReach = list.map((u) => ({ u, reach: Math.max(0, ...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => skillReach(k.s))) || 1 }));
     withReach.sort((a, b) => a.reach - b.reach);
     for (const { u } of withReach) if (!u.fixedCell && u.sz > 1) {
-      // anchor: 2×2 covers x..x+1 / y..y+1, 3×3 is centred
-      const front = ti === 0 ? (u.sz === 2 ? 8 : 8) : (u.sz === 2 ? 11 : 12);
+      // the body's front row touches the centre line: team 0 up to row 9, team 1 from row 11
+      const lo = fpLo(u.sz), front = ti === 0 ? 9 - (lo + u.sz - 1) : 11 - lo;
       outer: for (let row = 0; row < 7; row++) for (const col of [10, 7, 13, 4, 16]) { const y = ti === 0 ? front - row : front + row; if (canPut(u, col, y)) { put(u, col, y); u.fixedCell = 1; break outer; } }
     }
     const cols = [10, 9, 11, 8, 12, 7, 13, 6, 14];
@@ -646,6 +650,13 @@ export function simulate(P, seed, log) {
       default: return false;
     }
   }
+  /** how many of a skill's hit configs ([sideways, forward] cell lists) touch a unit's body */
+  function partHits(parts, tg, cx, cy, aim, f) {
+    const d = tg.t === 'F' ? DIRS[aim] : [0, 1], body = new Set(fpOf(f).map(([dx, dy]) => (f.y + dy) * W + f.x + dx));
+    let n = 0;
+    for (const p of parts) if (p.some(([lat, fw]) => body.has((cy + fw * d[1] + lat * d[0]) * W + cx + fw * d[0] - lat * d[1]))) n++;
+    return n;
+  }
   /** how many cells of a unit's footprint the area covers (0 = not hit) */
   function inShape(tg, cx, cy, aim, f) { let n = 0; for (const [dx, dy] of fpOf(f)) if (cellIn(tg, cx, cy, aim, f.x + dx, f.y + dy)) n++; return n; }
   const cellAim = (tg, ax, ay, x, y) => (tg.t === 'TQ' ? Math.max(Math.abs(x - ax), Math.abs(y - ay)) <= tg.ar : dist(x, y, ax, ay) <= tg.ar);
@@ -712,7 +723,8 @@ export function simulate(P, seed, log) {
     }
     if (!best) return null;
     const [x, y, d, k] = best, cnt = new Map();
-    const targets = foes.filter((f) => { const c = inShape(tg, x, y, k, f); if (c) cnt.set(f.id, c); return c > 0; });
+    // multi-hit count: one per game hit config touching the body (s.parts), else one per covered cell
+    const targets = foes.filter((f) => { const c = inShape(tg, x, y, k, f); if (c) cnt.set(f.id, s.parts ? partHits(s.parts, tg, x, y, k, f) || 1 : c); return c > 0; });
     return { x, y, walk: Math.max(0, d - leap), targets, cnt, ax: x, ay: y, dir: k };
   }
   /** kind: 1 leap, 'dash' | 'kb' | 'retreat' for skill movement (shown differently in the replay) */

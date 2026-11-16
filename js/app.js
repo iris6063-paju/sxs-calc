@@ -828,8 +828,8 @@ function drawMini() {
   const L = stage.live();
   L.forEach((u, i) => {
     if (u.hidden || u.x == null || u.x < 0) return;
-    const off = u.m.sz === 2 ? 0.5 : 0, sz = u.m.sz || 1;
-    const [px, py] = drag && drag.i === i ? [drag.px, drag.py] : toPx(u.x + off, u.y + off), r = sz === 3 ? 21 : sz === 2 ? 14 : 6.5;
+    const sz = u.m.sz || 1, off = sz % 2 ? 0 : 0.5; // even bodies (2×2, 4×4) centre half a cell off the anchor
+    const [px, py] = drag && drag.i === i ? [drag.px, drag.py] : toPx(u.x + off, u.y + off), r = sz > 1 ? sz * 7 : 6.5;
     if (sz > 1) { c.globalAlpha = u.alive ? 0.35 : 0.15; c.fillStyle = u.m.team ? '#ff6b5e' : '#5aa2ff'; c.fillRect(px - (sz * MM.c) / 2 + 1, py - (sz * MM.c) / 2 + 1, sz * MM.c - 2, sz * MM.c - 2); }
     c.globalAlpha = u.alive ? 1 : 0.35;
     c.fillStyle = u.m.team ? '#ff6b5e' : '#5aa2ff'; c.beginPath(); c.arc(px, py, r, 0, 7); c.fill();
