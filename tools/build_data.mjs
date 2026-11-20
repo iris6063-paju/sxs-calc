@@ -16,6 +16,9 @@ const strip = (s) => decode(String(s).replace(/<[^>]+>/g, '')).replace(/\s+/g, '
 const num = (s) => Number(String(s).replace(/[, ]/g, ''));
 const report = [];
 const log = (...a) => report.push(a.join(' '));
+// the game's skill definitions (purrwikimania simulator data assets/duel.json), when saved next to the pages
+const DUELSK = new Map();
+if (fs.existsSync(path.join(DL, 'duel.json'))) { const d = J('duel.json'); for (const s of Array.isArray(d.skills) ? d.skills : Object.values(d.skills)) DUELSK.set(s.id, s); }
 
 /* ───────────── level tables ───────────── */
 function tables(html) {
@@ -169,7 +172,7 @@ const OV = {
   10051: { ko: '끓어오르는 투지', ...B('critUp', 4, 'self'), bvKey: 'ST:CritRatePercent' },
   10052: { ko: '산사태' }, 10054: { ko: '환영 습격' },
   10000: { ko: '물 탄환' }, 10001: { ko: '폭풍 구체' }, 10003: { ko: '물의 습격' }, 10005: { ko: '강철 가시' }, 10006: { ko: '회오리바람' },
-  10019: { ko: '바위 족장 소환', kind: 'none', note: '소환수는 시뮬레이션에 반영되지 않습니다.' },
+  10019: { ko: '바위 족장 소환', kind: 'none', note: '게임 자료로 반영: 전방 2칸에 바위 정령을 소환해 바로 행동시킵니다(자기 턴 5번 뒤 소멸). 능력치는 시전자의 생명 18%·공격 70%·방어 80%·속도 70% × 스킬 랭크 계수 + 레벨 고정치. 스킬: 바위 깨기(인접 1명), 지진(주변 8칸).' },
   10020: { ko: '치유의 손길', kind: 'heal' },
   10028: { ko: '화염구' }, 10031: { ko: '타오르는 불꽃 고리' }, 10035: { ko: '얼음 가시' },
   10036: { ko: '바람의 환희', tg: { t: 'T', r: 6, ar: 1 }, hits: 1, sp: { k: 'waves', n: 7, decay: 0.35 }, note: '7회 파동을 대상 주변 랜덤 적에게 분배(반복 명중 시 대미지 35%씩 감소).' },
@@ -190,9 +193,9 @@ const OV = {
   10041: { ko: '에너지 분출', ...B('nextAcc', 2, 'self', { dmg: 0.5 }), bvKey: 'ST:BlockAvoidPercent', note: '다음 대미지 전투 스킬: 명중 증가 + 대미지 +50%.' },
   10075: { ko: '여명의 빛' },
   10021: { ko: '광휘의 회복', kind: 'heal' },
-  10025: { ko: '꼬마 나무정령 소환', kind: 'none', note: '소환수는 시뮬레이션에 반영되지 않습니다.' },
+  10025: { ko: '꼬마 나무정령 소환', kind: 'none', note: '게임 자료로 반영: 후방 1칸에 꼬마 나무정령(이동 불가·잠행, 자기 턴 5번). 흩날리는 잎(원거리 십자 5칸). 잎사귀 화살은 게임 자료에 대미지 계수가 없어 뺐습니다.' },
   10029: { ko: '약화의 저주' },
-  10058: { ko: '화염 늑대 소환', kind: 'none', note: '소환수는 시뮬레이션에 반영되지 않습니다.' },
+  10058: { ko: '화염 늑대 소환', kind: 'none', note: '게임 자료로 반영: 전방 양옆에 화염 늑대 2마리(잠행, 자기 턴 2번). 화염 발톱(앞 1칸 3타), 소각의 늑대(주변 8칸 4타).' },
   10076: { ko: '그림자 충격', sp: { k: 'erode', n: 2 } },
   10081: { ko: '암흑 탄환' },
   10017: { ko: '달물의 실' },
@@ -205,12 +208,12 @@ const OV = {
   10037: { ko: '신의 분노', tg: { t: 'S', r: 4 }, hits: 1, sp: { k: 'rand', n: 16, r: 3, min: 3, decay: 0.4 } },
   10057: { ko: '울부짖는 허리케인' },
   10062: { ko: '물의 소용돌이', tg: { t: 'T', r: 4, ar: 2 }, pull: 'a' },
-  10070: { ko: '유성 화염', eff: [], note: '작열(위치에 남는 지속 대미지)은 반영되지 않습니다.' },
+  10070: { ko: '유성 화염', eff: [], burn: { p: 0.6, t: 3 }, trig: 11600, note: '게임 자료로 반영: 맞힌 3×3 칸마다 60% 확률로 작열 바닥(시전자 턴 3번). 적이 그 칸에 들어서거나 그 위에서 턴을 시작하면 불 원소 대미지(유닛마다 턴당 1회).' },
   10098: { ko: '화염 폭발' },
   10040: { ko: '심연의 손' }, 10064: { ko: '마나 폭발' },
-  10071: { ko: '물방울 정령 소환', kind: 'none', note: '소환수는 시뮬레이션에 반영되지 않습니다.' },
+  10071: { ko: '물방울 정령 소환', kind: 'none', note: '게임 자료로 반영: 후방 2칸에 늪 도룡뇽(잠행, 자기 턴 5번). 이슬방울(5칸 내 아군 1명), 안개 증기(3칸 내 아군 모두) — 치유량은 도룡뇽 최대 생명력 기준.' },
   10078: { ko: '종결의 그림자', sp: { k: 'erode', n: 3 } },
-  10080: { ko: '광란의 토템', kind: 'none', note: '소환수는 시뮬레이션에 반영되지 않습니다.' },
+  10080: { ko: '광란의 토템', kind: 'none', note: '게임 자료로 반영: 4칸 안, 아군이 가장 많이 들어오는 칸에 토템(잠행, 자기 턴 5번). 투지: 4칸 내 다른 아군 공격력 +12%. 고무: 4칸 내 아군 1명의 다음 턴을 20% 앞당김.' },
   10047: { ko: '지진 해일' },
   10082: { ko: '소용돌이 칼날', sp: { k: 'dmgShield', v: 0.2, cap: 0.5, t: 2 } },
   10083: { ko: '빛의 검진', kind: 'buff', buff: { st: 'swords', t: 99, to: 'self', n: 4 }, pre: 1, note: '전투 스킬에 맞을 때마다 광검 1개로 반격(공격자 주변 1칸).' },
@@ -221,15 +224,15 @@ const OV = {
   10101: { ko: '섬화', tg: { t: 'S', r: 2 } },
   10104: { ko: '공포의 그림자' },
   10002: { ko: '별빛 폭발' }, 10056: { ko: '흐르는 파멸' },
-  10091: { ko: '바람칼 나선', note: '열상(이동 시 대미지)은 반영되지 않습니다.' },
+  10091: { ko: '바람칼 나선', eff: [{ k: 'lacer', p: 0.4, t: 1 }], trig: 11950, note: '게임 자료로 반영: 열상(1턴) — 걷기·돌진·넉백·끌림으로 움직일 때마다 시전자의 바람 원소 대미지.' },
   10092: { ko: '진형 파괴', ...B('atkUp', 2, 'allies', { r: 3, src: 'atk', adv: 0.5 }), bvKey: 'ST:StatusAdd1' },
   10093: { ko: '심판의 천둥' },
   10102: { ko: '보호의 룬', ...B('dmgRed', 3, 'self'), bvKey: 'ST:StatusDmgReducePer' },
   10059: { ko: '혼돈의 룬' },
-  10077: { ko: '영혼의 가호', ...B('dmgRed', 2, 'allyLow', { r: 5 }), bvKey: 'ST:StatusDmgReducePer', note: '영능 표식을 2턴 받는 대미지 감소로 근사.' },
-  10095: { ko: '바위 렉스 소환', kind: 'none', note: '소환수는 시뮬레이션에 반영되지 않습니다.' },
+  10077: { ko: '영혼의 가호', ...B('dmgRed', 99, 'allyLow', { r: 5 }), bvKey: 'ST:StatusDmgReducePer', note: '영능 표식(게임 자료: 지속 시간 없음): 받는 대미지 감소가 전투 내내 유지되고 다시 걸면 덮어씁니다. 표식의 고정 피해 감소분은 반영하지 않습니다.' },
+  10095: { ko: '바위 렉스 소환', kind: 'none', note: '소환수의 게임 자료(능력치·스킬)가 공개되지 않아 시뮬레이션에 반영하지 않습니다.' },
   10096: { ko: '회복의 비', kind: 'heal', sp: { k: 'lowBonus', th: 0.5, v: 0.2 } },
-  10097: { ko: '미끼 분신', kind: 'none', note: '분신은 시뮬레이션에 반영되지 않습니다.' },
+  10097: { ko: '미끼 분신', kind: 'none', note: '게임 자료로 반영: 6칸 내 적 1명(큰 몸집 → 낮은 생명 순)과 연결된 분신을 앞에 세웁니다(그 적 편, 시전자 턴 3번). 분신이 잃은 생명만큼 연결된 적도 고정 대미지로 잃고, 아군은 분신을 우선 노립니다.' },
   10103: { ko: '암흑 성폭' },
   10067: { ko: '최후의 저항' },
   10105: { ko: '첫 빛', kind: 'dmg', tg: { t: 'TQ', r: 4, ar: 1 }, sp: { k: 'shieldBurst' }, note: '보유 실드를 모두 소모해 그 양에 비례한 대미지.' },
@@ -238,21 +241,21 @@ const OV = {
   10108: { ko: '성화된 영혼', ...B('dmgRed', 2, 'allies', { r: 4 }), bvKey: 'ST:StatusDmgReducePer' },
   10109: { ko: '강철 연참' },
   10087: { ko: '공중 파쇄' },
-  10090: { ko: '밤의 저주', note: '혈원(피격 시 생명 흡수)은 반영되지 않습니다.' },
+  10090: { ko: '밤의 저주', note: '혈원(피격 시 공격자 치유)은 게임 자료에 치유량이 없어 반영하지 않습니다.' },
   10110: { ko: '파쇄의 춤' },
   10111: { ko: '태양 폭풍', sp: { k: 'then', tg: { t: 'A', r: 2 }, hits: 1 } },
   10112: { ko: '빙하의 노래' },
   10113: { ko: '그림자 종말', tg: { t: 'S', r: 1 }, sp: { k: 'killRecast', max: 4 } }, // teleports next to an enemy within 5 (leap 5)
-  10094: { ko: '폭발 정령', kind: 'none', note: '설치형 정령은 시뮬레이션에 반영되지 않습니다.' },
+  10094: { ko: '폭발 정령', kind: 'none', note: '전방 2칸 양옆에 불꽃요정 2개(최대 3턴). 시전자 턴이 끝날 때 2칸 안에 적이 있으면 터져 범위 안 모든 적에게 불 원소 대미지(시전자의 전투 스킬 대미지). 거리 기준은 요정 위치로 가정했습니다.' },
   10114: { ko: '서리 가시' }, 10115: { ko: '진홍 소용돌이' }, 10116: { ko: '폭풍 광시곡' },
   10117: { ko: '빛의 폭발', sp: { k: 'chain', n: 6, r: 4 } },
   10118: { ko: '쌍둥이 돌풍' },
-  10119: { ko: '탈라손 소환', kind: 'none', note: '소환수는 시뮬레이션에 반영되지 않습니다.' },
+  10119: { ko: '탈라손 소환', kind: 'none', note: '소환수의 게임 자료(능력치·스킬)가 공개되지 않아 시뮬레이션에 반영하지 않습니다.' },
   10120: { ko: '영혼 수확', sp: { k: 'execute', step: 0.05, max: 0.5 } },
   10121: { ko: '저주 폭발', sp: { k: 'perDebuff', max: 3 } },
   10122: { ko: '절망의 그림자', eff: [{ k: 'randDebuff', p: 0.7, t: 2 }] },
   10123: { ko: '광휘의 리듬', kind: 'heal', tg: { t: 'allyLow', r: 6 }, sp: { k: 'healChain', n: 5, decay: 0.35 } },
-  10124: { ko: '공허의 영창', kind: 'none', note: '반응형 룬은 시뮬레이션에 반영되지 않습니다.' },
+  10124: { ko: '공허의 영창', kind: 'none', note: '룬 2턴: 5칸 안의 적이 전투 스킬을 쓸 때마다 그 적에게 어둠 원소 대미지 1회, 침식(어둠 지속 대미지)을 지녔으면 1회 즉시 발동.' },
 };
 
 const secRe = /<section class="panel" id="cls-([^"]+)"[\s\S]*?(?=<section class="panel" id="cls-|<\/body>)/g;
@@ -313,6 +316,9 @@ while ((sm = secRe.exec(skillsHtml))) {
     else if (s.c2 && !s.c) { s.c = s.c2; s.fm = s.fm2; delete s.c2; delete s.fm2; }
     else if (s.c2 && s.hits === 1) { delete s.c2; delete s.fm2; }
     for (const [k, v] of Object.entries(ov)) if (!['ko', 'bvKey', 'useC2'].includes(k)) s[k] = v;
+    // ranged Technique that keeps its distance (SkillAiCfg: RangeType Far, not DontKeepDistance): on the turn's last
+    // cast the AI picks the cell farthest from the nearest enemy among those hitting the most targets
+    { const g = DUELSK.get(id); if (g && g.ec && g.ec.rangeType === 'Far' && !g.ec.dontKeepDistance) s.kd = 1; }
     // multi-hit on large targets: the game's hit configs (one hit per config that touches the body)
     if (s.multi && PARTS[id]) { s.parts = PARTS[id].map((p) => p.map(([x, f]) => [x, f + (FWD0[id] || 0)])); }
     if (s.eff && !s.eff.length) delete s.eff;

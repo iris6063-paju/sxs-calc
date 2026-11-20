@@ -453,6 +453,110 @@ for (const id of [...usedPv].sort((a, b) => a - b)) {
 }
 log('mob passives', Object.keys(MOB_PV).length, 'modelled', Object.values(MOB_PV).filter((p) => p.k !== 'none').length, 'estimated', Object.values(MOB_PV).filter((p) => p.est).length);
 
+/* hero summons from the game data (duel.json `skills`, FightHitSummon): the creature's inherited share of the caster's
+   stats (summon_monster_add_prop × summon_rank_additive_factor by skill rank), its fixed part (level curve of group g ×
+   m by skill rank, BattleFormulaHandler.CalcSummonMonsterInheritProp), lifespan in its own turns, where it appears
+   ([sideways, forward] from the caster) and its own skills in the boss-kit format the engine already plays */
+const SUMMONS = {}, SUMCURVE = {};
+const SK_IDS = new Set([...baseData.matchAll(/\{"id":(\d+),"cls"/g)].map((m) => +m[1]));
+if (have.has('duel.json')) {
+  const duel = J('duel.json');
+  const ELM = { Physical: 'phy', None: 'phy', Wind: 'wind', Water: 'water', Fire: 'fire', Light: 'light', Dark: 'dark' };
+  const TK = { Pos: 'p', Entity: 'e', EntityFollow: 'e', PosCanStand: 's' };
+  const ACT = { Frozen: 'freeze', Stun: 'stun', Restrict: 'immob', Confusion: 'frenzy', Blinding: 'blind' };
+  const CR_KO = { 3181: '바위 정령', 3183: '꼬마 나무정령', 3182: '화염 늑대', 3184: '늪 도룡뇽', 3190: '열광의 토템', 4600: '거울 분신' };
+  const CR_ART = { 3181: 'golem', 3183: 'plant', 3182: 'wolf', 3184: 'frog', 3190: 'relic' };
+  const SK_KO = { 14053: '바위 깨기', 14054: '지진', 14055: '화염 발톱', 14056: '소각의 늑대', 14057: '흩날리는 잎', 14058: '잎사귀 화살', 14059: '이슬방울', 14060: '안개 증기', 14472: '고무', 15073: '투지' };
+  const rad = (cells) => Math.max(0, ...(cells || []).map(([x, y]) => Math.abs(x) + Math.abs(y)));
+  const curveOf = (g, k) => {
+    const key = g + ':' + k; if (SUMCURVE[key]) return key;
+    const a = [0]; for (let l = 1; l <= 250; l++) { const r = rowAt(String(g), l); a[l] = r && r[k] != null ? r[k] : a[l - 1] || 0; }
+    SUMCURVE[key] = a; return key;
+  };
+  const per34 = (f) => { const a = []; for (let r = 1; r <= 34; r++) a.push(+(+f(String(r)) || 0).toFixed(4)); return a.every((x) => x === a[0]) ? a[0] : a; };
+  const creatureSkill = (k) => {
+    const ec = k.ec || {}, r1 = (k.r && k.r['1']) || {}, hits = ec.hits || [];
+    for (const r of Object.values(k.r || {})) if (JSON.stringify(r) !== JSON.stringify(r1)) { log('SUMMON skill numbers vary by rank (rank 1 used)', k.id, k.name); break; }
+    const base = { id: k.id, en: k.name, ko: SK_KO[k.id] || k.name, cd: r1.CD || 0 };
+    if (ec.skillType === 'Cure') {
+      const area = rad(hits[0] && hits[0].cells), far = rad(ec.range);
+      return { ...base, kind: 'heal', hv: +((r1.SkillCureByHp || 0) / 100).toFixed(4), tg: area ? { t: 'allies', r: area } : { t: 'allyLow', r: far } };
+    }
+    if (ec.skillType === 'Buff') {
+      // Inspiration: a random ally within the pool range gets its turn advanced (FightStatusRoundIntervalComponent FastForward)
+      const h = hits[0] || {}, st = h.on && h.on[0] && duel.statuses[String(h.on[0].status)];
+      if (st && st.roundInterval && st.roundInterval.fastForward) return { ...base, kind: 'advance', v: +(+st.roundInterval.pct).toFixed(3), r: rad(h.rnd ? h.rnd.cells : ec.range) };
+      log('SUMMON buff skill not modelled', k.id, k.name); return null;
+    }
+    const sets = [], setKey = new Map();
+    const setOf = (cells) => { const cs = cells && cells.length ? cells : [[0, 0]]; const key = JSON.stringify(cs.map((c2) => c2.join(',')).sort()); if (!setKey.has(key)) { setKey.set(key, sets.length); sets.push(cs); } return setKey.get(key); };
+    const groups = [], gi = {}; let fo = 0;
+    const c = +((r1.SkillAttack1 || 0) / 100).toFixed(4);
+    const h2 = hits.map((h) => {
+      const o = { c: setOf(h.cells) };
+      if (h.onSource) o.s = 1;
+      const v = r1[h.prop];
+      if (h.type === 'None' || !v) o.d = 0; else if (+(v / 100).toFixed(4) !== c) o.cf = +(v / 100).toFixed(4);
+      if (h.move) { if (h.move.distance === -1 && h.move.towards) o.pull = 1; else if (h.move.distance > 0) o.kb = h.move.distance; }
+      const es = [];
+      for (const x of h.on || []) { const m = duel.statuses[String(x.status)]; if (!m) continue; if (m.falloff) fo = m.falloff.pct; const kk = ACT[m.action]; if (kk) es.push([kk, +(+x.chance).toFixed(3), m.dur > 0 ? m.dur : 1]); }
+      if (es.length) o.st = es;
+      if (h.rnd) { if (!(h.rnd.g in gi)) { gi[h.rnd.g] = groups.length; groups.push({ pool: h.rnd.cells, s: h.rnd.onSource ? 1 : 0, n: h.rnd.n, min: h.rnd.minHits || 0, empty: h.rnd.allowEmpty ? 1 : 0 }); } o.r = gi[h.rnd.g]; o.pk = h.pick || 0; }
+      return o;
+    });
+    if (!h2.some((h) => h.d !== 0 && (h.cf || c))) { log('SUMMON skill without a coefficient in the data (not simulated)', k.id, k.name); return null; }
+    const out = { ...base, kind: 'kit', el: ELM[ec.ele] || 'phy', c, tk: TK[ec.targetKind] || 'p', rng: ec.range && ec.range.length ? ec.range : [[0, 0]], sets, h: h2 };
+    if (groups.length) out.rnd = groups;
+    if (fo) out.fo = fo; // damage falloff: each repeat on the same target deals this much less
+    return out;
+  };
+  for (const s of duel.skills) {
+    const hs = ((s.ec && s.ec.hits) || []).filter((h) => h.kind === 'HitSummon' && h.summon);
+    if (!hs.length || !SK_IDS.has(s.id)) continue;
+    const h = hs[0], sm = h.summon, def = sm.def || sm.clone;
+    const o = { cells: h.cells, src: h.onSource ? 1 : 0, imm: sm.immediate ? 1 : 0 };
+    if (!def) {
+      if (sm.gridItem) { log('SUMMON grid item (burning ground) not a unit', s.id, s.name); continue; }
+      // Blast Spirit: no creature in the data — a placed charge (text: explodes at the end of the caster's turn on an enemy within 2 grids)
+      SUMMONS[s.id] = { ...o, kind: 'trap', life: 3, r: 2 }; log('SUMMON', s.id, s.name, 'trap'); continue;
+    }
+    const stealth = (sm.statuses || []).concat(sm.initStatuses || []).some((id) => duel.statuses[String(id)] && duel.statuses[String(id)].invisible);
+    const lifeSt = (sm.statuses || []).map((id) => duel.statuses[String(id)]).find((m) => m && m.removeApplyEntity);
+    const add = {}, rf = {};
+    for (const [k, f] of [['MaxHp', 'hp'], ['Attack', 'atk'], ['Defence', 'def'], ['Speed', 'spd']]) { add[f] = def.add[k] != null ? def.add[k] : 0; const v = per34((r) => (def.rankFactor && def.rankFactor[r] && def.rankFactor[r][k] != null ? def.rankFactor[r][k] : 1)); if (v !== 1) rf[f] = v; }
+    const fx = [];
+    const ks = new Set(); for (const row of Object.values(def.fixRows || {})) for (const k of Object.keys(row)) ks.add(k);
+    for (const k of ks) { const g = Object.values(def.fixRows).find((r) => r[k])[k].g, f = { MaxHp: 'hp', Attack: 'atk', Defence: 'def', Speed: 'spd' }[k]; if (!f) continue; fx.push({ f, cv: curveOf(g, k), m: per34((r) => (def.fixRows[r] && def.fixRows[r][k] ? def.fixRows[r][k].m : 0)) }); }
+    const cr = { id: def.id, en: def.name, ko: CR_KO[def.id] || def.name, art: CR_ART[def.id] || 'spirit', move: def.moveDist || 0, add, rf, fx };
+    if (sm.clone) {
+      // Decoy Clone: on the linked enemy's side with that enemy's stats; the HP it loses goes to that enemy as True DMG
+      SUMMONS[s.id] = { ...o, kind: 'clone', life: lifeSt ? lifeSt.dur : 3, r: rad(s.ec.range), cr: { ...cr, link: def.link ? def.link.param : 1 } };
+    } else {
+      cr.sk = (def.skills || []).map(creatureSkill).filter(Boolean);
+      for (const p of def.passives || []) for (const pv of p.passive || []) for (const x of pv.statuses || []) {
+        const m = duel.statuses[String(x.status)], pr = m && m.props && m.props['1'];
+        if (pv.kind === 'aura' && pr && pr.AttackScale) cr.aura = { ko: SK_KO[p.id] || p.name, atk: pr.AttackScale.v / 100, r: rad(pv.cells), notMe: /NotMe/.test(pv.target) ? 1 : 0 };
+        else log('SUMMON passive not modelled', def.name, p.name);
+      }
+      SUMMONS[s.id] = { ...o, kind: 'unit', life: sm.lifespan || (lifeSt ? lifeSt.dur : 3), stealth: stealth ? 1 : 0, near: s.ec.target === 'Friend' ? rad(s.ec.range) : 0, cr };
+    }
+    log('SUMMON', s.id, s.name, SUMMONS[s.id].kind, cr.ko, 'x' + h.cells.length, 'life', SUMMONS[s.id].life, 'skills', (cr.sk || []).map((k) => k.ko + ':' + k.kind).join(','));
+  }
+}
+
+/* skills fired by a hero skill's status or ground (duel.json `trig`): Meteoric Flames' burning ground (11600) and
+   Laceration's damage on moving (11950) — coefficient and fixed part (fx × SkillFixedAttack curve of group fg) by rank */
+const TRIG = {};
+if (have.has('duel.json')) {
+  const duel = J('duel.json');
+  for (const id of [11600, 11950]) {
+    const t = duel.trig[String(id)]; if (!t) { log('TRIG missing', id); continue; }
+    const a = (k) => Array.from({ length: 34 }, (_, i) => +(+((t.r[String(i + 1)] || {})[k] || 0)).toFixed(5));
+    TRIG[id] = { c: a('SkillAttack1').map((x) => +(x / 100).toFixed(5)), fx: a('fx'), fg: (t.r['1'] || {}).fg || 1 };
+    log('TRIG', id, 'rank 6', TRIG[id].c[5], 'fx', TRIG[id].fx[5], 'g', TRIG[id].fg);
+  }
+}
+
 const out = `// GENERATED by tools/build_extra.mjs — do not edit by hand. Unofficial fan data (see CREDITS.md).
 export const KO_SKILL = ${JSON.stringify(KO_SKILL)};
 export const KO_CLASS = ${JSON.stringify(KO_CLASS)};
@@ -466,6 +570,9 @@ export const CURVES2 = ${JSON.stringify(CURVES2)};
 export const RPG = ${JSON.stringify(RPG)};
 export const ENC = ${JSON.stringify(ENC)};
 export const MOB_PV = ${JSON.stringify(MOB_PV)};
+export const SUMMONS = ${JSON.stringify(SUMMONS)};
+export const SUMCURVE = ${JSON.stringify(SUMCURVE)};
+export const TRIG = ${JSON.stringify(TRIG)};
 `;
 fs.writeFileSync(OUT, out);
 console.log('wrote', OUT, (out.length / 1024).toFixed(0) + ' KB');

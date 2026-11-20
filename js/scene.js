@@ -21,6 +21,7 @@ import { ST_SHORT, stOrder } from './status.js';
 const GROUNDS = {
   forest: { ko: '숲 섬', tile: [0xa7d77a, 0x9bcf6f], grass: 0x86c45c, leaf: null, sky: [0x3f8fe0, 0xa9dbf3, 0xffedcc], fog: 0xd5ecf2, hemi: [0xe6f6ff, 0x6f9050, 1.15], sun: [0xfff1d6, 2.3], exp: 1.08 },
   moon: { ko: '달밤 숲', tile: [0x5d7f6a, 0x557662], grass: 0x40604f, leaf: [0x2e5a4a, 0.55], sky: [0x0a1430, 0x2b3c6b, 0x5a4a7a], fog: 0x26345a, hemi: [0x9fb4ff, 0x1d2a2a, 0.8], sun: [0xc8d6ff, 1.25], exp: 1.05 },
+  duel: { ko: '결투장 (게임풍)', tile: [0xdc9f63, 0xcb8c53], grass: 0xb98452, leaf: [0xa6a457, 0.35], sky: [0x6aa6e0, 0xf2dcb4, 0xffe8c4], fog: 0xf0dcbc, hemi: [0xfff3e0, 0x9a7048, 1.12], sun: [0xfff2d8, 2.35], exp: 1.03, sand: 1 },
   desert: { ko: '사막 투기장', tile: [0xe4b47c, 0xd9a66e], grass: 0xd8b07a, leaf: [0x9aa04a, 0.45], sky: [0x4f95d6, 0xf3d7a8, 0xffe4b8], fog: 0xf1dcb8, hemi: [0xfff1d8, 0xa07a50, 1.1], sun: [0xfff0cc, 2.6], exp: 1.05 },
   snow: { ko: '설원', tile: [0xf1f6fc, 0xe3ecf6], grass: 0xf3f7fc, leaf: [0xdfe9f2, 0.55], sky: [0x7aa6d8, 0xdbe8f5, 0xf4f8ff], fog: 0xe6eef7, hemi: [0xf4f8ff, 0x9fb2c8, 1.15], sun: [0xffffff, 1.9], exp: 0.98 },
   lava: { ko: '용암 지대', tile: [0x5a463f, 0x4d3c36], grass: 0x3e2e29, leaf: [0x3a2a24, 0.7], sky: [0x2a0e0a, 0x8a3a1c, 0xff8a3c], fog: 0x5a2a1a, hemi: [0xffb08a, 0x401a10, 0.95], sun: [0xffb070, 2.0], exp: 1.1 },
@@ -37,6 +38,8 @@ const bodyOff = (u) => ((u.m.sz || 1) % 2 ? 0 : 0.5);
 const ux = (u, gy) => wx(gy + bodyOff(u));
 const uz = (u, gx) => wz(gx + bodyOff(u));
 const TEAM = [0x4d8dff, 0xff5d5d];
+// summoned creatures: stone spirit, little treant, flame wolf, swamp newt, totem, mirror clone
+const SUM_HUE = { golem: 32, plant: 104, wolf: 14, frog: 188, relic: 44, doll: 268 };
 const MONO = '"JetBrains Mono","D2Coding",Consolas,"Malgun Gothic",monospace';
 const SANS = '"Pretendard","Malgun Gothic","Apple SD Gothic Neo",sans-serif';
 const rng = (s) => () => { s |= 0; s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -159,6 +162,24 @@ export function createStage(canvas) {
   cells.forEach(([gx, gy], i) => { m4.makeTranslation(wx(gy), 0.03, wz(gx)); tiles.setMatrixAt(i, m4); });
   tiles.setColorAt(0, tc); paintTiles(GROUNDS.forest.tile);
   tiles.receiveShadow = true; world.add(tiles);
+  /* the game-style board: sand grain on every tile and cracked earth on a few (drawn here, no game art) */
+  const sandTex = (() => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128; const c = cv.getContext('2d');
+    c.fillStyle = '#fff'; c.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 900; i++) { const v = 200 + Math.floor(R() * 55); c.fillStyle = `rgba(${v},${v - 8},${v - 20},${0.25 + R() * 0.35})`; c.fillRect(R() * 128, R() * 128, 1 + R() * 2.2, 1 + R() * 2.2); }
+    c.strokeStyle = 'rgba(120,80,45,0.18)'; c.lineWidth = 3; c.strokeRect(1.5, 1.5, 125, 125);
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const crackTex = (() => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128; const c = cv.getContext('2d');
+    c.strokeStyle = 'rgba(92,52,24,0.75)'; c.lineCap = 'round';
+    const branch = (x, y, a, len, w) => { if (len < 6 || w < 0.6) return; const x2 = x + Math.cos(a) * len, y2 = y + Math.sin(a) * len; c.lineWidth = w; c.beginPath(); c.moveTo(x, y); c.lineTo(x2, y2); c.stroke(); branch(x2, y2, a + (R() - 0.5) * 1.1, len * 0.72, w * 0.75); if (R() < 0.55) branch(x2, y2, a + (R() < 0.5 ? 1 : -1) * (0.6 + R() * 0.6), len * 0.55, w * 0.6); };
+    for (let k = 0; k < 4; k++) branch(64, 64, k * 1.57 + R() * 0.8, 20 + R() * 10, 3.2);
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const cracks = new THREE.Group(); cracks.visible = false; world.add(cracks);
+  { const geo = new THREE.PlaneGeometry(T * 0.9, T * 0.9), mat = new THREE.MeshBasicMaterial({ map: crackTex, transparent: true, depthWrite: false, toneMapped: false });
+    for (const [gx, gy] of [[5, 4], [14, 5], [7, 8], [12, 7], [9, 12], [15, 13], [6, 15], [11, 16], [16, 9], [4, 11]]) { const m = new THREE.Mesh(geo, mat); m.rotation.x = -Math.PI / 2; m.rotation.z = (gx * 7 + gy) % 4 * 1.57; m.position.set(wx(gy), 0.085, wz(gx)); cracks.add(m); } }
   const inArena = (x, z, pad = 0.6) => Math.abs(x) < 8.4 + pad + 0.6 && Math.abs(z) < 7.2 + pad + 0.6;
 
   /* trees, rocks, flowers, grass */
@@ -269,20 +290,21 @@ export function createStage(canvas) {
     const g = new THREE.Group();
     const u = { m, g, hp: m.hpMax, sh: 0, alive: true, atk: -1, hit: 0, fall: 0, tw: null, seed: i * 1.7, lunge: null, frame: i, sts: new Map(), tn: 0, gx: m.x, gy: m.y };
     const pet = m.kind === 'pet' ? PET.get(m.petId) : null;
-    const mob = m.kind === 'mob' ? MOB.get(m.key) : pet ? { ty: 0 } : null;
-    const h = mob ? (mob.ty === 2 ? 2.5 : mob.ty === 1 ? 1.75 : pet ? 1.3 : 1.38) : 2.05, w = mob ? h : h / 1.2;
+    const sumM = m.kind === 'summon' ? { ty: 0, en: m.name, art: m.art, hue: SUM_HUE[m.art] != null ? SUM_HUE[m.art] : 200 } : null;
+    const mob = m.kind === 'mob' ? MOB.get(m.key) : pet ? { ty: 0 } : sumM;
+    const h = mob ? (mob.ty === 2 ? 2.5 : mob.ty === 1 ? 1.75 : pet ? 1.3 : sumM ? 1.15 : 1.38) : 2.05, w = mob ? h : h / 1.2;
     let tex;
     // cel-shaded 3D model (GPT-designed spec) when one exists for this hero design / monster kind
     let spec = null, tscale = 1, recolor = null;
     if (m.kind === 'hero') { u.design = designOf(m.cls); spec = u.design && toonSpec(u.design); }
     else if (mob) {
-      const md = pet || MOB.get(m.key), id = toonIdForMob(md.en, pet ? petArtSlug(pet) : mobArtSlug(md));
+      const md = pet || sumM || MOB.get(m.key), id = toonIdForMob(md.en, pet ? petArtSlug(pet) : mobArtSlug(md));
       spec = id && toonSpec(id);
       if (spec) {
         const uniq = id.startsWith('boss_');
         if (!uniq) { const p = pet ? petPalette(pet) : mobPalette(md); recolor = { MAIN: p[0], LIGHT: p[1], DARK: p[2] }; }
         // Hieromon fill their 4×4 / 5×5 bodies
-        tscale = pet ? 0.62 : uniq ? (m.sz >= 5 ? 2.9 : m.sz === 4 ? 2.5 : 2.0) : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
+        tscale = pet ? 0.62 : sumM ? 0.7 : uniq ? (m.sz >= 5 ? 2.9 : m.sz === 4 ? 2.5 : 2.0) : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
       }
     }
     if (spec) {
@@ -301,7 +323,7 @@ export function createStage(canvas) {
       drawBar(u); unitsG.add(g); return u;
     }
     if (mob) {
-      const tk = pet ? 'pet' + m.petId : m.key;
+      const tk = pet ? 'pet' + m.petId : sumM ? 'sum' + m.art + m.team : m.key;
       let e = mobTex.get(tk);
       if (!e) { const cv = document.createElement('canvas'); cv.width = cv.height = 256; e = { cv, tex: new THREE.CanvasTexture(cv), draw: () => { if (pet) drawPet(cv.getContext('2d'), 256, 256, pet); else drawMob(cv.getContext('2d'), 256, 256, mob); e.tex.needsUpdate = true; } }; e.tex.colorSpace = THREE.SRGBColorSpace; e.draw(); mobTex.set(tk, e); }
       tex = e.tex;
@@ -370,7 +392,23 @@ export function createStage(canvas) {
     else if (e && --e.c <= 0) m.delete(ev.k);
   }
   function disposeUnits() { for (const u of units) { unitsG.remove(u.g); u.card.geometry.dispose(); u.mat.dispose(); u.bar.tex.dispose(); if (u.sprite) u.tex.dispose(); if (u.toon) { u.toon.mats.forEach((m) => m.dispose()); if (u.toon.face) u.toon.face.tex.dispose(); } } units = []; }
-  function setRoster(meta) { disposeUnits(); units = meta.map(makeUnit); ring.visible = false; }
+  function setRoster(meta) { disposeUnits(); clearTraps(); units = meta.map(makeUnit); ring.visible = false; }
+  /* Blast Spirit charges (grid items: they stand on a cell without blocking it) */
+  const trapG = new THREE.Group(); scene.add(trapG);
+  const trapM = new Map(), trapGeo = new THREE.IcosahedronGeometry(0.24, 1), trapMat = toonMat(0xff8a3c, { emissive: 0xff5a1a, emissiveIntensity: 0.55 });
+  const burnGeo = new THREE.PlaneGeometry(T * 0.92, T * 0.92), burnMat = new THREE.MeshBasicMaterial({ map: shadowTex, color: 0xff6a1a, transparent: true, depthWrite: false, opacity: 0.85, toneMapped: false });
+  function trapEv(ev) {
+    if (!ev.on) { const g = trapM.get(ev.id); if (g) { trapG.remove(g); trapM.delete(ev.id); } return; }
+    if (ev.burn) {
+      // Meteoric Flames' burning ground: a glowing tile on the cell
+      const g = new THREE.Group(), tile = new THREE.Mesh(burnGeo, burnMat); tile.rotation.x = -Math.PI / 2; g.add(tile);
+      g.position.set(wx(ev.y), 0.13, wz(ev.x)); g.userData.flat = 1; g.userData.ph = ev.id; trapG.add(g); trapM.set(ev.id, g); return;
+    }
+    const g = new THREE.Group(), core = new THREE.Mesh(trapGeo, trapMat); core.add(new THREE.Mesh(trapGeo, OUTLINE)); g.add(core);
+    const glow = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ map: shadowTex, color: 0xff7a2a, transparent: true, depthWrite: false, opacity: 0.55 })); glow.rotation.x = -Math.PI / 2; glow.position.y = -0.3; glow.scale.setScalar(0.7); g.add(glow);
+    g.position.set(wx(ev.y), 0.45, wz(ev.x)); g.userData.ph = ev.id * 1.3; trapG.add(g); trapM.set(ev.id, g);
+  }
+  function clearTraps() { for (const g of trapM.values()) trapG.remove(g); trapM.clear(); }
 
   /* fx pools */
   const fxG = new THREE.Group(); scene.add(fxG);
@@ -517,9 +555,13 @@ export function createStage(canvas) {
       case 'heal': { const t = units[ev.t]; t.hp = ev.hp; drawBar(t); popNum('+' + fmt(ev.v), '#7dff9a', head(t)); p.hooks.onHp && p.hooks.onHp(); return 0.06; }
       case 'shield': { const t = units[ev.t]; t.sh = ev.sh; drawBar(t); popNum('실드 +' + fmt(ev.v), '#bfe6ff', head(t)); return 0.06; }
       case 'st': { const t = units[ev.t]; applySt(t, ev); drawBar(t); return 0; }
-      case 'spawn': { const u = units[ev.u]; u.g.position.set(ux(u, ev.y), 0, uz(u, ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1); u.barS.visible = true; drawBar(u); popRing(u.g.position.x, u.g.position.z, 1.6, '#ffe9a8'); popLabel(`${u.m.name} 실체화!`, '#ffe9a8', new THREE.Vector3(u.g.position.x, u.h + 0.9, u.g.position.z)); term.line(`  ✦ ${u.m.name} 실체화`, '#ffd24a'); return 0.3; }
+      case 'spawn': { const u = units[ev.u]; if (ev.hp) u.m.hpMax = ev.hp; u.g.position.set(ux(u, ev.y), 0, uz(u, ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.card.rotation.x = 0; u.mat.opacity = 1; if (!u.sprite) u.mat.color.setScalar(1); u.barS.visible = true; drawBar(u); const word = ev.sum ? '소환' : '실체화'; popRing(u.g.position.x, u.g.position.z, 1.6, ev.sum ? '#c9b8ff' : '#ffe9a8'); popLabel(`${u.m.name} ${word}!`, ev.sum ? '#d9ccff' : '#ffe9a8', new THREE.Vector3(u.g.position.x, u.h + 0.9, u.g.position.z)); term.line(`  ✦ ${u.m.name} ${word}`, '#ffd24a'); return ev.sum ? 0.22 : 0.3; }
+      case 'trap': { trapEv(ev); if (ev.on && !ev.burn) popRing(wx(ev.y), wz(ev.x), 0.9, '#ff9a4a'); return ev.on && !ev.burn ? 0.08 : 0; }
       case 'die': {
-        const u = units[ev.u]; u.alive = false; u.fall = 0.001; u.barS.visible = false; term.line(`  ✝ ${uname(u.m)} 쓰러짐`, '#8f8b80');
+        const u = units[ev.u];
+        // a summon leaves the board (it fades at the end of its life or when it falls)
+        if (u.m.sum) { u.alive = false; u.barS.visible = false; u.g.visible = false; u.hidden = true; popRing(u.g.position.x, u.g.position.z, 1.1, '#cfc6ff'); term.line(`  ○ ${u.m.name} ${ev.fade ? '소멸' : '쓰러짐'}`, '#8f8b80'); return 0.12; }
+        u.alive = false; u.fall = 0.001; u.barS.visible = false; term.line(`  ✝ ${uname(u.m)} 쓰러짐`, '#8f8b80');
         // finishing blow by an SD-sheet hero: its finisher effect on the fallen unit
         const src = p.cur && units[p.cur.src];
         if (fxDesign(src) && src.m.team !== u.m.team) { const U = FXU[fxDesign(src)] || {}; if (U.finish != null) spawnFx(fxDesign(src), U.finish, head(u), 1.7, { dur: 0.6, flip: u.g.position.x < src.g.position.x }); }
@@ -571,8 +613,9 @@ export function createStage(canvas) {
       case 'heal': units[ev.t].hp = ev.hp; break;
       case 'shield': units[ev.t].sh = ev.sh; break;
       case 'st': applySt(units[ev.t], ev); break;
-      case 'spawn': { const u = units[ev.u]; u.g.position.set(ux(u, ev.y), 0, uz(u, ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.barS.visible = true; break; }
-      case 'die': { const u = units[ev.u]; u.alive = false; u.fall = 1; u.barS.visible = false; break; }
+      case 'spawn': { const u = units[ev.u]; if (ev.hp) u.m.hpMax = ev.hp; u.g.position.set(ux(u, ev.y), 0, uz(u, ev.x)); u.gx = ev.x; u.gy = ev.y; u.g.visible = true; u.alive = true; u.hidden = false; u.hp = u.m.hpMax; u.sh = 0; u.sts.clear(); u.fall = 0; u.barS.visible = true; break; }
+      case 'trap': trapEv(ev); break;
+      case 'die': { const u = units[ev.u]; u.alive = false; u.barS.visible = false; if (u.m.sum) { u.g.visible = false; u.hidden = true; } else u.fall = 1; break; }
       case 'end': ring.visible = false; break;
     }
   }
@@ -580,7 +623,7 @@ export function createStage(canvas) {
   function seek(i) {
     const p = play; if (!p) return;
     i = Math.max(0, Math.min(p.ev.length, i | 0));
-    resetUnits(); clearFx(); p.round = 0; p.cur = null; p.stopAt = null; ring.visible = false;
+    resetUnits(); clearFx(); clearTraps(); p.round = 0; p.cur = null; p.stopAt = null; ring.visible = false;
     for (let j = 0; j < i; j++) applySilent(p.ev[j], p);
     for (const u of units) { if (u.fall >= 1) u.card.rotation.x = -1.42; drawBar(u); }
     const wasDone = p.done;
@@ -612,6 +655,7 @@ export function createStage(canvas) {
     stepReplay(dt);
     const a = paused ? 0 : dt * speed;
     animT += a;
+    for (const g of trapM.values()) { if (g.userData.flat) { g.children[0].material.opacity = 0.7 + Math.sin(animT * 6 + g.userData.ph) * 0.15; continue; } g.position.y = 0.45 + Math.sin(animT * 4 + g.userData.ph) * 0.07; g.children[0].rotation.y += a * 2.2; }
     for (const u of units) {
       const g = u.g;
       if (u.tw) { const w = u.tw; w.k = Math.min(1, w.k + a / w.d); const k = w.k * w.k * (3 - 2 * w.k); g.position.x = w.x0 + (w.x1 - w.x0) * k; g.position.z = w.z0 + (w.z1 - w.z0) * k; g.position.y = Math.sin(Math.PI * w.k) * w.hop * (u.toon ? 0.5 : 1); if (w.k >= 1) { u.tw = null; g.position.y = 0; } }
@@ -692,6 +736,7 @@ export function createStage(canvas) {
   function setGround(key) {
     const g = GROUNDS[key] || GROUNDS.forest;
     paintTiles(g.tile);
+    tiles.material.map = g.sand ? sandTex : null; tiles.material.needsUpdate = true; cracks.visible = !!g.sand;
     grass.material.color.set(g.grass);
     leafAll.forEach((m, i) => { m.color.copy(leafOrig[i]); if (g.leaf) m.color.lerp(tmpC.set(g.leaf[0]), g.leaf[1]); });
     sky.material.uniforms.top.value.set(g.sky[0]); sky.material.uniforms.mid.value.set(g.sky[1]); sky.material.uniforms.bot.value.set(g.sky[2]);

@@ -1,6 +1,6 @@
 // UI: team builder (skills, charms, Fantomon), encounter presets, Monte Carlo runner and results.
 import { CLASSES, SKILLS, MAPS, RANKS, MAXLV } from './gamedata.js';
-import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH, rankGap, rankGroup } from './engine.js';
+import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH, rankGap, rankGroup, statBases, SUBRANKS } from './engine.js';
 import { createStage, GROUND_LIST } from './scene.js';
 import { ST_KO } from './status.js';
 import { loadSheets, designOf, sheet, sheetURL, faceIndex } from './sheets.js';
@@ -17,10 +17,21 @@ const KEY = 'sxs-calc-v2';
 const MAX_UNITS = 24;
 const TYPE_KO = ['일반', '정예', '보스'];
 // stat / status names follow the Korean client's wording (skill descriptions, KR resources)
-const ADV = [['critRate', '치명타율 %'], ['critDmg', '치명타 대미지 %'], ['critRes', '치명타 저항 %'], ['blockRate', '막기율 %'], ['blockEff', '막기 대미지 저항 %'], ['acc', '명중 %'],
-  ['dmgBoost', '대미지 보너스 %'], ['dmgRes', '대미지 저항 %'], ['dodge', '회피 %'], ['effHit', '효과 적중 %'], ['effRes', '효과 저항 %'], ['mastery', '원소 마스터리'],
-  ['phyMastery', '물리 마스터리'], ['aff', '원소 친화력'], ['res', '원소 저항'], ['phyRes', '물리 저항'], ['aegis', '원소 가호'],
-  ['pveAdd', 'PvE 대미지 보너스 %'], ['pveRes', 'PvE 대미지 저항 %']];
+// advanced stats laid out like the game's Character Stats screen: "%" with the number after its "+" sign beside it,
+// plain percents, flat numbers, then affinity and aegis per element
+const ADV_PAIRS = [['critRate', '치명타율'], ['critDmg', '치명타 대미지'], ['critRes', '치명타 저항'], ['blockRate', '막기율'], ['blockEff', '막기 대미지 저항'], ['acc', '명중']];
+const ADV_PCT = [['dmgBoost', '대미지 보너스'], ['dmgRes', '대미지 저항'], ['healBoost', '치유 보너스'], ['pvpAdd', 'PvP 대미지 보너스'], ['pvpRes', 'PvP 대미지 저항'], ['pveAdd', 'PvE 대미지 보너스'], ['pveRes', 'PvE 대미지 저항']];
+const ADV_RAW = [['effHitV', '효과 적중'], ['effResV', '효과 저항'], ['mastery', '원소 마스터리'], ['res', '원소 저항'], ['phyMastery', '물리 마스터리'], ['phyRes', '물리 저항']];
+const ADV_EL = [['wind', '바람'], ['water', '물'], ['fire', '불'], ['light', '빛'], ['dark', '어둠']];
+const ADV_KEYS = new Set([...ADV_PAIRS.flatMap(([k]) => [k, k + 'V']), ...ADV_PCT.map(([k]) => k), ...ADV_RAW.map(([k]) => k), ...ADV_EL.flatMap(([e]) => ['aff_' + e, 'aeg_' + e]), 'dodge']);
+// sub-ranks as the game names them (Korean client)
+const SUBRANK_KO = (k) => {
+  const g = { Norank: '랭크 없음', Blackiron: '견습', Bronze: '정예', Silver: '숙련', Gold: '챔피언', Saint: '마스터', Legend: '패러곤', Angel: '세인트' }, R = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
+  let m; if (k === 'Norank') return g.Norank;
+  if ((m = /^(Godtouched|Demigod)(\d)_(\d)$/.exec(k))) return `${m[1] === 'Godtouched' ? '에테리얼' : '어센던트'} ${R[(+m[2] - 1) * 3 + +m[3] - 1]}`;
+  m = /^([A-Za-z]+)(\d)$/.exec(k); return m ? `${g[m[1]] || m[1]} ${R[+m[2] - 1]}` : k;
+};
+const SUBRANK_OPTS = `<option value="">미지정 (몹과 같은 랭크로 계산)</option>` + SUBRANKS.map((k) => `<option value="${k}">${SUBRANK_KO(k)}</option>`).join('');
 const EFF_KO = { abreak: '방어력 감소', weak: '약화', slow: '감속', stun: '스턴', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명', cold: '냉기', wet: '습윤', dot: '침식', riven: '막기율 감소', sigil: '낙인', vuln: '취약', randDebuff: '랜덤 디버프', kb: '넉백' };
 const effName = (e) => (e.k === 'kb' ? `넉백 ${e.n || 1}칸${e.side ? '(옆으로)' : ''}` : (e.k === 'dot' && e.el && e.el !== 'dark' ? (e.el === 'fire' ? '작열' : '지속 대미지') : EFF_KO[e.k] || e.k) + (e.v && ['abreak', 'weak', 'slow'].includes(e.k) ? ` ${e.v >= 0.3 ? 2 : 1}` : ''));
 const MODE_KO = { fantasia: '환상계단', dungeon: '일일 던전', conquest: '길드 토벌 (길드 보스 460층)', crucible: '신수 시련', raid: '혼돈 침공 (혼돈의 폭군 레이드)' };
@@ -29,7 +40,7 @@ const MODE_KO = { fantasia: '환상계단', dungeon: '일일 던전', conquest: 
 // assets/skills/icons.json → { "ext": "webp" | "png" | "" }  (empty = no icon files supplied, built-in tiles are used)
 let ICON_EXT = null;
 fetch('assets/skills/icons.json').then((r) => (r.ok ? r.json() : {})).then((j) => { ICON_EXT = j && j.ext ? String(j.ext).replace(/[^a-z0-9]/gi, '') : null; if (ICON_EXT) { renderTeam(0); renderTeam(1); } }).catch(() => {});
-function glyphOf(s) { if (!s) return '＋'; if (s.kind === 'none') return '⚠'; if (s.kind === 'heal') return '✚'; if (s.kind === 'shield') return '⛨'; if (s.kind === 'buff') return '▲'; const t = s.tg && s.tg.t; return t === 'S' ? '⚔' : t === 'F' ? '➤' : t === 'T' || t === 'TQ' ? '◎' : '✸'; }
+function glyphOf(s) { if (!s) return '＋'; if (s.kind === 'none') return '⚠'; if (s.kind === 'summon') return '✦'; if (s.kind === 'rune') return '◈'; if (s.kind === 'heal') return '✚'; if (s.kind === 'shield') return '⛨'; if (s.kind === 'buff') return '▲'; const t = s.tg && s.tg.t; return t === 'S' ? '⚔' : t === 'F' ? '➤' : t === 'T' || t === 'TQ' ? '◎' : '✸'; }
 function iconHtml(id, el, glyph) {
   const img = ICON_EXT && id ? `<img src="assets/skills/skill_${id}.${ICON_EXT}" alt="" loading="lazy" onerror="this.parentNode.classList.remove('has-img');this.remove()">` : '';
   const dot = img && el && el !== 'none' ? `<b class="eldot" title="${(EL[el] || EL.none).ko}"></b>` : '';
@@ -89,12 +100,25 @@ function upgradeFix(key, fix) {
   for (const md of ENC) for (const g of md.groups) if (g.st) for (let i = 0; i < g.fights.length; i++) { const f = g.fights[i]; for (let j = 1, ui = 0; j < f.length; j += 4, ui++) if (f[j] === key && same(g.st[i] && g.st[i][ui])) return g.st[i][ui]; }
   return fix;
 }
+// advanced stats saved before they followed the stats screen: one affinity / aegis for every element, Effect Hit /
+// RES as a percent (now the screen's flat number)
+function migrateAdv(adv, level, rank) {
+  const a = {};
+  for (const [k, v] of Object.entries(adv)) if (typeof v === 'number' && isFinite(v)) a[k] = v;
+  if (a.aff != null) { for (const [e] of ADV_EL) if (a['aff_' + e] == null) a['aff_' + e] = a.aff; delete a.aff; }
+  if (a.aegis != null) { for (const [e] of ADV_EL) if (a['aeg_' + e] == null) a['aeg_' + e] = a.aegis; delete a.aegis; }
+  const eb = statBases(level, rank).eff;
+  if (a.effHit != null) { if (a.effHitV == null) a.effHitV = Math.round((a.effHit / 100) * eb); delete a.effHit; }
+  if (a.effRes != null) { if (a.effResV == null) a.effResV = Math.round((a.effRes / 100) * eb); delete a.effRes; }
+  for (const k of Object.keys(a)) if (!ADV_KEYS.has(k)) delete a[k];
+  return a;
+}
 function sanitize(s) {
   if (!s || !Array.isArray(s.teams) || s.teams.length !== 2) return null;
   const d = demo();
   const out = { ...d, ...s, v: 2, roundCap: { ...d.roundCap, ...(s.roundCap || {}) }, preset: { ...d.preset, ...(s.preset && s.preset.mode ? s.preset : {}) } };
   out.mode = out.mode === 'pvp' ? 'pvp' : 'pve';
-  out.prank = typeof s.prank === 'string' && /^[A-Za-z0-9]{0,16}$/.test(s.prank) ? s.prank : '';
+  delete out.prank; // the old party rank became each character's own rank (moved onto the heroes below)
   out.ground = GROUND_LIST.some(([k]) => k === s.ground) ? s.ground : 'forest';
   const cellOf = (c) => (Array.isArray(c) && c.length === 2 && c.every((v) => Number.isInteger(v)) ? [c[0], c[1]] : undefined);
   const four =(arr, ok) => { const a = (Array.isArray(arr) ? arr : []).slice(0, 4).map((x) => (x && ok(x) ? x : null)); while (a.length < 4) a.push(null); return a; };
@@ -107,7 +131,9 @@ function sanitize(s) {
       return m;
     }
     const pet = u.pet && PET.has(+u.pet.id) ? { id: +u.pet.id, rank: +u.pet.rank || 3, adult: !!u.pet.adult, atk: +u.pet.atk || 1, def: +u.pet.def || 0, hp: +u.pet.hp || 1, spd: +u.pet.spd || 1 } : null;
-    return { uid: u.uid || uid(), kind: 'hero', name: String(u.name || '캐릭터').slice(0, 20), cls: u.cls, level: +u.level || 1, atk: +u.atk || 1, def: +u.def || 0, hp: +u.hp || 1, spd: +u.spd || 1, adv: u.adv && typeof u.adv === 'object' ? u.adv : {},
+    const prank = typeof s.prank === 'string' && s.prank ? (/^(Godtouched|Demigod)\d$/.test(s.prank) ? s.prank + '_1' : s.prank === 'Norank' ? 'Norank' : s.prank + '1') : '';
+    const rank = SUBRANKS.includes(u.rank) ? u.rank : SUBRANKS.includes(prank) ? prank : '';
+    return { uid: u.uid || uid(), kind: 'hero', name: String(u.name || '캐릭터').slice(0, 20), cls: u.cls, level: +u.level || 1, rank, atk: +u.atk || 1, def: +u.def || 0, hp: +u.hp || 1, spd: +u.spd || 1, adv: migrateAdv(u.adv && typeof u.adv === 'object' ? u.adv : {}, +u.level || 1, rank),
       skills: four(u.skills, (x) => x.custom || SK.has(x.id)), charms: four(u.charms, (x) => CHARM.has(x.id)), pet, cell: cellOf(u.cell) };
   }));
   return out;
@@ -122,9 +148,9 @@ let saveT = 0, rosterT = 0, lastRes = null, lastSetup = null, running = false;
 
 function toSetup() {
   return {
-    mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100, pvEst: state.pvEst !== false, rank: state.prank || '',
+    mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100, pvEst: state.pvEst !== false,
     teams: state.teams.map((t) => t.map((u) => (u.kind === 'mob' ? { kind: 'mob', uid: u.uid, key: u.key, level: u.level, count: u.count, sr: u.sr, fix: u.fix, uws: u.uws, cell: u.cell }
-      : { kind: 'hero', uid: u.uid, name: u.name, cls: u.cls, level: u.level, atk: u.atk, def: u.def, hp: u.hp, spd: u.spd, ...u.adv, skills: u.skills, charms: u.charms, pet: u.pet, cell: u.cell }))),
+      : { kind: 'hero', uid: u.uid, name: u.name, cls: u.cls, level: u.level, rank: u.rank || '', atk: u.atk, def: u.def, hp: u.hp, spd: u.spd, ...u.adv, skills: u.skills, charms: u.charms, pet: u.pet, cell: u.cell }))),
   };
 }
 const countUnits = (t) => t.reduce((s, u) => s + (u.kind === 'mob' ? u.count : 1), 0);
@@ -188,6 +214,22 @@ function skillTags(s, n, order) {
     if (s.sp && s.sp.k === 'recast') t.push(tag(`${Math.round(s.sp.p * 100)}% 확률 재사용`));
     if (s.sp && s.sp.k === 'killRecast') t.push(tag('처치 시 재사용'));
     if (s.sp && s.sp.k === 'execute') t.push(tag('잃은 생명 비례 최대 +50%'));
+  } else if (s.kind === 'summon') {
+    // summons from the game data: what appears, for how long, and the share of the caster's stats it inherits
+    const sm = s.sum, c = sm.cr, pct = (v) => (n && n.coef != null ? `${(n.coef * 100).toFixed(1)}%${n.flat ? ' + ' + fmt(n.flat) : ''}` : '');
+    if (sm.kind === 'trap') t.push(tag(`불꽃요정 ${sm.cells.length}개 설치 · 최대 ${sm.life}턴`), tag(`턴 끝 ${sm.r}칸 내 적에게 폭발 ${pct()}`));
+    else if (sm.kind === 'clone') t.push(tag(`${sm.r}칸 내 적 1명과 연결된 분신`), tag(`시전자 턴 ${sm.life}번`), tag('분신이 잃은 생명 → 연결된 적 고정 대미지'));
+    else {
+      t.push(tag(`${c.ko}${sm.cells.length > 1 ? ' ' + sm.cells.length + '마리' : ''} 소환 · 자기 턴 ${sm.life}번`));
+      if (sm.imm) t.push(tag('즉시 행동'));
+      if (sm.stealth) t.push(tag('잠행'));
+      t.push(tag(`계승 · 생명 ${Math.round(c.add.hp * 100)}% · 공격 ${Math.round(c.add.atk * 100)}% · 방어 ${Math.round(c.add.def * 100)}% · 속도 ${Math.round(c.add.spd * 100)}%`));
+      if (c.aura) t.push(tag(`${c.aura.ko} · ${c.aura.r}칸 아군 공격력 +${Math.round(c.aura.atk * 100)}%`));
+      for (const k of c.sk || []) t.push(tag(k.kind === 'heal' ? `${k.ko} · 치유 ${(k.hv * 100).toFixed(1)}%` : k.kind === 'advance' ? `${k.ko} · 행동 +${Math.round(k.v * 100)}%` : `${k.ko} · ${+(k.c * 100).toFixed(2)}%`));
+    }
+    t.push(tag('게임 자료로 반영', 'ok'));
+  } else if (s.kind === 'rune') {
+    t.push(tag('자신 · 룬 2턴'), tag(`5칸 내 적이 전투 스킬 시전 시 ${n && n.coef != null ? (n.coef * 100).toFixed(1) + '%' + (n.flat ? ' + ' + fmt(n.flat) : '') : ''}`), tag('침식 즉시 1회 발동'));
   } else if (s.kind === 'heal') {
     t.push(tag(shapeKo(s.tg)));
     if (n && n.healPct != null) t.push(tag(`치유 · 최대 생명력 ${(n.healPct * 100).toFixed(2)}%${n.healFlat ? ' + ' + fmt(n.healFlat) : ''}`));
@@ -353,7 +395,7 @@ function heroHtml(u) {
         <label class="f"><span>직업</span><select data-f="cls" data-val="${u.cls}">${CLS_OPTS}</select></label>
       </div>
       ${turnStrip(u.cls)}
-      <div class="lvrow" style="margin-top:8px">${fld('레벨', 'level', u.level, `min="1" max="${MAXLV}"`)}<button class="btn" data-act="base" title="해당 레벨의 장비 제외 기본 능력치로 채웁니다">레벨 기본값 채우기</button></div>
+      <div class="lvrow" style="margin-top:8px">${fld('레벨', 'level', u.level, `min="1" max="${MAXLV}"`)}<label class="f"><span>랭크</span><select data-f="rank" data-val="${u.rank || ''}" title="능력치 화면의 랭크. 랭크 기준값(치명타율 + 수치 등의 환산)과 몹과의 랭크 차이 보정에 씁니다">${SUBRANK_OPTS}</select></label><button class="btn" data-act="base" title="해당 레벨의 장비 제외 기본 능력치로 채웁니다">레벨 기본값 채우기</button></div>
       <div class="grid4">${fld('공격', 'atk', u.atk, 'min="1"', 'big atk')}${fld('방어', 'def', u.def, 'min="0"', 'big def')}${fld('생명', 'hp', u.hp, 'min="1"', 'big hp')}${fld('속도', 'spd', u.spd, 'min="1"', 'big spd')}</div>
       <div class="sec"><span>전투 스킬 · 위에서부터 순서대로 사용</span><span class="hint">품질</span></div>
       ${[0, 1, 2, 3].map((i) => skillBlock(u, i)).join('')}
@@ -361,8 +403,12 @@ function heroHtml(u) {
       ${[0, 1, 2, 3].map((i) => charmBlock(u, i)).join('')}
       <div class="sec"><span>판타몬</span></div>
       ${petBlock(u)}
-      <details class="adv" ${Object.keys(u.adv).length ? 'open' : ''}><summary>고급 스탯 (비우면 기본값)</summary>
-        <div class="grid3">${ADV.map(([k, label]) => `<label class="f"><span>${label}</span><input type="number" data-adv="${k}" value="${u.adv[k] ?? ''}" placeholder="${HERO_DEFAULTS[k]}"></label>`).join('')}</div>
+      <details class="adv" ${Object.keys(u.adv).length ? 'open' : ''}><summary>고급 스탯 · 게임 능력치 화면 그대로 (비우면 기본값)</summary>
+        <div class="note" style="margin:6px 0">「%」 옆 칸은 능력치 화면에서 + 뒤에 붙는 수치입니다(예: 치명타율 30.5% + 12,000 → 30.5와 12000). 수치는 랭크 기준값으로 %로 바꿔 더합니다.</div>
+        <div class="advpairs">${ADV_PAIRS.map(([k, label]) => `<label class="f"><span>${label} %</span><span class="pair"><input type="number" data-adv="${k}" value="${u.adv[k] ?? ''}" placeholder="${HERO_DEFAULTS[k]}"><b>+</b><input type="number" data-adv="${k}V" value="${u.adv[k + 'V'] ?? ''}" placeholder="0"></span></label>`).join('')}</div>
+        <div class="grid3">${ADV_PCT.map(([k, label]) => `<label class="f"><span>${label} %</span><input type="number" data-adv="${k}" value="${u.adv[k] ?? ''}" placeholder="0"></label>`).join('')}${ADV_RAW.map(([k, label]) => `<label class="f"><span>${label}</span><input type="number" data-adv="${k}" value="${u.adv[k] ?? ''}" placeholder="0"></label>`).join('')}</div>
+        <div class="advel"><span></span>${ADV_EL.map(([, ko]) => `<b>${ko}</b>`).join('')}<span>친화력</span>${ADV_EL.map(([e]) => `<input type="number" data-adv="aff_${e}" value="${u.adv['aff_' + e] ?? ''}" placeholder="0">`).join('')}<span>가호</span>${ADV_EL.map(([e]) => `<input type="number" data-adv="aeg_${e}" value="${u.adv['aeg_' + e] ?? ''}" placeholder="0">`).join('')}</div>
+        ${u.adv.dodge ? `<div class="grid3"><label class="f"><span>회피 % (능력치 화면에 없음)</span><input type="number" data-adv="dodge" value="${u.adv.dodge}"></label></div>` : ''}
       </details>
     </div></article>`;
 }
@@ -405,10 +451,11 @@ function mobHtml(u) {
       ${fixed ? '<div class="note" style="margin:6px 0 0">층·단계 기준 고정 능력치 (게임 자료로 계산)</div>' : ''}
       ${u.uws ? '<div class="note" style="margin:4px 0 0">길드 토벌 보스 효과 United We Stand: 처음 3턴 동안 받는 대미지 99% 감소</div>' : ''}
       ${(() => { // PvE rank gap for this monster against the party rank picked in the settings
-        if (!state.prank || state.mode === 'pvp') return '';
-        const mr = rankGroup(mob.map ? MAP.get(mob.map).sr : u.sr || mob.sr), g = rankGap(state.prank, mr, !!mob.map);
+        const me = state.teams[0].find((h) => h.kind === 'hero' && h.rank);
+        if (!me || state.mode === 'pvp') return '';
+        const mr = rankGroup(mob.map ? MAP.get(mob.map).sr : u.sr || mob.sr), g = rankGap(rankGroup(me.rank), mr, !!mob.map);
         const f = (x) => (x >= 1 ? '×' : '÷') + (Math.round((x >= 1 ? x : 1 / x) * 100) / 100).toLocaleString('ko-KR');
-        return `<div class="note" style="margin:4px 0 0">랭크 차이 보정: ${g === 1 ? '같은 랭크 — 보정 없음' : `내 대미지 ${f(g)}, 몹 대미지 ${f(1 / g)}`}</div>`;
+        return `<div class="note" style="margin:4px 0 0">랭크 차이 보정 (${esc(me.name)} ${SUBRANK_KO(me.rank)}): ${g === 1 ? '같은 랭크 — 보정 없음' : `내 대미지 ${f(g)}, 몹 대미지 ${f(1 / g)}`}</div>`;
       })()}
       <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}${st.ele ? (() => { const e = st.ele, a = Object.values(e.aff), g = Object.values(e.aeg), one = (v) => (v.every((x) => x === v[0]) ? fmt(v[0]) : `${fmt(Math.min(...v))}~${fmt(Math.max(...v))}`); return `${a.some(Boolean) ? `<span>원소 친화력 ${one(a)}</span><span>원소 가호 ${one(g)}</span>` : ''}${e.mast ? `<span>원소·물리 마스터리 ${fmt(e.mast)}</span><span>원소·물리 저항 ${fmt(e.eres)}</span>` : ''}`; })() : ''}</div>
       ${mob.raid ? `<div class="note" style="margin:4px 0 0">레이드 보스 · 몸체 5×5 · 이동력 ${mob.raid.move}칸 · ${mob.raid.rounds}라운드. 섬멸의 발톱(9×3)은 게임 자료에 대미지 계수가 없어 뺐습니다.</div>` : mob.kit ? `<div class="note" style="margin:4px 0 0">몸체 ${mob.sz}×${mob.sz} · 스킬은 게임 자료의 타격 구역을 한 타씩 처리합니다(넉백으로 밀린 대상이 다음 타격 범위에 다시 들어가면 또 맞음). 계수 조정(「몹 스킬 계수」)은 적용되지 않습니다.</div>` : ''}
@@ -517,6 +564,7 @@ function onTeamInput(ti, e, commit) {
     const k = t.dataset.f;
     if (k === 'name') { u.name = t.value.slice(0, 20) || '캐릭터'; $('.unit-title b', card).textContent = u.name; }
     else if (k === 'cls') { u.cls = t.value; u.skills = defaultSkills(u.cls); rerenderUnit(card, u); }
+    else if (k === 'rank') { u.rank = SUBRANKS.includes(t.value) ? t.value : ''; if (commit) { rerenderUnit(card, u); renderTeam(1 - f.ti); } }
     else if (k === 'key') {
       u.key = t.value; const mob = MOB.get(u.key); delete u.fix; delete u.uws;
       if (mob.map) { const m = MAP.get(mob.map); delete u.sr; if (u.level < m.lvMin || u.level > m.lvMax + 5) u.level = m.lvMin; }
@@ -554,7 +602,6 @@ function syncSettings() {
   $('#balLabel').hidden = state.mode !== 'pvp';
   const hasMob = state.teams.some((t) => t.some((u) => u.kind === 'mob'));
   $('#mobCoefLabel').hidden = !hasMob;
-  $('#rankSel').value = state.prank || ''; $('#rankLabel').hidden = !hasMob || state.mode === 'pvp';
   $('#pvLabel').hidden = !hasMob || !state.teams.some((t) => t.some((u) => u.kind === 'mob' && (MOB.get(u.key).pv || []).some((id) => MOB_PV[id] && MOB_PV[id].est)));
 }
 function setMode(mode, keep) {
@@ -572,7 +619,6 @@ $('#modeSeg').addEventListener('click', (e) => { const b = e.target.closest('but
 $('#runsSel').addEventListener('change', (e) => { state.runs = +e.target.value; touch(true); });
 $('#capInp').addEventListener('change', (e) => { state.roundCap[state.mode] = Math.max(1, Math.min(200, Math.round(+e.target.value || 15))); e.target.value = state.roundCap[state.mode]; touch(true); });
 $('#mobCoefInp').addEventListener('change', (e) => { state.mobCoef = Math.max(10, Math.min(500, +e.target.value || 100)); e.target.value = state.mobCoef; renderTeam(0); renderTeam(1); touch(true); });
-$('#rankSel').addEventListener('change', (e) => { state.prank = e.target.value || ''; renderTeam(1); touch(true); });
 $('#balChk').addEventListener('change', (e) => { state.pvpBalance = e.target.checked; touch(true); });
 $('#pvChk').addEventListener('change', (e) => { state.pvEst = e.target.checked; renderTeam(0); renderTeam(1); touch(true); });
 $('#resetBtn').addEventListener('click', () => { state = demo(); openSet.clear(); lastRes = null; $('#results').innerHTML = ''; $('#winTag').hidden = true; renderAll(); touch(); toast('예시 구성으로 되돌렸습니다'); });
@@ -580,6 +626,65 @@ $('#shareBtn').addEventListener('click', async () => {
   const url = location.origin + location.pathname + '#s=' + b64e(JSON.stringify(state));
   try { await navigator.clipboard.writeText(url); toast('구성 링크를 복사했습니다'); } catch (e) { prompt('아래 링크를 복사하세요', url); }
 });
+/* ───────── presets: named setups saved in this browser (export / import as a JSON file) ───────── */
+const PKEY = 'sxs-calc-presets';
+function loadPresets() { try { const a = JSON.parse(localStorage.getItem(PKEY) || '[]'); return Array.isArray(a) ? a.filter((p) => p && typeof p.name === 'string' && p.state && typeof p.state === 'object') : []; } catch (e) { return []; } }
+function storePresets(a) { try { localStorage.setItem(PKEY, JSON.stringify(a)); return true; } catch (e) { toast('브라우저 저장 공간이 부족해 저장하지 못했습니다'); return false; } }
+function presetSummary(s) {
+  const t = Array.isArray(s.teams) ? s.teams : [[], []];
+  const who = (list) => (list || []).map((u) => (u.kind === 'hero' ? (CLS.get(u.cls) || {}).ko || u.cls : `${(MOB.get(u.key) || {}).ko || '몹'}${u.count > 1 ? '×' + u.count : ''}`));
+  const a = who(t[0]), b = who(t[1]), cut = (l) => (l.length > 3 ? `${l.slice(0, 3).join(', ')} 외 ${l.length - 3}` : l.join(', '));
+  return `${s.mode === 'pvp' ? '대전' : '몹 전투'} · ${cut(a) || '아군 없음'} vs ${cut(b) || '상대 없음'}`;
+}
+function renderPresets() {
+  const list = loadPresets();
+  $('#psList').innerHTML = list.length ? list.map((p, i) => `<div class="ps-row"><div class="ps-info"><b>${esc(p.name)}</b><small>${esc(presetSummary(p.state))} · ${new Date(p.at || 0).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}</small></div><button class="ghost" data-ps="load" data-i="${i}">불러오기</button><button class="ghost" data-ps="over" data-i="${i}" title="현재 구성으로 덮어쓰기">덮어쓰기</button><button class="ghost" data-ps="del" data-i="${i}">삭제</button></div>`).join('')
+    : '<div class="ps-empty">저장된 프리셋이 없습니다. 이름을 적고 「현재 구성 저장」을 누르세요.</div>';
+}
+const snapshot = () => JSON.parse(JSON.stringify(state));
+function applyPreset(p) {
+  const s = sanitize(JSON.parse(JSON.stringify(p.state)));
+  if (!s) { toast('이 프리셋은 불러올 수 없습니다'); return; }
+  state = s; openSet.clear(); lastRes = null; $('#results').innerHTML = ''; $('#winTag').hidden = true;
+  renderAll(); touch(); $('#presets').hidden = true; toast(`「${p.name}」을(를) 불러왔습니다`);
+}
+$('#presetBtn').addEventListener('click', () => { renderPresets(); $('#presets').hidden = false; $('#psName').focus({ preventScroll: true }); });
+$('#psClose').addEventListener('click', () => { $('#presets').hidden = true; });
+$('#presets').addEventListener('click', (e) => { if (e.target.id === 'presets') $('#presets').hidden = true; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#presets').hidden = true; });
+$('#psSave').addEventListener('click', () => {
+  const list = loadPresets(), name = ($('#psName').value.trim() || `구성 ${new Date().toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}`).slice(0, 40);
+  const i = list.findIndex((p) => p.name === name);
+  if (i >= 0 && !confirm(`「${name}」 프리셋이 이미 있습니다. 현재 구성으로 덮어쓸까요?`)) return;
+  const p = { name, at: Date.now(), state: snapshot() };
+  if (i >= 0) list[i] = p; else list.unshift(p);
+  if (storePresets(list)) { $('#psName').value = ''; renderPresets(); toast(`「${name}」 저장됨`); }
+});
+$('#psName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#psSave').click(); });
+$('#psList').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-ps]'); if (!b) return;
+  const list = loadPresets(), i = +b.dataset.i, p = list[i]; if (!p) return;
+  if (b.dataset.ps === 'load') applyPreset(p);
+  else if (b.dataset.ps === 'over') { if (!confirm(`「${p.name}」을(를) 현재 구성으로 덮어쓸까요?`)) return; list[i] = { ...p, at: Date.now(), state: snapshot() }; if (storePresets(list)) { renderPresets(); toast('덮어썼습니다'); } }
+  else if (b.dataset.ps === 'del') { if (!confirm(`「${p.name}」 프리셋을 삭제할까요? 되돌릴 수 없습니다.`)) return; list.splice(i, 1); if (storePresets(list)) { renderPresets(); toast('삭제했습니다'); } }
+});
+$('#psExport').addEventListener('click', () => {
+  const list = loadPresets(); if (!list.length) { toast('내보낼 프리셋이 없습니다'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sxs-calc', v: 1, presets: list }, null, 1)], { type: 'application/json' }));
+  a.download = `sxs-calc-presets-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$('#psImport').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text()), inc = (Array.isArray(j) ? j : j.presets || []).filter((p) => p && typeof p.name === 'string' && p.state && sanitize(JSON.parse(JSON.stringify(p.state))));
+    if (!inc.length) { toast('불러올 프리셋이 없는 파일입니다'); return; }
+    const list = loadPresets(), names = new Set(list.map((p) => p.name));
+    for (const p of inc) { let n = p.name.slice(0, 40), k = 2; while (names.has(n)) n = `${p.name.slice(0, 34)} (${k++})`; names.add(n); list.push({ name: n, at: +p.at || Date.now(), state: p.state }); }
+    if (storePresets(list)) { renderPresets(); toast(`프리셋 ${inc.length}개를 불러왔습니다`); }
+  } catch (err) { toast('파일을 읽지 못했습니다'); }
+});
+
 let toastT = 0;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 2200); }
 
@@ -633,7 +738,7 @@ function showResults(res) {
   const p = res.wins[0] / res.n, ci = 1.96 * Math.sqrt((p * (1 - p)) / res.n) * 100, col = pctColor(p), N = res.n;
   const len = Math.PI * 80, tA = res.meta.filter((m) => m.team === 0 && !m.pet).length, tB = res.meta.filter((m) => m.team === 1 && !m.pet).length;
   const rows = [], by = new Map(); let dmgA = 0;
-  res.meta.forEach((m, i) => { const key = m.team + '|' + (m.kind === 'mob' ? m.ref : m.id); let r = by.get(key); if (!r) { r = { team: m.team, name: (m.pet ? '🐾 ' : '') + m.name, n: 0, dmg: 0, taken: 0, kills: 0, alive: 0 }; by.set(key, r); rows.push(r); } const a = res.units[i]; r.n++; r.dmg += a.dmg / N; r.taken += a.taken / N; r.kills += a.kills / N; r.alive += a.alive / N; if (m.team === 0) dmgA += a.dmg / N; });
+  res.meta.forEach((m, i) => { const key = m.team + '|' + (m.kind === 'mob' ? m.ref : m.sum ? `s${m.owner}:${m.name}` : m.id); let r = by.get(key); if (!r) { r = { team: m.team, name: (m.sum ? '✦ ' : m.pet ? '🐾 ' : '') + m.name, n: 0, dmg: 0, taken: 0, kills: 0, alive: 0 }; by.set(key, r); rows.push(r); } const a = res.units[i]; r.n++; r.dmg += a.dmg / N; r.taken += a.taken / N; r.kills += a.kills / N; r.alive += a.alive / N; if (m.team === 0) dmgA += a.dmg / N; });
   const maxD = Math.max(1, ...rows.map((r) => r.dmg));
   const winTag = $('#winTag'); winTag.hidden = false; winTag.textContent = (p * 100).toFixed(1) + '%'; winTag.style.color = col; winTag.style.borderColor = col;
   $('#results').classList.remove('stale');
@@ -746,7 +851,7 @@ function actLine(a, nm, M) {
   if (a.heal) sub.push(`<span class="hl">치유 +${fmt(a.heal)}</span>`);
   if (a.taken) sub.push(`반격·반사 −${fmt(a.taken)}`);
   for (const g of a.gains) sub.push(`${esc(nm[g.t])}: ${ST_KO[g.k] || g.k}${g.n > 1 ? ' ×' + g.n : ''}`);
-  if (a.spawn >= 0) sub.push(`✦ ${esc(nm[a.spawn])} 실체화`);
+  if (a.spawn >= 0) sub.push(`✦ ${esc(nm[a.spawn])} ${M[a.spawn].sum ? '소환' : '실체화'}`);
   for (const f of a.falls) sub.push(`<span class="fl">✝ ${esc(nm[f])} 쓰러짐</span>`);
   return `<div class="lg t${who.team}" data-a="${a.i}"><span class="lr">R${a.r}</span><b>${esc(nm[a.u])}</b> ${what}${tgs.length ? ` → ${esc(nm[tgs[0]])}${tgs.length > 1 ? ` 외 ${tgs.length - 1}` : ''}` : ''}${a.dmg ? ` <span class="dm">−${fmt(a.dmg)}</span>` : ''}${sub.length ? `<div class="sub">${sub.join(' · ')}</div>` : ''}</div>`;
 }
@@ -755,7 +860,7 @@ function fieldChips(setup) {
   if (setup.mode === 'pvp' && setup.pvpBalance !== false) { c.push(['균형의 미 · 캐릭터 대상 대미지 ×0.2', 'PvP 전장 효과 (Beauty of Balance)']); c.push(['12라운드부터 라운드마다 대미지 +10%p · 치유·실드 감소', 'PvP 전장 효과 (Swift Resolution)']); }
   if (setup.teams.some((t) => t.some((u) => u.uws))) c.push(['United We Stand · 보스가 첫 3턴 받는 대미지 −99%', '길드 토벌 층 효과']);
   c.push([`라운드 제한 ${setup.roundCap}R`, '한 라운드 = 생존한 전원이 한 번씩 행동']);
-  if (setup.teams.some((t) => t.some((u) => u.kind === 'mob'))) { if (setup.mobCoef !== 1) c.push([`몹 스킬 계수 ${Math.round(setup.mobCoef * 100)}%`, '']); if (setup.pvEst === false) c.push(['몹 비전 추정값 꺼짐', '']); if (setup.rank && setup.mode !== 'pvp') { const o = [...$('#rankSel').options].find((x) => x.value === setup.rank); c.push([`내 랭크 ${o ? o.text : setup.rank} · 랭크 차이 보정`, '']); } }
+  if (setup.teams.some((t) => t.some((u) => u.kind === 'mob'))) { if (setup.mobCoef !== 1) c.push([`몹 스킬 계수 ${Math.round(setup.mobCoef * 100)}%`, '']); if (setup.pvEst === false) c.push(['몹 비전 추정값 꺼짐', '']); const rk = [...new Set(setup.teams[0].filter((u) => u.kind === 'hero' && u.rank).map((u) => SUBRANK_KO(u.rank)))]; if (rk.length && setup.mode !== 'pvp') c.push([`랭크 ${rk.join(' · ')} · 랭크 차이 보정`, '']); }
   return c.map(([t, title]) => `<span class="fchip" title="${esc(title)}">${t}</span>`).join('');
 }
 function playSeed(setup, seed) {
@@ -840,10 +945,10 @@ function drawLive() {
   $('#liveList').innerHTML = L.map((u, i) => {
     const mood = end && u.alive ? (end.w === u.m.team ? 'joy' : 'sad') : u.mood;
     const face = u.d ? faceHtml(u.d, mood) : '';
-    if (u.hidden && !u.alive) return u.m.pet ? `<div class="lv pet off"><span class="nm">🐾 ${esc(nm[i])}</span><small>실체화 대기</small></div>` : '';
+    if (u.hidden && !u.alive) return u.m.pet && !u.m.sum ? `<div class="lv pet off"><span class="nm">🐾 ${esc(nm[i])}</span><small>실체화 대기</small></div>` : '';
     const f = Math.max(0, u.hp / u.m.hpMax), s = Math.min(1 - f, u.sh / u.m.hpMax);
     const chips = !u.alive ? '' : u.sts.map((x) => `<i class="st ${x.k === 'shield' ? 'sh' : ST_CTRL.has(x.k) ? 'cc' : x.b ? 'bf' : 'db'}">${ST_KO[x.k] || x.k}${x.n > 1 ? ' ×' + x.n : ''}${x.left ? ` · ${x.left}턴` : ''}</i>`).join('');
-    return `<div class="lv t${u.m.team}${u.alive ? '' : ' dead'}${face ? ' hasface' : ''}">${face}<span class="nm">${u.m.pet ? '🐾 ' : ''}${esc(nm[i])}</span><div class="hpb"><s style="width:${(f * 100).toFixed(1)}%"></s><u style="left:${(f * 100).toFixed(1)}%;width:${(s * 100).toFixed(1)}%"></u><em>${u.alive ? `${fmtK(u.hp)} / ${fmtK(u.m.hpMax)}${u.sh > 0 ? ' +' + fmtK(u.sh) : ''}` : '쓰러짐'}</em></div>${chips ? `<div class="sts">${chips}</div>` : ''}</div>`;
+    return `<div class="lv t${u.m.team}${u.alive ? '' : ' dead'}${face ? ' hasface' : ''}">${face}<span class="nm">${u.m.sum ? '✦ ' : u.m.pet ? '🐾 ' : ''}${esc(nm[i])}</span><div class="hpb"><s style="width:${(f * 100).toFixed(1)}%"></s><u style="left:${(f * 100).toFixed(1)}%;width:${(s * 100).toFixed(1)}%"></u><em>${u.alive ? `${fmtK(u.hp)} / ${fmtK(u.m.hpMax)}${u.sh > 0 ? ' +' + fmtK(u.sh) : ''}` : '쓰러짐'}</em></div>${chips ? `<div class="sts">${chips}</div>` : ''}</div>`;
   }).join('');
 }
 const ST_CTRL = new Set(['stun', 'freeze', 'immob', 'taunt', 'frenzy']);

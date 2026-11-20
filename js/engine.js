@@ -2,7 +2,7 @@
 // Pure module: runs in the page, in a Web Worker and in Node.
 import { LV, FLAT, RANK_Q, RANK_R, SKILLS, MOBS, CURVES, MAPS, MAXLV, CLASSES } from './gamedata.js';
 
-import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV, RANK_BASE } from './gamedata2.js';
+import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV, RANK_BASE, SUMMONS, SUMCURVE, TRIG } from './gamedata2.js';
 export { MOB_PV };
 
 // official Korean client names / descriptions + extra tables
@@ -82,6 +82,9 @@ export function rankGap(ra, rb, demon) {
   if (demon) n *= 1 + Math.abs((DEMON_DMG[ra] || 0) - (DEMON_DMG[rb] || 0));
   return oa > ob ? n : 1 / n;
 }
+/** the bases a character's stats-screen numbers are read against: its sub-rank's, or the level's when no rank is set */
+export const statBases = (level, rank) => { const r = rank && RANK_BASE && RANK_BASE[rank]; return { val: r ? r[2] : LV.crit[lvi(level)] || 1, eff: r ? r[3] : LV.eres[lvi(level)] || 1 }; };
+export const SUBRANKS = RANK_BASE ? Object.keys(RANK_BASE) : [];
 export function heroBase(level) {
   const l = lvi(level);
   return { atk: LV.atk[l], def: LV.def[l], hp: LV.hp[l], spd: LV.spd[l] };
@@ -93,6 +96,7 @@ export function skillNumbers(id, rank, level) {
   const o = { q };
   if (s.c) { o.coef = s.c[q] / 100; o.flat = (s.fm || 0) * R * A; }
   if (s.c2) { o.coef2 = s.c2[q] / 100; o.flat2 = (s.fm2 || 0) * R * A; }
+  if (s.trig && TRIG && TRIG[s.trig]) { const T = TRIG[s.trig]; o.tc = T.c[r - 1]; o.tf = T.fx[r - 1] * flatBase(T.fg, level); }
   if (s.hv) { o.healPct = s.hv[q] / 100; o.healFlat = (s.hfm || 0) * R * A * CURE_BASE; }
   if (s.bv) { o.bv = s.bv[q] / 100; o.bflat = s.bfm ? s.bfm[q] * A : 0; }
   return o;
@@ -110,6 +114,22 @@ function buildHero(d, opts) {
   u.atk = Math.max(1, +d.atk || 1); u.def = Math.max(0, +d.def || 0); u.hpMax = Math.max(1, +d.hp || 1); u.spd = Math.max(1, +d.spd || 1);
   for (const k of PCT) u[k] = (d[k] != null && d[k] !== '' ? +d[k] : HERO_DEFAULTS[k]) / 100;
   for (const k of RAW) u[k] = +d[k] || 0;
+  // the game's Character Stats screen: the character's own sub-rank (bases + rank gap), the flat number after the
+  // "+" sign of Crit Rate / Crit RES / Block Rate / Accuracy (worth value ÷ the rank's base), flat Crit DMG / Block
+  // Efficiency (added on a crit / removed on a block, scaled by the skill coefficient), flat Effect Hit / RES,
+  // affinity and aegis per element (physical hits use their mean)
+  const l0 = lvi(u.level), sr = d.rank && RANK_BASE && RANK_BASE[d.rank] ? d.rank : null;
+  if (sr) { u.sr = sr; u.rk = rankGroup(sr); u.bMas = RANK_BASE[sr][0]; u.bAff = RANK_BASE[sr][1]; }
+  const vb = sr ? RANK_BASE[sr][2] : LV.crit[l0] || 1, eb = sr ? RANK_BASE[sr][3] : LV.eres[l0] || 1, num = (v) => (v != null && v !== '' ? +v || 0 : null);
+  u.critRate += (num(d.critRateV) || 0) / vb; u.critRes += (num(d.critResV) || 0) / vb; u.blockRate += (num(d.blockRateV) || 0) / vb; u.acc += (num(d.accV) || 0) / vb;
+  u.critPowV = num(d.critDmgV) || 0; u.blockValV = num(d.blockEffV) || 0;
+  if (num(d.effHitV) != null) u.effHit = num(d.effHitV) / eb;
+  if (num(d.effResV) != null) u.effRes = num(d.effResV) / eb;
+  u.healBoost = (num(d.healBoost) || 0) / 100; u.pvpAdd = (num(d.pvpAdd) || 0) / 100; u.pvpRes = (num(d.pvpRes) || 0) / 100;
+  u.affEl = {}; u.aegisEl = {};
+  for (const e of ELS) { if (num(d['aff_' + e]) != null) u.affEl[e] = num(d['aff_' + e]); if (num(d['aeg_' + e]) != null) u.aegisEl[e] = num(d['aeg_' + e]); }
+  if (Object.keys(u.affEl).length) u.affEl.phy = ELS.reduce((s, e) => s + (u.affEl[e] || 0), 0) / 5;
+  if (Object.keys(u.aegisEl).length) u.aegisEl.phy = ELS.reduce((s, e) => s + (u.aegisEl[e] || 0), 0) / 5;
   u.skills = [];
   for (const sl of d.skills || []) {
     if (!sl) continue;
@@ -121,9 +141,9 @@ function buildHero(d, opts) {
       n = { coef: (+c.coef || 0) / 100, flat: +c.flat || 0 };
     } else { s = SK.get(sl.id); if (!s) continue; n = skillNumbers(sl.id, sl.rank, u.level); }
     if (s.kind === 'none') continue;
-    u.skills.push({ s, n, cd: s.cd || 0, init: s.cd && !s.zi ? s.cd + 1 : 0 });
+    u.skills.push({ s, n, cd: s.cd || 0, init: s.cd && !s.zi ? s.cd + 1 : 0, rank: clamp(sl.rank || 1, 1, 34) });
   }
-  u.affEl = {}; u.healUp = 0; u.lsAll = 0;
+  u.healUp = 0; u.lsAll = 0;
   u.ch = compileCharms(d.charms, u);
   return u;
 }
@@ -175,11 +195,46 @@ function compileCharms(list, u) {
   }
   return any ? ch : null;
 }
+// summons and Blast Spirit (game data, SUMMONS) and Void Chant's rune are played by their own code; skills without
+// public game data (Rock Rex, Thalasson) keep kind 'none' and stay out of the fight
+const VOID_CHANT = 10124;
+for (const s of SKILLS) if (s.kind === 'none') { if (SUMMONS && SUMMONS[s.id]) { s.kind = 'summon'; s.sum = SUMMONS[s.id]; } else if (s.id === VOID_CHANT) s.kind = 'rune'; }
+/** a summoned creature (FightHitSummon, game data): the caster's own sheet × the inherited share × the rank factor of the
+ *  summoning skill's rank, plus the fixed part (level curve × factor). Percent and elemental stats are inherited in full. */
+function sumStats(u, base, c, ri, level) {
+  const at = (v) => (Array.isArray(v) ? v[ri] : v), st = {};
+  for (const f of ['hp', 'atk', 'def', 'spd']) st[f] = (base[f] || 0) * (c.add[f] || 0) * (c.rf && c.rf[f] != null ? at(c.rf[f]) : 1);
+  for (const x of c.fx || []) st[x.f] += ((SUMCURVE[x.cv] || [])[lvi(level)] || 0) * at(x.m);
+  u.hpMax = Math.max(1, Math.round(st.hp)); u.atk = Math.max(1, Math.round(st.atk)); u.def = Math.max(0, Math.round(st.def)); u.spd = Math.max(1, Math.round(st.spd));
+}
+function buildSummon(h, k) {
+  const c = k.s.sum.cr;
+  const u = { kind: 'summon', sum: true, pet: true, name: c.ko, art: c.art, cr: c.id, level: h.level, move: c.move || 0, sz: 1, ch: null, healUp: 0, lsAll: 0, rk: h.rk, sr: h.sr, bMas: h.bMas, bAff: h.bAff, affEl: { ...h.affEl }, aegisEl: { ...h.aegisEl } };
+  for (const f of PCT) u[f] = h[f];
+  for (const f of RAW) u[f] = h[f];
+  for (const f of ['critPowV', 'blockValV', 'healBoost', 'pvpAdd', 'pvpRes']) u[f] = h[f] || 0;
+  sumStats(u, { hp: h.hpMax, atk: h.atk, def: h.def, spd: h.spd }, c, k.rank - 1, h.level);
+  u.skills = (c.sk || []).map((x) => {
+    if (x.kind === 'heal') return { s: { id: x.id, en: x.en, ko: x.ko, kind: 'heal', el: 'none', tg: x.tg }, n: { healPct: x.hv, healFlat: 0 }, cd: x.cd || 0, init: 0 };
+    if (x.kind === 'advance') return { s: { id: x.id, en: x.en, ko: x.ko, kind: 'advance', el: 'none', r: x.r }, n: { v: x.v }, cd: x.cd || 0, init: 0 };
+    return { s: { ...x, kind: 'kit' }, n: { coef: x.c, flat: 0 }, cd: x.cd || 0, init: 0 };
+  });
+  if (c.aura) u.aura = c.aura;
+  return u;
+}
+/** Decoy Clone: no skills, never walks; its stats come from the enemy it links to when it is cast */
+function buildClone(h, k) {
+  const c = k.s.sum.cr;
+  const u = { kind: 'summon', sum: true, clone: true, pet: true, name: c.ko, art: 'doll', cr: c.id, level: h.level, move: 0, sz: 1, ch: null, healUp: 0, lsAll: 0, affEl: {}, aegisEl: {}, skills: [], hpMax: 1, atk: 1, def: 0, spd: 1, rkLv: k.rank - 1 };
+  for (const f of PCT) u[f] = 0;
+  for (const f of RAW) u[f] = 0;
+  return u;
+}
 /** Fantomon: a dormant companion unit (support skill, and materialization for adults) */
 function buildPet(d, owner) {
   const p = PET.get(d.id); if (!p) return null;
   const r = clamp(d.rank || 1, 1, 34), q = RANK_Q[r - 1], R = RANK_R[r - 1];
-  const u = { kind: 'pet', name: p.ko, petId: p.id, level: owner.level, move: 4, pet: true, affEl: {}, healUp: 0, lsAll: 0, ch: null };
+  const u = { kind: 'pet', name: p.ko, petId: p.id, level: owner.level, move: 4, pet: true, affEl: {}, healUp: 0, lsAll: 0, ch: null, rk: owner.rk, sr: owner.sr, bMas: owner.bMas, bAff: owner.bAff };
   u.atk = Math.max(1, +d.atk || 1); u.def = Math.max(0, +d.def || 0); u.hpMax = Math.max(1, +d.hp || 1); u.spd = Math.max(1, +d.spd || 1);
   for (const k of PCT) u[k] = HERO_DEFAULTS[k] / 100;
   for (const k of RAW) u[k] = 0;
@@ -335,6 +390,16 @@ export function prepare(setup) {
   });
   // dormant Fantomon units go after the fighters
   for (const h of units.slice()) if (h.petU) { const p = h.petU; delete h.petU; p.team = h.team; p.x = -1; p.y = -1; p.out = true; p.ownerRef = h; h.petRef = p; units.push(p); }
+  // summon slots: dormant creatures per summon skill, two sets so a re-cast can overlap one still standing
+  // (a Decoy Clone stands on the side of the enemy it links to)
+  for (const h of units.slice()) if (h.kind === 'hero') h.skills.forEach((k, i) => {
+    const sm = k.s.sum; if (!sm || sm.kind === 'trap') return;
+    for (let j = 0; j < sm.cells.length * 2; j++) {
+      const p = sm.kind === 'clone' ? buildClone(h, k) : buildSummon(h, k);
+      p.team = sm.kind === 'clone' ? 1 - h.team : h.team; p.x = -1; p.y = -1; p.out = true; p.ownerRef = h; p.sumSk = i; p.slot = j; p.ref = `${h.ref}:s${i}:${j}`;
+      units.push(p);
+    }
+  });
   units.forEach((u, i) => { u.id = i; });
   for (const u of units) { if (u.ownerRef) { u.owner = u.ownerRef.id; delete u.ownerRef; } if (u.petRef) { u.petI = u.petRef.id; delete u.petRef; } }
   const pvp = setup.mode === 'pvp';
@@ -359,7 +424,7 @@ export function simulate(P, seed, log) {
     dmg: 0, taken: 0, healed: 0, kills: 0, lastAil: -9, ailStreak: 0,
     casts: 0, eye: 0, stone: 0, marks: 0, lossAcc: 0, supTurn: -1, supN: 0, petStk: 0, undyingUsed: false, above50: true, voidUsed: false, energy: 0, reactCast: -1,
   }));
-  const B = { U, pvp: P.pvp, round: 1, pvpScale: 1, healScale: 1, castId: 0, over: false, winner: -1, now: 0 };
+  const B = { U, pvp: P.pvp, round: 1, pvpScale: 1, healScale: 1, castId: 0, over: false, winner: -1, now: 0, traps: [], trapN: 0, totem: false };
   for (const u of U) if (!u.out) setOcc(u, u.id);
   const aliveCount = [0, 0];
   const proxU = U.filter((u) => u.mp && u.mp.prox); // units with an on-enter proximity passive
@@ -435,6 +500,9 @@ export function simulate(P, seed, log) {
     t.alive = false; t.hp = 0; setOcc(t, -1);
     if (by) by.kills++;
     if (ev) ev.push({ e: 'die', u: t.id });
+    // a Decoy Clone goes with the unit it links to (FollowDieId) and with its caster (its life counts the caster's turns)
+    for (const c of U) if (c.clone && c.alive && (c.link === t.id || c.owner === t.id)) dismiss(c);
+    if (B.traps.length) for (let i = B.traps.length - 1; i >= 0; i--) if (B.traps[i].src === t.id) { if (ev) ev.push({ e: 'trap', id: B.traps[i].id, on: 0 }); B.traps.splice(i, 1); }
     if (t.pet) { petGone(t); return; }
     aliveCount[t.team]--;
     if (aliveCount[t.team] <= 0) { B.over = true; B.winner = 1 - t.team; return; }
@@ -446,7 +514,7 @@ export function simulate(P, seed, log) {
   }
   function heal(a, t, v) {
     if (!t.alive || v <= 0) return 0;
-    v = Math.floor(v * B.healScale * (1 + (a.healUp || 0)));
+    v = Math.floor(v * B.healScale * (1 + (a.healUp || 0) + (a.healBoost || 0))); // Healing Boost (stats screen) + healing-up effects
     const real = Math.min(v, t.hpMax - t.hp);
     if (real <= 0) return 0;
     t.hp += real; a.healed += real;
@@ -476,7 +544,8 @@ export function simulate(P, seed, log) {
     const g = Math.floor(a.level) - Math.floor(t.level), ag = Math.abs(g);
     let f = g ? 1 + (ag > 20 ? 0.1 : 0.04 * Math.min(4, ag)) : 1;
     f = g > 0 ? f : g < 0 ? 1 / f : 1;
-    if (!P.pvp && P.prank) { const ra = a.kind === 'mob' ? a.rk : P.prank, rb = t.kind === 'mob' ? t.rk : P.prank; f *= rankGap(ra, rb, a.demon || t.demon); }
+    // a character's own rank (stats screen) or the party rank picked in the settings; a monster's from its sub-rank
+    if (!P.pvp) { const ra = a.kind === 'mob' ? a.rk : a.rk || P.prank, rb = t.kind === 'mob' ? t.rk : t.rk || P.prank; if (ra && rb) f *= rankGap(ra, rb, a.demon || t.demon); }
     return f;
   }
 
@@ -500,6 +569,8 @@ export function simulate(P, seed, log) {
     t.hp -= hpDmg; a.dmg += hpDmg; t.taken += hpDmg;
     if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d, k: o.kind || 0, hp: t.hp, sh: t.shield, el: o.el });
     if (o.ls && hpDmg > 0) heal(a, a, hpDmg * o.ls);
+    // Decoy Clone: the HP it loses, the linked unit loses too (True DMG; shields still take it)
+    if (t.clone && hpDmg > 0 && U[t.link] && U[t.link].alive) applyDamage(a, U[t.link], Math.max(1, Math.floor(hpDmg * (t.linkV || 1))), { el: o.el, kind: 4 });
     if (t.hp <= 0) { kill(t, a); return hpDmg; }
     if (saved) { const c = t.ch.undying; heal(t, t, t.hpMax * c.healPct + c.healFlat); if (c.indom) addStatus(t, { k: 'dmgRed', v: 0.9, exp: t.turnNo + 2, buff: true }); }
     // HP-threshold charms
@@ -655,15 +726,18 @@ export function simulate(P, seed, log) {
     if (em <= 0) { if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d: 0, k: 5, hp: t.hp, sh: t.shield, el }); return 0; } // element immunity (비전)
     let d = (o.base != null ? o.base : atk * coef + flat) * (atk / (atk + def));
     d *= em;
-    // PvE Bonus DMG (against a monster) / PvE DMG RES (from a monster): the character screen's MonsterDmgAdd/ReduceScale
+    // PvE Bonus DMG (against a monster) / PvE DMG RES (from a monster): the character screen's MonsterDmgAdd/ReduceScale;
+    // PvP Bonus DMG / PvP DMG RES between characters
     const pveA = !P.pvp && t.kind === 'mob' ? a.pveAdd || 0 : 0, pveR = !P.pvp && a.kind === 'mob' ? t.pveRes || 0 : 0;
-    d *= (1 + a.dmgBoost + a.bDmg + boost + pveA) / (1 + t.dmgRes + pveR);
-    d *= (1 + t.vuln + t.sigil) * t.red * redX;
+    const pvpA = P.pvp && t.kind === 'hero' ? a.pvpAdd || 0 : 0, pvpR = P.pvp && a.kind !== 'mob' ? t.pvpRes || 0 : 0;
+    const mul = em * ((1 + a.dmgBoost + a.bDmg + boost + pveA + pvpA) / (1 + t.dmgRes + pveR + pvpR)) * ((1 + t.vuln + t.sigil) * t.red * redX);
+    d = d / em * mul;
     const acc = a.acc + (a.bAcc || 0) + (o.acc || 0);
     let kind = 0;
     const bc = t.blockRate + t.bBlock - 0.1 * t.riven - acc;
-    if (bc > 0 && rnd() < bc) { d /= Math.max(1.5, 1 + t.blockEff - acc); kind = 2; }
-    else { const cc = 0.05 + a.critRate + a.bCrit - t.critRes; if (cc > 0 && rnd() < cc) { d *= Math.max(1.3, 1 + a.critDmg - t.critRes); kind = 1; } }
+    // the flat Block Efficiency / Crit DMG numbers of the stats screen join outside the DEF term, times the coefficient
+    if (bc > 0 && rnd() < bc) { if (t.blockValV) d = Math.max(0.1 * d, d - t.blockValV * coef * mul); d /= Math.max(1.5, 1 + t.blockEff - acc); kind = 2; }
+    else { const cc = 0.05 + a.critRate + a.bCrit - t.critRes; if (cc > 0 && rnd() < cc) { if (a.critPowV) d += a.critPowV * coef * mul; d *= Math.max(1.3, 1 + a.critDmg - t.critRes); kind = 1; } }
     d *= levelOffset(a, t);
     if (P.balance && t.kind === 'hero') d *= B.pvpScale;
     d *= o.mult || 1;
@@ -725,6 +799,7 @@ export function simulate(P, seed, log) {
     }
     if (k === 'dot') { addStatus(t, { k, el: e.el || 'dark', src: a.id, exp: t.turnNo + (e.t || 3) }); return; }
     if (k === 'taunt') { addStatus(t, { k, src: a.id, exp: t.turnNo + turns, uniq: 1 }); return; }
+    if (k === 'lacer') { addStatus(t, { k, src: a.id, coef: e.coef || 0, flat: e.flat || 0, exp: t.turnNo + turns, uniq: 1 }); return; }
     addStatus(t, { k, v, exp: t.turnNo + turns, uniq: 1, cast: B.castId });
   }
   function dotTick(t, s) {
@@ -738,6 +813,10 @@ export function simulate(P, seed, log) {
   /* ── targeting ── */
   const foesOf = (u) => { const tn = has(u, 'taunt'); if (tn && U[tn.src] && U[tn.src].alive) return [U[tn.src]]; const o = []; for (const f of U) if (f.alive && f.team !== u.team) o.push(f); return o; };
   const alliesOf = (u) => { const o = []; for (const f of U) if (f.alive && f.team === u.team) o.push(f); return o; };
+  /** main-target pool: Stealth "cannot be selected as the main target" while another enemy can */
+  const aimFoes = (u) => { const fs = foesOf(u); if (!fs.some((f) => f.sum)) return fs; const vis = fs.filter((f) => !has(f, 'stealth')); return vis.length ? vis : fs; };
+  /** the AI's VoodooDollCountWeightChange (+1): a Decoy Clone counts as one more target ("prioritized by allies as an attack target") */
+  const wt = (f) => (f.clone ? 2 : 1);
   /** does one cell lie in a caster-anchored area (A / Q / F) */
   /** distance from a caster standing at (x, y) to a cell: from the nearest cell of its body */
   const dAt = (c, x, y, ax, ay) => { if (!(c && c.sz > 1)) return dist(x, y, ax, ay); let m = 99; for (const [dx, dy] of fpOf(c)) m = Math.min(m, Math.abs(x + dx - ax) + Math.abs(y + dy - ay)); return m; };
@@ -771,15 +850,41 @@ export function simulate(P, seed, log) {
     return null;
   }
   /** → { x, y, walk, targets, ax, ay, dir } | null */
-  function plan(u, s, pool, foes) {
+  /** SaferPos (the game's AI): distance from a cell to the nearest enemy, beyond 6 grids counted back down
+   *  (HasEnemyRoundDistanceAfterKeepAway 6: a cell that leaves no enemy within 6 is not a better keep-away cell) */
+  function safer(u, x, y) {
+    let m = 99;
+    for (const f of U) if (f.alive && !f.out && f.team !== u.team) { const d = u.sz > 1 ? Math.min(...fpOf(u).map(([dx, dy]) => dU(f, x + dx, y + dy))) : dU(f, x, y); if (d < m) m = d; }
+    return m > 6 ? 6 - (m - 6) : m;
+  }
+  /** keep: the turn's last cast of a ranged skill that keeps its distance (s.kd) — among the cells that hit the most
+   *  targets the caster takes the safest one, so a mage steps to the edge of its range; otherwise the shortest walk */
+  function plan(u, s, pool, foes, keep) {
     const tg = s.tg, leap = s.leap || 0, reach = pool + leap;
     if (!foes.length) return null;
     const bigF = s.bigFirst ? 1 : 0; // "Prioritizes large targets" / "...the skill range that contains large targets"
+    if (tg.t === 'S' && keep) {
+      const min = tg.min || 1;
+      let best = null;
+      for (const [dx, dy, d] of DIAMOND) {
+        if (d > reach) break;
+        const x = u.x + dx, y = u.y + dy;
+        if (d && !fits(u, x, y)) continue;
+        let inR = foes.filter((f) => { const dd = dU(f, x, y); return dd >= min && dd <= tg.r; });
+        if (!inR.length) continue;
+        if (bigF && inR.some((f) => f.sz > 1)) inR = inR.filter((f) => f.sz > 1);
+        const sc = safer(u, x, y);
+        if (!best || sc > best.sc || (sc === best.sc && d < best.d)) best = { sc, d, x, y, inR };
+      }
+      if (!best) return null;
+      const f = best.inR.sort((a, b) => (b.clone ? 1 : 0) - (a.clone ? 1 : 0) || a.hp / a.hpMax - b.hp / b.hpMax)[0]; // then LowerTargetHp
+      return { x: best.x, y: best.y, walk: Math.max(0, best.d - leap), targets: [f], cnt: new Map([[f.id, 1]]), ax: f.x, ay: f.y };
+    }
     if (tg.t === 'S') {
       const min = tg.min || 1;
       const c = [];
       for (const f of foes) { const d = dU(f, u.x, u.y); const need = d > tg.r ? d - tg.r : d < min ? min - d : 0; if (need <= reach) c.push([need, f.hp / f.hpMax, f]); }
-      c.sort((a, b) => bigF * ((b[2].sz || 1) - (a[2].sz || 1)) || a[0] - b[0] || a[1] - b[1]);
+      c.sort((a, b) => bigF * ((b[2].sz || 1) - (a[2].sz || 1)) || (b[2].clone ? 1 : 0) - (a[2].clone ? 1 : 0) || a[0] - b[0] || a[1] - b[1]);
       for (const [, , f] of c) {
         const cell = standCell(u, reach, (x, y) => { const d = dU(f, x, y); return d >= min && d <= tg.r; });
         if (cell) return { x: cell[0], y: cell[1], walk: Math.max(0, cell[2] - leap), targets: [f], cnt: new Map([[f.id, 1]]), ax: f.x, ay: f.y };
@@ -795,11 +900,26 @@ export function simulate(P, seed, log) {
           const ax = f.x + fx + ox, ay = f.y + fy + oy; if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
           const key = ay * W + ax; if (seen.has(key)) continue; seen.add(key);
           const need = Math.max(0, dAt(u, u.x, u.y, ax, ay) - tg.r); if (need > reach) continue;
-          let n = 0, big = 0; for (const g of foes) if (inAim(tg, ax, ay, g)) { n++; if (g.sz > 1) big = 1; }
+          let n = 0, big = 0; for (const g of foes) if (inAim(tg, ax, ay, g)) { n += wt(g); if (g.sz > 1) big = 1; }
           if (n) aims.push([n, need, ax, ay, big]);
         }
       }
       aims.sort((a, b) => bigF * (b[4] - a[4]) || b[0] - a[0] || a[1] - b[1]);
+      if (keep && aims.length) {
+        // the safest cell among the aims that hit the most targets
+        let best = null;
+        for (let i = 0; i < aims.length && i < 12; i++) {
+          const [n, , ax, ay, big] = aims[i]; if (n < aims[0][0] || big < aims[0][4]) break;
+          for (const [dx, dy, d] of DIAMOND) {
+            if (d > reach) break;
+            const x = u.x + dx, y = u.y + dy;
+            if ((d && !fits(u, x, y)) || dAt(u, x, y, ax, ay) > tg.r) continue;
+            const sc = safer(u, x, y);
+            if (!best || sc > best.sc || (sc === best.sc && d < best.d)) best = { sc, d, x, y, ax, ay };
+          }
+        }
+        if (best) { const cnt = new Map(); const targets = foes.filter((g) => { const k = inAim(tg, best.ax, best.ay, g); if (k) cnt.set(g.id, k); return k > 0; }); return { x: best.x, y: best.y, walk: Math.max(0, best.d - leap), targets, cnt, ax: best.ax, ay: best.ay }; }
+      }
       for (let i = 0; i < aims.length && i < 6; i++) {
         const [, , ax, ay] = aims[i];
         const cell = standCell(u, reach, (x, y) => dAt(u, x, y, ax, ay) <= tg.r);
@@ -808,19 +928,20 @@ export function simulate(P, seed, log) {
       return null;
     }
     // shapes anchored on the caster: A / Q / F
-    let best = null, bestN = 0;
+    let best = null, bestN = 0, bestSafe = -99;
     const dirs = tg.t === 'F' ? 4 : 1;
     for (const [dx, dy, d] of DIAMOND) {
       if (d > reach) break;
       const x = u.x + dx, y = u.y + dy;
       if (d && !fits(u, x, y)) continue;
+      const sc = keep ? safer(u, x, y) : 0;
       for (let k = 0; k < dirs; k++) {
         let n = 0, big = 0;
-        for (const f of foes) if (inShape(tg, x, y, k, f, u)) { n++; if (f.sz > 1) big = 1; }
+        for (const f of foes) if (inShape(tg, x, y, k, f, u)) { n += wt(f); if (f.sz > 1) big = 1; }
         const score = n + (bigF && big ? 100 : 0);
-        if (score > bestN) { bestN = score; best = [x, y, d, k]; }
+        if (score > bestN || (keep && score && score === bestN && sc > bestSafe)) { bestN = score; bestSafe = sc; best = [x, y, d, k]; }
       }
-      if (bestN >= foes.length && !bigF) break;
+      if (!keep && bestN >= foes.length && !bigF) break;
     }
     if (!best) return null;
     const [x, y, d, k] = best, cnt = new Map();
@@ -835,6 +956,7 @@ export function simulate(P, seed, log) {
     const prox = proxU.length ? proxU.filter((f) => f.alive && f.team !== u.team && dUU(u, f) > f.mp.prox[0].r) : null;
     setOcc(u, -1); u.x = x; u.y = y; setOcc(u, u.id);
     if (ev) ev.push({ e: 'move', u: u.id, x, y, leap: leap === 1 || leap === true ? 1 : 0, ...(typeof leap === 'string' ? { [leap]: 1 } : {}) });
+    moved(u);
     if (prox) for (const f of prox) if (u.alive && !B.over && dUU(u, f) <= f.mp.prox[0].r) { const p = f.mp.prox[0]; pvLabel(f, p.name); hit(f, u, p.c, 0, p.el, { noProc: 1, noReact: 1 }); }
   }
   /** DIRS index that points from the unit toward a target */
@@ -875,7 +997,7 @@ export function simulate(P, seed, log) {
       if (d > 3) break;
       const x = px + dx, y = py + dy;
       if (dist(x, y, t.x, t.y) >= dist(px, py, t.x, t.y) && d > 0) continue;
-      if (free(x, y)) { occ[t.y * W + t.x] = -1; t.x = x; t.y = y; occ[y * W + x] = t.id; if (ev) ev.push({ e: 'move', u: t.id, x, y, pull: 1 }); return; }
+      if (free(x, y)) { occ[t.y * W + t.x] = -1; t.x = x; t.y = y; occ[y * W + x] = t.id; if (ev) ev.push({ e: 'move', u: t.id, x, y, pull: 1 }); moved(t); return; }
     }
   }
 
@@ -896,7 +1018,7 @@ export function simulate(P, seed, log) {
   }
   const kitCo = (u) => (u.sz > 1 && u.sz % 2 === 0 ? 0.5 : 0);
   function kitPlan(u, s, pool) {
-    const G = kitGeo(s, kitCo(u)), foes = foesOf(u); if (!foes.length) return null;
+    const G = kitGeo(s, kitCo(u)), foes = aimFoes(u); if (!foes.length) return null;
     const NE = G.entries.length, cnt = new Int32Array(NE), mark = new Int32Array(NE); let stamp = 0;
     let best = null;
     for (const [dx, dy, d] of DIAMOND) {
@@ -939,11 +1061,15 @@ export function simulate(P, seed, log) {
     const inCells = (cells, bx, by) => { const out = []; for (const [cx, cy] of cells) { const x = bx + cx, y = by + cy; if (x < 0 || y < 0 || x >= W || y >= H) continue; const o = occ[y * W + x]; if (o >= 0) { const t = U[o]; if (t.alive && t.team !== u.team && !out.includes(t)) out.push(t); } } return out; };
     if (ev) ev.push({ e: 'cast', u: u.id, n: s.ko || s.en, el: s.el, tg: (G.all ? foes0 : foes0.filter((f) => fpOf(f).some(([fx, fy]) => G.entryHas(pl.ei, f.x + fx - pl.x, f.y + fy - pl.y)))).map((t) => t.id), ax, ay, sh: G.aimed ? 'T' : 'A', ar: G.ar });
     if (u.mp && u.mp.dualSurge && s.c > 0) { const m = u.mp.dualSurge[0]; if (s.el === 'fire') u.infN = Math.min(m.max, (u.infN || 0) + 1); else if (s.el === 'water') u.tideN = Math.min(m.max, (u.tideN || 0) + 1); }
+    const foN = s.fo ? new Map() : null;
     const strike = (h, t) => {
       if (!t.alive || B.over) return;
-      if (h.d !== 0 && s.c > 0) {
-        const mult = s.ex ? 1 + Math.min(s.ex.max, Math.floor((1 - t.hp / t.hpMax) / 0.05 + 1e-9) * s.ex.step) : 1;
-        hit(u, t, s.c, 0, s.el, { mult, acc: 0, boost: 0 });
+      const c = h.cf != null ? h.cf : s.c;
+      if (h.d !== 0 && c > 0) {
+        let mult = s.ex ? 1 + Math.min(s.ex.max, Math.floor((1 - t.hp / t.hpMax) / 0.05 + 1e-9) * s.ex.step) : 1;
+        // damage falloff: each repeat on the same target deals fo less
+        if (foN) { const i = foN.get(t.id) || 0; mult *= Math.pow(1 - s.fo, i); foN.set(t.id, i + 1); }
+        hit(u, t, c, 0, s.el, { mult, acc: 0, boost: 0 });
       }
       if (!t.alive || B.over) return;
       if (h.st) for (const [k2, p, dur] of h.st) tryStatus(u, t, { k: k2, p, t: dur }, s);
@@ -1000,7 +1126,7 @@ export function simulate(P, seed, log) {
     const hitN = new Map();
     const decay = (t) => { const i = hitN.get(t.id) || 0; hitN.set(t.id, i + 1); return s.rep && i >= s.rep.from ? Math.pow(1 - s.rep.d, i - s.rep.from + 1) : 1; };
     const one = (t, coef, flat, mult) => { o.mult = mult || 1; if (s.big && t.big) o.mult *= 1 + s.big; if (sp.k === 'lucky' && rnd() < sp.p) o.mult *= sp.m; if (sp.k === 'execute') o.mult *= 1 + Math.min(sp.max, Math.floor((1 - t.hp / t.hpMax) / 0.05) * sp.step); const d = hit(u, t, coef, flat, s.el, o); dealt += d; return d; };
-    const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
+    const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e.k === 'lacer' ? { ...e, coef: n.tc, flat: n.tf } : e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
     if (sp.k === 'shieldBurst') {
       let sh = 0; for (let i = u.st.length - 1; i >= 0; i--) if (u.st[i].k === 'shield') { sh += u.st[i].v; u.st.splice(i, 1); } recalc(u);
       o.base = sh * n.coef + n.flat;
@@ -1088,6 +1214,7 @@ export function simulate(P, seed, log) {
     if (u.ch && u.ch.critStack && s.el === u.ch.critStack.el) { const st = has(u, 'critStk'); if (st) { st.n = Math.min(8, st.n + 1); st.exp = u.turnNo + 2; recalc(u); stEv(u, st, true); } else addStatus(u, { k: 'critStk', v: u.ch.critStack.v, n: 1, exp: u.turnNo + 2, buff: true }); }
     // enemy Thunder Judgment reacts to this cast
     for (const f of U) if (f.alive && u.alive && !B.over && f.team !== u.team && f.ch && f.ch.thunder && dUU(f, u) <= 5 && rnd() < f.ch.thunder.p) hit(f, u, f.ch.thunder.coef, f.ch.thunder.flat, 'light', { noProc: 1, noReact: 1 });
+    if (s.burn && u.alive && !B.over) placeBurn(u, s, n, pl);
     petProc(u, targets);
   }
   /** Fantomon support skill that follows the owner's damaging technique */
@@ -1120,6 +1247,157 @@ export function simulate(P, seed, log) {
     p.cds = p.skills.map((k) => (k.s.zi ? 0 : k.init));
     if (ev) ev.push({ e: 'spawn', u: p.id, x: p.x, y: p.y });
   }
+  /* ── summons (FightHitSummon, game data) ── */
+  /** [sideways, forward] from the caster: our team faces +y, the other side faces −y */
+  const sumCell = (o, lat, fwd) => (o.team === 0 ? [o.x + lat, o.y + fwd] : [o.x - lat, o.y - fwd]);
+  function nearFree(x, y, r = 4) { if (free(x, y)) return [x, y]; for (const [dx, dy, d] of DIAMOND) { if (!d) continue; if (d > r) break; if (free(x + dx, y + dy)) return [x + dx, y + dy]; } return null; }
+  function dismiss(p) {
+    if (!p.alive) return;
+    p.alive = false; p.hp = 0; setOcc(p, -1); p.out = true; p.st = []; p.shield = 0;
+    if (ev) ev.push({ e: 'die', u: p.id, fade: 1 });
+  }
+  function spawnSummon(o, p, cell, sm) {
+    p.out = false; p.alive = true; p.hp = p.hpMax; p.x = cell[0]; p.y = cell[1]; occ[p.y * W + p.x] = p.id;
+    p.st = []; p.shield = 0; recalc(p); p.turnNo = 0; p.life = sm.life; p.spawnAt = B.now; p.flip = o.flip;
+    p.cds = p.skills.map((k) => k.init);
+    // SummonImmediateRound: it acts right after the caster's turn, then on its own SPD clock
+    p.next = sm.imm ? B.now + 1e-6 * (1 + p.slot) : B.now + interval(p);
+    if (ev) ev.push({ e: 'spawn', u: p.id, x: p.x, y: p.y, sum: 1, hp: p.hpMax, owner: o.id });
+    if (sm.stealth) addStatus(p, { k: 'stealth', exp: 1e9, buff: true, nd: 1 });
+    if (p.aura) { B.totem = true; for (const a of alliesOf(p)) totemAura(a); }
+  }
+  /** slots for a cast: free ones first; when every set is standing, the oldest set is replaced */
+  function sumSlots(u, i, need) {
+    const slots = U.filter((p) => p.sum && p.owner === u.id && p.sumSk === i);
+    const pick = slots.filter((p) => !p.alive).slice(0, need);
+    const live = slots.filter((p) => p.alive).sort((a, b) => a.spawnAt - b.spawnAt);
+    while (pick.length < need && live.length) { const p = live.shift(); dismiss(p); pick.push(p); }
+    return pick;
+  }
+  function castSummon(u, k, i) {
+    const s = k.s, sm = s.sum, label = (tg) => { if (ev) ev.push({ e: 'cast', u: u.id, n: s.ko || s.en, el: sm.kind === 'trap' ? 'fire' : 'none', tg, ax: u.x, ay: u.y, sh: 'B', sup: 1 }); };
+    if (sm.kind === 'trap') {
+      // Blast Spirit: charges placed in front of the caster (grid items: they do not block a cell)
+      const cells = sm.cells.map(([a, b]) => sumCell(u, a, b)).filter(([x, y]) => x >= 0 && y >= 0 && x < W && y < H);
+      if (!cells.length) return false;
+      B.castId++; u.casts++; label([]);
+      for (const [x, y] of cells) { const t = { id: ++B.trapN, x, y, team: u.team, src: u.id, coef: k.n.coef || 0, flat: k.n.flat || 0, life: sm.life, r: sm.r }; B.traps.push(t); if (ev) ev.push({ e: 'trap', id: t.id, x, y, team: u.team, on: 1 }); }
+      return true;
+    }
+    if (sm.kind === 'clone') {
+      // Decoy Clone: links 1 enemy within range (AI: the bigger body first, then the lower HP); one clone per enemy
+      const foes = aimFoes(u).filter((f) => !f.sum && dUU(u, f) <= sm.r && !U.some((c) => c.clone && c.alive && c.link === f.id));
+      if (!foes.length) return false;
+      const t = foes.sort((a, b) => (b.sz || 1) - (a.sz || 1) || a.hp / a.hpMax - b.hp / b.hpMax)[0];
+      const [p] = sumSlots(u, i, 1); if (!p) return false;
+      const cell = nearFree(...sumCell(u, sm.cells[0][0], sm.cells[0][1])); if (!cell) return false;
+      // the clone takes the linked unit's side and its stats (summon_monster_add_prop 4600 × rank factor + the fixed HP part)
+      const c = sm.cr;
+      sumStats(p, { hp: t.hpMax, atk: t.atk, def: t.def, spd: t.spd }, c, p.rkLv, u.level);
+      for (const f of PCT) p[f] = t[f];
+      for (const f of RAW) p[f] = t[f];
+      p.affEl = { ...(t.affEl || {}) }; p.aegisEl = { ...(t.aegisEl || {}) }; p.rk = t.rk; p.bMas = t.bMas; p.bAff = t.bAff; p.level = t.level; p.er = t.er || null;
+      p.link = t.id; p.linkV = c.link || 1;
+      B.castId++; u.casts++; label([t.id]);
+      spawnSummon(u, p, cell, sm);
+      return true;
+    }
+    const pick = sumSlots(u, i, sm.cells.length);
+    // Frenzy Totem: an empty cell within N grids of the caster where its aura reaches the most allies
+    let cells;
+    if (sm.near) {
+      let best = null; const r = (sm.cr.aura && sm.cr.aura.r) || 4;
+      for (const [dx, dy, d] of DIAMOND) { if (d > sm.near) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!free(x, y)) continue; const n = alliesOf(u).filter((a) => !a.sum && dist(a.x, a.y, x, y) <= r).length; if (!best || n > best.n) best = { n, x, y }; }
+      cells = best ? [[best.x, best.y]] : [];
+    } else cells = sm.cells.map(([a, b]) => sumCell(u, a, b));
+    const placed = [];
+    pick.forEach((p, j) => { const c = cells[j] && nearFree(cells[j][0], cells[j][1]); if (c) { occ[c[1] * W + c[0]] = p.id; placed.push([p, c]); } });
+    for (const [, c] of placed) occ[c[1] * W + c[0]] = -1;
+    if (!placed.length) return false;
+    B.castId++; u.casts++; label([]);
+    for (const [p, c] of placed) spawnSummon(u, p, c, sm);
+    return true;
+  }
+  /** Void Chant: a rune on the caster; an enemy within 5 grids that casts a Technique takes Dark DMG once */
+  function castRune(u, k) {
+    B.castId++; u.casts++;
+    if (ev) ev.push({ e: 'cast', u: u.id, n: k.s.ko || k.s.en, el: 'dark', tg: [u.id], ax: u.x, ay: u.y, sh: 'B', sup: 1 });
+    addStatus(u, { k: 'voidRune', coef: k.n.coef || 0, flat: k.n.flat || 0, exp: u.turnNo + 2, buff: true, uniq: 1, nd: 1 });
+  }
+  function runeReact(u) {
+    if (B.over || !u.alive) return;
+    for (const f of U) {
+      if (!f.alive || f.team === u.team || !u.alive || B.over) continue;
+      const r = has(f, 'voidRune'); if (!r || dUU(f, u) > 5) continue;
+      if (ev) ev.push({ e: 'cast', u: f.id, n: '보이드 커스 · 룬', el: 'dark', tg: [u.id], ax: u.x, ay: u.y, sh: 'S', ar: 0, pet: 1 });
+      hit(f, u, r.coef, r.flat, 'dark', { noProc: 1, noReact: 1 });
+      // "If the target carries Erosion, triggers the Erosion effect once" (Erosion: the dark damage-over-time)
+      if (u.alive) for (const st of u.st.filter((x) => x.k === 'dot' && x.el === 'dark')) if (u.alive) dotTick(u, st);
+    }
+  }
+  /** Frenzy Totem's Inspiration: a random ally within range gets its next turn 20% sooner */
+  function castAdvance(u, k) {
+    const al = alliesOf(u).filter((a) => a !== u && dist(a.x, a.y, u.x, u.y) <= k.s.r); if (!al.length) return false;
+    const t = al[Math.floor(rnd() * al.length)];
+    B.castId++; u.casts++;
+    if (ev) ev.push({ e: 'cast', u: u.id, n: k.s.ko || k.s.en, el: 'none', tg: [t.id], ax: t.x, ay: t.y, sh: 'B', sup: 1 });
+    t.next -= k.n.v * interval(t);
+    return true;
+  }
+  /** Frenzy Totem's Fighting Spirit: other allies (not summons) within its range have +12% ATK */
+  function totemAura(u) {
+    if (u.sum || !u.alive) return;
+    let v = 0;
+    for (const t of U) if (t.alive && t.aura && t.team === u.team && t !== u && dist(t.x, t.y, u.x, u.y) <= t.aura.r) v = Math.max(v, t.aura.atk);
+    const i = u.st.findIndex((x) => x.totem);
+    if (v && i < 0) addStatus(u, { k: 'atkUp', v: u.atk * v, exp: 1e9, buff: true, nd: 1, totem: 1 });
+    else if (!v && i >= 0) { removeStatus(u, i); recalc(u); }
+  }
+  /** Blast Spirit: at the end of its caster's turn it explodes on an enemy within 2 grids (Fire DMG to every enemy in
+   *  range, counted as the caster's Technique); it lasts up to 3 of the caster's turns */
+  function trapsAfter(u) {
+    for (const t of B.traps.slice()) {
+      if (t.src !== u.id) continue;
+      if (!t.burn && u.alive && !B.over) {
+        const near = U.filter((f) => f.alive && f.team !== t.team && dU(f, t.x, t.y) <= t.r);
+        if (near.length) {
+          B.castId++;
+          if (ev) ev.push({ e: 'cast', u: u.id, n: '불꽃요정 폭발', el: 'fire', tg: near.map((f) => f.id), ax: t.x, ay: t.y, sh: 'T', ar: t.r });
+          for (const f of near) if (!B.over) hit(u, f, t.coef, t.flat, 'fire', {});
+          t.life = 0;
+        }
+      }
+      if (--t.life <= 0) { B.traps.splice(B.traps.indexOf(t), 1); if (ev) ev.push({ e: 'trap', id: t.id, on: 0 }); }
+    }
+  }
+  /** Meteoric Flames: each cell of the struck 3×3 has a 60% chance to burn for 3 of the caster's turns (grid status 11542) */
+  function placeBurn(u, s, n, pl) {
+    const cells = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = pl.ax + dx, y = pl.ay + dy; if (x >= 0 && y >= 0 && x < W && y < H && rnd() < s.burn.p) cells.push([x, y]); }
+    for (const [x, y] of cells) {
+      const t = { id: ++B.trapN, burn: 1, x, y, team: u.team, src: u.id, coef: n.tc || 0, flat: n.tf || 0, life: s.burn.t, seen: new Set() };
+      B.traps.push(t); if (ev) ev.push({ e: 'trap', id: t.id, x, y, team: u.team, on: 1, burn: 1 });
+      // an enemy already standing there burns at once (onStart)
+      const o = occ[y * W + x]; if (o >= 0 && U[o].alive && U[o].team !== u.team) burnHit(t, U[o]);
+    }
+  }
+  /** skill 11600 from the burning cell: once per unit and per its own turn */
+  function burnHit(t, f) {
+    const key = f.id * 4096 + f.turnNo; if (t.seen.has(key) || B.over) return; t.seen.add(key);
+    const a = U[t.src]; if (!a) return;
+    if (ev) ev.push({ e: 'cast', u: a.id, n: '작열', el: 'fire', tg: [f.id], ax: t.x, ay: t.y, sh: 'S', ar: 0, pet: 1 });
+    hit(a, f, t.coef, t.flat, 'fire', { noProc: 1, noReact: 1 });
+  }
+  function burnCheck(u) {
+    if (!u.alive) return;
+    for (const t of B.traps) if (t.burn && t.team !== u.team && fpOf(u).some(([dx, dy]) => u.x + dx === t.x && u.y + dy === t.y)) { burnHit(t, u); if (!u.alive || B.over) return; }
+  }
+  /** after any move: Laceration strikes the mover, then a burning cell under it */
+  function moved(u) {
+    const lc = u.alive && u.st.length ? has(u, 'lacer') : null;
+    if (lc && U[lc.src] && !B.over) { if (ev) ev.push({ e: 'cast', u: lc.src, n: '열상', el: 'wind', tg: [u.id], ax: u.x, ay: u.y, sh: 'S', ar: 0, pet: 1 }); hit(U[lc.src], u, lc.coef, lc.flat, 'wind', { noProc: 1, noReact: 1 }); }
+    if (B.traps.length && u.alive && !B.over) burnCheck(u);
+  }
   /** a materialized Fantomon fell or faded: Evanescent Phantom bursts, then Fantasmia starts refilling */
   function petGone(p) {
     if (p.phantom && !B.over) {
@@ -1139,7 +1417,8 @@ export function simulate(P, seed, log) {
     return ok;
   }
   function castSupport0(u, k) {
-    const s = k.s, n = k.n, allies = alliesOf(u);
+    // "Summons cannot receive any stat boosts": buffs skip them (heals and shields still reach them)
+    const s = k.s, n = k.n, allies = s.buff ? alliesOf(u).filter((a) => !a.sum || a === u) : alliesOf(u);
     const within = (r) => allies.filter((a) => dist(a.x, a.y, u.x, u.y) <= r);
     const lowest = (list) => list.reduce((b, a) => (a.hp / a.hpMax < b.hp / b.hpMax ? a : b), list[0]);
     let targets;
@@ -1190,7 +1469,18 @@ export function simulate(P, seed, log) {
     B.castId++;
     for (const f of U) if (f.alive && f.team !== t.team && Math.max(Math.abs(f.x - t.x), Math.abs(f.y - t.y)) <= 1) hit(a, f, s.coef, s.flat, 'fire', {});
   }
-  function tryCast(u, i, pre) {
+  /** is slot i the turn's last cast? — no later ready skill has anyone to act on (the game's rule for the keep-away AI) */
+  function lastCast(u, i) {
+    for (let j = i + 1; j < u.skills.length; j++) {
+      if (u.cds[j] > 0) continue;
+      const s = u.skills[j].s;
+      if (s.kind === 'dmg') { if (foesOf(u).length) return false; }
+      else if (s.kind === 'heal') { if (alliesOf(u).some((a) => a.hp < a.hpMax)) return false; }
+      else if (s.kind !== 'none') return false;
+    }
+    return true;
+  }
+  function tryCast(u, i, pre, keep) {
     const k = u.skills[i], s = k.s;
     if (s.kind === 'kit') {
       const pl = kitPlan(u, s, pre ? 0 : u.pool);
@@ -1198,23 +1488,29 @@ export function simulate(P, seed, log) {
       if (!pre) u.pool -= pl.walk;
       kitCast(u, k, pl);
     } else if (s.kind === 'dmg') {
-      const pl = plan(u, s, pre ? 0 : u.pool, foesOf(u));
+      const pl = plan(u, s, pre ? 0 : u.pool, aimFoes(u), !!keep);
       if (!pl || !pl.targets.length) return 0;
       if (!pre) u.pool -= pl.walk;
       castDamage(u, k, pl, pre);
-    } else {
+    } else if (s.kind === 'rune') castRune(u, k); // Void Chant can be cast while taunted
+    else {
       if (has(u, 'taunt')) return 0;
-      if (!castSupport(u, k)) return 0;
+      if (s.kind === 'summon') { if (!castSummon(u, k, i)) return 0; }
+      else if (s.kind === 'advance') { if (!castAdvance(u, k)) return 0; }
+      else if (!castSupport(u, k)) return 0;
     }
     u.cds[i] = k.cd + 1;
+    runeReact(u);
     return 1;
   }
   function approach(u) {
-    const foes = foesOf(u); if (!foes.length || u.pool <= 0) return;
+    const foes = aimFoes(u); if (!foes.length || u.pool <= 0) return;
+    // a healing summon (Waterling) stays with its side; an attacking one closes in
+    if (u.sum && !u.skills.some((k) => k.s.kind === 'kit')) return;
     // a large unit (raid boss) measures from its body and stops once its targeted skills reach
     const big = u.sz > 1;
     const near = (x, y) => { let m = 1e9; for (const f of foes) { const d = big ? Math.min(...fpOf(u).map(([dx, dy]) => dU(f, x + dx, y + dy))) : dU(f, x, y); if (d < m) m = d; } return m; };
-    const want = Math.max(1, Math.min(...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => (k.s.tg.t === 'S' || (big && k.s.tg.t === 'T') ? k.s.tg.r : 1)), 99));
+    const want = u.sum ? 1 : Math.max(1, Math.min(...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => (k.s.tg.t === 'S' || (big && k.s.tg.t === 'T') ? k.s.tg.r : 1)), 99));
     let best = null, bd = near(u.x, u.y);
     if (bd <= want) return;
     for (const [dx, dy, d] of DIAMOND) { if (d > u.pool) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue; const nd = near(x, y); if (nd < bd && nd >= 1) { bd = nd; best = [x, y]; } }
@@ -1223,6 +1519,7 @@ export function simulate(P, seed, log) {
   function takeTurn(u) {
     u.turnNo++;
     if (ev) ev.push({ e: 'turn', u: u.id, r: B.round });
+    if (B.totem) totemAura(u);
     // start-of-turn effects
     for (const s of u.st.slice()) {
       if (!u.alive || B.over) break;
@@ -1230,6 +1527,7 @@ export function simulate(P, seed, log) {
       else if (s.k === 'hot') heal(u, u, s.v);
     }
     if (u.alive && !B.over && has(u, 'flame')) flameBurst(u);
+    if (u.alive && !B.over && B.traps.length) burnCheck(u);
     u.stone = 0;
     if (u.alive && !B.over && u.ch) {
       if (u.ch.regen) heal(u, u, u.hpMax * u.ch.regen.healPct + u.ch.regen.healFlat);
@@ -1262,11 +1560,12 @@ export function simulate(P, seed, log) {
         if (u.kind === 'mob' && !u.kit) {
           // monsters: one skill a turn, specials first (assumption)
           for (let i = u.skills.length - 1; i >= 0 && !cast && !B.over; i--) if (u.cds[i] <= 0 && !(u.skills[i].s.rage && !u.raged)) { if (tryCast(u, i)) cast = 1; else waiting = 1; } // "Activate [Rage] to enable this skill"
-        } else if (u.kit) {
-          // boss kit: every ready skill in its own order (as the recorded raids show), within its gate / state
+        } else if (u.kit || u.sum) {
+          // boss kit / summoned creature: every ready skill in its own order (as the recorded raids show), within its gate / state
           for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) { const s = u.skills[i].s; if (u.cds[i] > 0 || !kitUsable(u, s)) continue; if (tryCast(u, i)) cast++; else waiting = 1; }
         } else {
-          for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) if (u.cds[i] <= 0) { if (tryCast(u, i)) cast++; else if (u.skills[i].s.kind === 'dmg') waiting = 1; }
+          // the turn's last cast of a ranged keep-distance skill (heroes) plans from the safest cell in reach
+          for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) if (u.cds[i] <= 0) { const keep = u.kind === 'hero' && u.skills[i].s.kd && lastCast(u, i); if (tryCast(u, i, false, keep)) cast++; else if (u.skills[i].s.kind === 'dmg') waiting = 1; }
         }
         if (u.alive && !B.over && (waiting || !cast)) approach(u);
       } else if (ev) ev.push({ e: 'skip', u: u.id });
@@ -1318,6 +1617,11 @@ export function simulate(P, seed, log) {
         if (mp.cloud) u.cloudN = Math.min(mp.cloud[0].n, (u.cloudN || 0) + mp.cloud[0].add);
       }
     }
+    // Blast Spirits act at the end of their caster's turn; a Decoy Clone's life counts its caster's turns
+    if (B.traps.length) trapsAfter(u);
+    for (const c of U) if (c.clone && c.alive && c.owner === u.id && --c.life <= 0) dismiss(c);
+    // a summon's lifespan counts its own turn ends (StatusEndComponent.RemoveApplyEntity)
+    if (u.sum && !u.clone && u.alive && --u.life <= 0) { dismiss(u); return; }
     // end of turn: expire statuses
     if (u.alive) { let ch = 0; for (let i = u.st.length - 1; i >= 0; i--) if (u.turnNo >= u.st[i].exp) { removeStatus(u, i); ch = 1; } if (ch) recalc(u); }
   }
@@ -1408,7 +1712,7 @@ export function monteCarlo(setup, n, seed0 = 12345, onProgress) {
   }
   return { ...agg, meta: metaOf(P) };
 }
-function metaOf(P) { return P.units.map((u) => ({ id: u.id, team: u.team, name: u.name, kind: u.kind, ref: u.ref, nth: u.nth || 0, key: u.key, cls: u.cls, level: u.level, x: u.x, y: u.y, sz: u.sz || 1, hpMax: u.hpMax, big: !!u.big, pet: !!u.pet, out: !!u.out, petId: u.petId, owner: u.owner })); }
+function metaOf(P) { return P.units.map((u) => ({ id: u.id, team: u.team, name: u.name, kind: u.kind, ref: u.ref, nth: u.nth || 0, key: u.key, cls: u.cls, level: u.level, x: u.x, y: u.y, sz: u.sz || 1, hpMax: u.hpMax, big: !!u.big, pet: !!u.pet, out: !!u.out, petId: u.petId, owner: u.owner, sum: !!u.sum, clone: !!u.clone, art: u.art })); }
 /** deployment preview (names, cells, max HP) without running a fight */
 export function roster(setup) { return metaOf(prepare(setup)); }
 /** one logged fight for the replay */

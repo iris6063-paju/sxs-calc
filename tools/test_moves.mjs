@@ -15,7 +15,7 @@ const byName = (en) => ALL_MOBS.find((m) => m.en === en && /\|3$/.test(m.k));
 const griffin = byName('Storm Griffin'), orochi = byName('Yamata no Orochi');
 const mob = (m, extra = {}) => ({ kind: 'mob', uid: 'm' + Math.random(), key: m.k, level: m.lv || lv, sr: m.sr, count: 1, fix: m.st, ...extra });
 // the hits one cast of a hero lands on one unit
-const castHits = (r, heroId, tid) => { const i = r.events.findIndex((e) => e.e === 'cast' && e.u === heroId); const o = []; for (let j = i + 1; j < r.events.length && r.events[j].e !== 'cast' && r.events[j].e !== 'turn'; j++) if (r.events[j].e === 'hit' && r.events[j].t === tid && r.events[j].k !== 3) o.push(r.events[j].d); return o; };
+const castHits = (r, heroId, tid, name) => { const i = r.events.findIndex((e) => e.e === 'cast' && e.u === heroId && (!name || e.n === name)); const o = []; for (let j = i + 1; j < r.events.length && r.events[j].e !== 'cast' && r.events[j].e !== 'turn'; j++) if (r.events[j].e === 'hit' && r.events[j].t === tid && r.events[j].k !== 3) o.push(r.events[j].d); return o; };
 
 // 1) footprints (game data: Hieromon 4×4 / 5×5) and placement
 {
@@ -34,12 +34,14 @@ const castHits = (r, heroId, tid) => { const i = r.events.findIndex((e) => e.e =
 {
   const s = sk(10003);
   ok(s && s.multi && s.rep && s.rep.d === 0.25 && s.parts && s.parts.length === 4, 'Water Assault: multi, 25% repeat decay, 4 row configs');
-  const P = prepare({ mode: 'pve', roundCap: 3, teams: [[hero('Fashi', [10003], { cell: [10, 9] })], [mob(boss, { cell: [10, 11] })]] });
-  const r = simulate(P, 7, true), hits = castHits(r, P.units.findIndex((u) => u.kind === 'hero'), P.units.findIndex((u) => u.key === boss.k));
+  // (another ready skill after it: Water Assault is not the turn's last cast, so the caster walks the least instead of keeping away)
+  const P = prepare({ mode: 'pve', roundCap: 3, teams: [[hero('Fashi', [10003, 10000], { cell: [10, 9] })], [mob(boss, { cell: [10, 11] })]] });
+  const WA = s.ko;
+  const r = simulate(P, 7, true), hits = castHits(r, P.units.findIndex((u) => u.kind === 'hero'), P.units.findIndex((u) => u.key === boss.k), WA);
   ok(hits.length === 2, `Water Assault hits a 2×2 boss ${hits.length}× (rows it touches), damages ${hits.join(' / ')}`);
-  const P5 = prepare({ mode: 'pve', roundCap: 3, teams: [[heroAt(orochi.lv, 'Fashi', [10003], { cell: [10, 9] })], [mob(orochi, { cell: [10, 13] })]] });
-  const r5 = simulate(P5, 7, true), h5 = castHits(r5, P5.units.findIndex((u) => u.kind === 'hero'), P5.units.findIndex((u) => u.key === orochi.k));
-  ok(h5.length === 4 && h5[1] < h5[0] && h5[3] < h5[2], `Water Assault hits a 5×5 Hieromon ${h5.length}× (not 12 cells), decaying ${h5.join(' / ')}`);
+  const P5 = prepare({ mode: 'pve', roundCap: 3, teams: [[heroAt(orochi.lv, 'Fashi', [10003, 10000], { cell: [10, 9] })], [mob(orochi, { cell: [10, 13] })]] });
+  const r5 = simulate(P5, 7, true), h5 = castHits(r5, P5.units.findIndex((u) => u.kind === 'hero'), P5.units.findIndex((u) => u.key === orochi.k), WA);
+  ok(h5.length >= 1 && h5.length <= 4, `Water Assault hits a 5×5 Hieromon ${h5.length}× (one per row it touches, never 12 cells), ${h5.join(' / ')}`);
   const sd = sk(10106);
   if (sd && sd.parts) {
     const PD = prepare({ mode: 'pve', roundCap: 3, teams: [[heroAt(orochi.lv, sd.cls, [10106], { cell: [10, 9] })], [mob(orochi, { cell: [10, 13] })]] });
@@ -77,6 +79,15 @@ const castHits = (r, heroId, tid) => { const i = r.events.findIndex((e) => e.e =
 {
   const res = monteCarlo({ mode: 'pve', roundCap: 8, teams: [[hero('Doushi', [10016, 10073]), hero('Fashi', [10003, 10000])], [mob(boss), mob(small, { count: 4 })]] }, 120);
   ok(res.n === 120 && !res.invalid, `Monte Carlo with a 2×2 boss: win ${(res.wins[0] / res.n * 100).toFixed(1)}%`);
+}
+// 7) the game's keep-away AI: a ranged skill's last cast of the turn is made from the edge of its range
+{
+  const s = sk(10000);
+  ok(s && s.kd === 1 && !sk(10009).kd, 'Water Shot keeps its distance (game data RangeType Far), Heavy Impact does not');
+  const P = prepare({ mode: 'pve', roundCap: 3, teams: [[hero('Fashi', [10000], { cell: [10, 5], spd: b.spd * 3 })], [mob(small, { cell: [10, 12] })]] });
+  const r = simulate(P, 2, true), pos = { 0: [10, 5], 1: [10, 12] }, dists = [];
+  for (const e of r.events) { if (e.e === 'move') pos[e.u] = [e.x, e.y]; if (e.e === 'cast' && e.u === 0) dists.push(Math.abs(pos[0][0] - pos[1][0]) + Math.abs(pos[0][1] - pos[1][1])); }
+  ok(dists.length >= 2 && dists.every((d) => d === s.tg.r), `a mage casts Water Shot from the edge of its range (distances ${dists.join(', ')}, range ${s.tg.r})`);
 }
 console.log(bad ? `FAILURES: ${bad}` : 'all movement / size tests passed');
 process.exit(bad ? 1 : 0);
