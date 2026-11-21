@@ -75,5 +75,20 @@ const label = (runs, name) => runs.reduce((a, { r }) => a + r.events.filter((e) 
   const P = prepare({ mode: 'pve', teams: [[hero()], [foe()]] }); const r = simulate(P, 1, true);
   ok(r.winner >= 0, 'plain fight still runs');
 }
+// unique effects ("해당 효과는 유일합니다"): the same status from two casters stays one; different skills' statuses of one kind stand side by side
+{
+  const H = (uid, name, cls, skills, charms, cell, o = {}) => ({ kind: 'hero', uid, name, cls, level: L, atk: b.atk * 3, def: b.def * 5, hp: b.hp * 50, spd: b.spd * 3, skills: skills.map((id) => ({ id, rank: 6 })), charms: charms.map((id) => ({ id, rank: 6 })), cell, ...o });
+  const foeH = [H('f1', '상대', 'Huwei', [10000], [], [10, 15])];
+  // Iron Fortress on two Paladins: each ally gets one DEF buff at battle start (the second replaces the first)
+  const P1 = prepare({ mode: 'pvp', roundCap: 2, teams: [[H('p1', '성기A', 'Dunjiashi', [10000], [10571], [9, 9]), H('p2', '성기B', 'Dunjiashi', [10000], [10571], [11, 9]), H('t', '대상', 'Huwei', [10000], [], [10, 9])], foeH] });
+  const e1 = simulate(P1, 1, true).events, t1 = e1.findIndex((e) => e.e === 'turn');
+  const fresh = [0, 1, 2].map((id) => e1.slice(0, t1).filter((e) => e.e === 'st' && e.t === id && e.k === 'defUp' && e.on && !e.u).length);
+  ok(fresh.every((n) => n === 1), `Iron Fortress ×2: one DEF buff on each ally (${fresh.join(', ')})`);
+  // Sanctified Soul (unique, allies) after an ally's own Magic Armor: both DMG reductions stay
+  const P2 = prepare({ mode: 'pvp', roundCap: 2, teams: [[H('s', '장막', 'Xianzhe', [10108], [], [9, 9], { spd: b.spd * 2 }), H('m', '갑옷', 'Fashi', [10102], [], [10, 9])], foeH] });
+  const e2 = simulate(P2, 3, true).events, sTurn = e2.findIndex((e) => e.e === 'turn' && e.u === 0), next = e2.findIndex((e, i) => i > sTurn && e.e === 'turn');
+  const onArmor = e2.slice(sTurn, next < 0 ? undefined : next).filter((e) => e.e === 'st' && e.t === 1 && e.k === 'dmgRed' && e.on);
+  ok(onArmor.length > 0 && onArmor.every((e) => !e.u), `Sanctified Soul next to Magic Armor: added beside it, not replacing it (${onArmor.map((e) => (e.u ? 'replaced' : 'added')).join(', ')})`);
+}
 console.log(bad ? `FAILURES: ${bad}` : 'all charm tests passed');
 process.exit(bad ? 1 : 0);

@@ -598,9 +598,12 @@ export function simulate(P, seed, log) {
   const has = (u, k) => { for (const s of u.st) if (s.k === k) return s; return null; };
   /** replay log: status gained/refreshed (d = own turns left, n = stacks, b = buff, u = update of an existing one) */
   const stEv = (t, s, upd) => { if (ev) ev.push({ e: 'st', t: t.id, k: s.k, on: 1, b: s.buff ? 1 : 0, d: s.exp < 1e8 ? s.exp - t.turnNo : 0, n: s.n || 0, u: upd ? 1 : 0 }); };
+  /** a unique status (the game's ActionBehOfSameStatus Immediate: "해당 효과는 유일합니다") replaces the same status on the
+   *  holder whoever cast it; the same status = the same skill (sid) when known, else the same kind. Different skills'
+   *  statuses of one kind (Magic Armor and Sanctified Soul, both DMG reduction) stand side by side. */
   function addStatus(t, s) {
     let rep = false;
-    if (s.uniq) { const i = t.st.findIndex((x) => x.k === s.k && x.uniq); if (i >= 0) { if (s.k === 'hpUp') dropHpUp(t, t.st[i]); t.st.splice(i, 1); rep = true; } }
+    if (s.uniq) { const i = t.st.findIndex((x) => x.k === s.k && x.uniq && x.sid === s.sid); if (i >= 0) { if (s.k === 'hpUp') dropHpUp(t, t.st[i]); t.st.splice(i, 1); rep = true; } }
     t.st.push(s); recalc(t);
     stEv(t, s, rep);
   }
@@ -1715,7 +1718,7 @@ export function simulate(P, seed, log) {
     if (s.kind === 'shield') { for (const t of targets) addShield(u, t, u.def * n.bv + (n.bflat || 0) * CURE_BASE, s.shT || 2, skR(s)); return true; }
     const b = s.buff, T = b.t;
     for (const t of targets) {
-      const base = { exp: t.turnNo + T, buff: true, uniq: 1, src: u.id };
+      const base = { exp: t.turnNo + T, buff: true, uniq: 1, src: u.id, sid: s.id };
       switch (b.st) {
         case 'blockUp': case 'critUp': case 'dmgUp': case 'dmgRed': addStatus(t, { ...base, k: b.st, v: n.bv }); break;
         case 'atkUp': addStatus(t, { ...base, k: 'atkUp', v: u.atk * n.bv + (n.bflat || 0) * STAT_BASE }); if (b.adv && t !== u && rnd() < b.adv) t.next -= 0.2 * interval(t); break;
@@ -1927,7 +1930,8 @@ export function simulate(P, seed, log) {
       if (c.soulfire) { u.hp = Math.max(1, Math.ceil(u.hp * 0.5)); addStatus(u, { ...perm, k: 'dmgRed', v: c.soulfire }); }
       if (c.rapid) for (let i = 0; i < u.cds.length; i++) if (u.cds[i] > 0) u.cds[i]--;
       if (c.elixir) { u.potions = c.elixir.start; B.elixir.push(u); }
-      if (c.ironFort) for (const f of U) if (f.alive && f.team === u.team && f.kind === 'hero' && Math.max(Math.abs(f.x - u.x), Math.abs(f.y - u.y)) <= 3) addStatus(f, { ...perm, k: 'defUp', v: u.def * c.ironFort });
+      // Iron Fortress: "해당 효과는 유일" — a second wearer's buff replaces the first on an ally, it does not add to it
+      if (c.ironFort) for (const f of U) if (f.alive && f.team === u.team && f.kind === 'hero' && Math.max(Math.abs(f.x - u.x), Math.abs(f.y - u.y)) <= 3) addStatus(f, { ...perm, k: 'defUp', v: u.def * c.ironFort, uniq: 1, sid: 'c10571', src: u.id });
     }
     if (u.petI != null) {
       const p = U[u.petI], sp = p.sup, v = sp.v;
