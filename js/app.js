@@ -854,11 +854,12 @@ function unitNames(meta) {
 function buildActs(r) {
   const acts = [], evToAct = new Int32Array(r.events.length + 1).fill(-1), M = r.meta;
   let a = null, started = false;
+  const turnN = new Map();
   const blank = () => ({ casts: [], dmg: 0, taken: 0, heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0, kbs: [], dash: 0, retreat: 0, pulls: 0, mh: 0 });
   r.events.forEach((e, i) => {
     // battle-start casts (before the first turn, highest SPD first): one "전투 전" line per caster
     if (!started && e.e === 'cast' && (!a || a.u !== e.u)) { a = { i, u: e.u, r: 0, pre: 1, ...blank() }; acts.push(a); }
-    if (e.e === 'turn') { started = true; a = { i, u: e.u, r: e.r, casts: [], dmg: 0, taken: 0, heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0, kbs: [], dash: 0, retreat: 0, pulls: 0, mh: 0 }; acts.push(a); }
+    if (e.e === 'turn') { started = true; turnN.set(e.u, (turnN.get(e.u) || 0) + 1); a = { i, u: e.u, r: e.r, tn: turnN.get(e.u), casts: [], dmg: 0, taken: 0, heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0, kbs: [], dash: 0, retreat: 0, pulls: 0, mh: 0 }; acts.push(a); }
     else if (a) {
       switch (e.e) {
         case 'cast': a.casts.push(e); a.mh += e.mh || 0; break;
@@ -894,7 +895,7 @@ function actLine(a, nm, M) {
   for (const g of a.gains) sub.push(`${esc(nm[g.t])}: ${ST_KO[g.k] || g.k}${g.n > 1 ? ' ×' + g.n : ''}`);
   if (a.spawn >= 0) sub.push(`✦ ${esc(nm[a.spawn])} ${M[a.spawn].sum ? '소환' : '실체화'}`);
   for (const f of a.falls) sub.push(`<span class="fl">✝ ${esc(nm[f])} 쓰러짐</span>`);
-  return `<div class="lg t${who.team}" data-a="${a.i}"><span class="lr">${a.pre ? '전투 전' : 'R' + a.r}</span><b>${esc(nm[a.u])}</b> ${what}${tgs.length ? ` → ${esc(nm[tgs[0]])}${tgs.length > 1 ? ` 외 ${tgs.length - 1}` : ''}` : ''}${a.dmg ? ` <span class="dm">−${fmt(a.dmg)}</span>` : ''}${sub.length ? `<div class="sub">${sub.join(' · ')}</div>` : ''}</div>`;
+  return `<div class="lg t${who.team}" data-a="${a.i}"><span class="lr">${a.pre ? '전투 전' : 'R' + a.r}</span><b>${esc(nm[a.u])}</b>${a.tn ? `<span class="tn" title="이 캐릭터의 ${a.tn}번째 턴 (속도가 빠를수록 턴이 자주 옵니다)">${a.tn}턴</span>` : ''} ${what}${tgs.length ? ` → ${esc(nm[tgs[0]])}${tgs.length > 1 ? ` 외 ${tgs.length - 1}` : ''}` : ''}${a.dmg ? ` <span class="dm">−${fmt(a.dmg)}</span>` : ''}${sub.length ? `<div class="sub">${sub.join(' · ')}</div>` : ''}</div>`;
 }
 function fieldChips(setup) {
   const c = [];
@@ -970,7 +971,7 @@ function refreshBattle() {
     const a = A[Math.min(A.length - 1, Math.max(0, k))];
     if (pos.done) { const end = cur.r.events[cur.r.events.length - 1]; $('#tlCap').textContent = `전투 종료 · ${resKo(end.w, end.timeout)} · ${end.r}라운드 · 행동 ${A.length}개`; }
     else if (k < 0 || !a) $('#tlCap').textContent = `전투 시작 전 · 막대를 끌거나 ▶▶로 한 행동씩 보세요 · 행동 ${A.length}개`;
-    else $('#tlCap').textContent = `${a.pre ? '전투 전' : '라운드 ' + a.r} · 행동 ${k + 1}/${A.length} · ${cur.nm[a.u]}: ${a.casts.length ? a.casts.map((c) => c.n).join(' · ') : a.skip ? '행동 불가' : a.move ? '이동' : '스킬 대기'}${a.dmg ? ' · −' + fmt(a.dmg) : ''}`;
+    else $('#tlCap').textContent = `${a.pre ? '전투 전' : '라운드 ' + a.r} · 행동 ${k + 1}/${A.length} · ${cur.nm[a.u]}${a.tn ? ` (${a.tn}번째 턴)` : ''}: ${a.casts.length ? a.casts.map((c) => c.n).join(' · ') : a.skip ? '행동 불가' : a.move ? '이동' : '스킬 대기'}${a.dmg ? ' · −' + fmt(a.dmg) : ''}`;
     if (k !== cur.k) {
       const L = cur.lines, old = cur.k; cur.k = k;
       const lo = Math.max(0, Math.min(old, k) + 1), hi = Math.min(L.length - 1, Math.max(old, k));

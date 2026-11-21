@@ -127,7 +127,8 @@ select.chip { padding: 4px 8px; color: var(--text); }
 .lg.t1 { border-left-color: var(--red); }
 .lg:hover { background: var(--panel2); }
 .lg .lr { font: 700 10.5px var(--mono); color: var(--muted); margin-right: 6px; }
-.lg b { color: #9cc4ff; margin-right: 4px; } .lg.t1 b { color: #ff9c8f; }
+.lg b { color: #9cc4ff; margin-right: 4px; }
+.lg .tn { font: 600 10px var(--mono); color: var(--muted); border: 1px solid #3a372f; border-radius: 6px; padding: 0 4px; margin-right: 5px; } .lg.t1 b { color: #ff9c8f; }
 .lg .dm { font: 800 11.5px var(--mono); color: var(--gold); }
 .lg .sub { color: var(--muted); font-size: 11px; margin-top: 1px; }
 .lg .sub .hl { color: #7dff9a; } .lg .sub .fl { color: #ff9c8f; }
