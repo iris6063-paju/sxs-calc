@@ -71,6 +71,20 @@ const duel = (a, b, o = {}) => ({ mode: 'pvp', roundCap: 3, pvpBalance: false, t
   const lo = firstHit(duel(hero(100, { rank: 'Silver3' }), hero(100, { rank: 'Silver3' }))).d, hi = firstHit(duel(hero(130, { rank: 'Silver3', atk: heroBase(100).atk * 50, def: heroBase(100).def, hp: heroBase(100).hp * 1000 }), hero(100, { rank: 'Silver3' }))).d;
   ok(lo > 0 && near(hi, lo, 0.002), `30 levels above the target: ×${(hi / lo).toFixed(3)} in PvP (no level gap)`);
 }
+// 8. a mirror match is a coin toss: the same 4 characters on both sides (a battle-start taunt between equal-SPD
+// Paladins, summons, area aims) — both sides take every tie the same way in their own frame
+{
+  const L = 87, b = heroBase(L), st = (m, sp) => ({ atk: Math.round(b.atk * m), def: Math.round(b.def * m), hp: Math.round(b.hp * m * 4), spd: Math.round(b.spd * sp) });
+  const team = (tag) => [
+    { kind: 'hero', uid: 'arc' + tag, name: '비술사', cls: 'Mishushi', level: L, ...st(5, 5), skills: [10080, 10060, 10071, 10021].map((id) => ({ id, rank: 3 })), charms: [10514, 10531, 10570, 10550].map((id) => ({ id, rank: 7 })) },
+    { kind: 'hero', uid: 'pal' + tag, name: '성기사', cls: 'Dunjiashi', level: L, ...st(6, 6), skills: [10066, 10024, 10049, 10032].map((id) => ({ id, rank: 10 })), charms: [10507, 10571, 10587, 10541].map((id) => ({ id, rank: 8 })) },
+    { kind: 'hero', uid: 'ber' + tag, name: '광전사', cls: 'Kuangzhanshi', level: L, ...st(5, 5.5), skills: [10074, 10011, 10065, 10053].map((id) => ({ id, rank: 10 })), charms: [10562, 10564, 10574, 10547].map((id) => ({ id, rank: 7 })) },
+    { kind: 'hero', uid: 'mag' + tag, name: '마도사', cls: 'Modaoshi', level: L, ...st(7, 6.3), skills: [10004, 10001, 10072, 10036].map((id) => ({ id, rank: 10 })), charms: [10577, 10554, 10556, 10604].map((id) => ({ id, rank: 8 })) },
+  ];
+  const m = (await import('../js/engine.js')).monteCarlo({ mode: 'pvp', roundCap: 50, pvpBalance: true, serverDays: 150, teams: [team('a'), team('b')] }, 3000, 21);
+  const p = m.wins[0] / (m.wins[0] + m.wins[1]);
+  ok(Math.abs(p - 0.5) < 0.04, `4v4 mirror match: side 0 wins ${(p * 100).toFixed(1)}% (50% ± 4)`);
+}
 // how much lower a Legend-level duel now is than before the fix (Beauty of Balance I only, no divisors, no governor)
 {
   const L = 170, a = hero(L, { rank: 'Legend1' }), b = hero(L, { rank: 'Legend1' });

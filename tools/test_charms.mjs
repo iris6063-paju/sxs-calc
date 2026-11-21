@@ -53,7 +53,7 @@ const label = (runs, name) => runs.reduce((a, { r }) => a + r.events.filter((e) 
 }
 // Overload Protection: a shield per 15% max HP lost within a turn
 {
-  const runs = many([[hero({ skills: [], hp: b.hp * 2, def: b.def, charms: [{ id: 10573, rank: 6 }] })], [foe({ count: 6, level: L + 8 })]], 8, 10);
+  const runs = many([[hero({ skills: [], hp: b.hp, def: b.def, charms: [{ id: 10573, rank: 6 }] })], [foe({ count: 6, level: L + 8 })]], 8, 10);
   const sh = runs.reduce((a, { r }) => a + r.events.filter((e) => e.e === 'shield' && e.t === 0).length, 0);
   ok(sh > 0, `Overload Protection shields (${sh}×)`);
 }

@@ -507,6 +507,13 @@ export function pvpGovernor(units, days) {
 /* ───────── battle ───────── */
 const DIAMOND = (() => { const o = []; for (let dy = -10; dy <= 10; dy++) for (let dx = -10; dx <= 10; dx++) { const d = Math.abs(dx) + Math.abs(dy); if (d <= 10) o.push([dx, dy, d]); } return o.sort((a, b) => a[2] - b[2]); })();
 const DIRS = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+/* Side-relative search orders. The two sides stand on a mirror image of each other (y → 20 − y), so every "first
+   cell / first facing that is as good" tie must be read in the unit's own frame, or one side always takes the
+   forward cell and the other the backward one (a 4v4 mirror match went 66% / 34% before this). */
+const DIAMOND_1 = DIAMOND.map(([dx, dy, d]) => [dx, -dy, d]);
+const diaOf = (u) => (u && u.team === 1 ? DIAMOND_1 : DIAMOND);
+const DIR_ORDER = [[0, 1, 2, 3], [2, 1, 0, 3]]; // facings to try: forward, right, back, left in each side's frame
+const AIM_OFF = [[[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]], [[0, 0], [1, 0], [-1, 0], [0, -1], [0, 1]]];
 const dist = (ax, ay, bx, by) => Math.abs(ax - bx) + Math.abs(ay - by);
 
 export function simulate(P, seed, log) {
@@ -983,7 +990,7 @@ export function simulate(P, seed, log) {
   const cellAim = (tg, ax, ay, x, y) => (tg.t === 'TQ' ? Math.max(Math.abs(x - ax), Math.abs(y - ay)) <= tg.ar : dist(x, y, ax, ay) <= tg.ar);
   function inAim(tg, ax, ay, f) { let n = 0; for (const [dx, dy] of fpOf(f)) if (cellAim(tg, ax, ay, f.x + dx, f.y + dy)) n++; return n; }
   function standCell(u, reach, pred) {
-    for (const [dx, dy, d] of DIAMOND) {
+    for (const [dx, dy, d] of diaOf(u)) {
       if (d > reach) break;
       const x = u.x + dx, y = u.y + dy;
       if (d === 0 ? pred(x, y) : fits(u, x, y) && pred(x, y)) return [x, y, d];
@@ -1007,7 +1014,7 @@ export function simulate(P, seed, log) {
     if (tg.t === 'S' && keep) {
       const min = tg.min || 1;
       let best = null;
-      for (const [dx, dy, d] of DIAMOND) {
+      for (const [dx, dy, d] of diaOf(u)) {
         if (d > reach) break;
         const x = u.x + dx, y = u.y + dy;
         if (d && !fits(u, x, y)) continue;
@@ -1036,7 +1043,7 @@ export function simulate(P, seed, log) {
       const aims = [];
       const seen = new Set();
       for (const f of foes) {
-        const cand = tg.ar > 0 ? [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] : [[0, 0]];
+        const cand = tg.ar > 0 ? AIM_OFF[u.team === 1 ? 1 : 0] : [[0, 0]];
         for (const [fx, fy] of fpOf(f)) for (const [ox, oy] of cand) {
           const ax = f.x + fx + ox, ay = f.y + fy + oy; if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
           const key = ay * W + ax; if (seen.has(key)) continue; seen.add(key);
@@ -1051,7 +1058,7 @@ export function simulate(P, seed, log) {
         let best = null;
         for (let i = 0; i < aims.length && i < 12; i++) {
           const [n, , ax, ay, big] = aims[i]; if (n < aims[0][0] || big < aims[0][4]) break;
-          for (const [dx, dy, d] of DIAMOND) {
+          for (const [dx, dy, d] of diaOf(u)) {
             if (d > reach) break;
             const x = u.x + dx, y = u.y + dy;
             if ((d && !fits(u, x, y)) || dAt(u, x, y, ax, ay) > tg.r) continue;
@@ -1070,13 +1077,13 @@ export function simulate(P, seed, log) {
     }
     // shapes anchored on the caster: A / Q / F
     let best = null, bestN = 0, bestSafe = -99;
-    const dirs = tg.t === 'F' ? 4 : 1;
-    for (const [dx, dy, d] of DIAMOND) {
+    const dirs = tg.t === 'F' ? DIR_ORDER[u.team === 1 ? 1 : 0] : [0];
+    for (const [dx, dy, d] of diaOf(u)) {
       if (d > reach) break;
       const x = u.x + dx, y = u.y + dy;
       if (d && !fits(u, x, y)) continue;
       const sc = keep ? safer(u, x, y) : 0;
-      for (let k = 0; k < dirs; k++) {
+      for (const k of dirs) {
         let n = 0, big = 0;
         for (const f of foes) if (inShape(tg, x, y, k, f, u)) { n += wt(f); if (f.sz > 1) big = 1; }
         const score = n + (bigF && big ? 100 : 0);
@@ -1130,12 +1137,12 @@ export function simulate(P, seed, log) {
     const foes = foesOf(u); if (!foes.length) return;
     const far = (x, y) => Math.min(...foes.map((f) => dU(f, x, y)));
     let best = null, bd = far(u.x, u.y);
-    for (const [dx, dy, d] of DIAMOND) { if (d > n) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue; const v = far(x, y); if (v > bd) { bd = v; best = [x, y]; } }
+    for (const [dx, dy, d] of diaOf(u)) { if (d > n) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue; const v = far(x, y); if (v > bd) { bd = v; best = [x, y]; } }
     if (best) moveTo(u, best[0], best[1], 'retreat');
   }
   function pullTo(t, px, py) {
     if (!t.alive || (t.sz || 1) > 1 || has(t, 'freeze') || has(t, 'immob')) return;
-    for (const [dx, dy, d] of DIAMOND) {
+    for (const [dx, dy, d] of diaOf(t)) {
       if (d > 3) break;
       const x = px + dx, y = py + dy;
       if (dist(x, y, t.x, t.y) >= dist(px, py, t.x, t.y) && d > 0) continue;
@@ -1196,7 +1203,7 @@ export function simulate(P, seed, log) {
     if (!e.dep) u.flip = e.flip;
     const ax = u.x + e.r[0], ay = u.y + e.r[1];
     if (s.leap) { // Phoenix Dive / Starbreak Impact: the caster lands on the aimed cell (or the nearest free one)
-      let c = null; for (const [ddx, ddy] of DIAMOND) { if (fits(u, ax + ddx, ay + ddy)) { c = [ax + ddx, ay + ddy]; break; } }
+      let c = null; for (const [ddx, ddy] of diaOf(u)) { if (fits(u, ax + ddx, ay + ddy)) { c = [ax + ddx, ay + ddy]; break; } }
       if (c) moveTo(u, c[0], c[1], 1);
     }
     const foes0 = foesOf(u);
@@ -1285,7 +1292,7 @@ export function simulate(P, seed, log) {
       // monster random strikes ("Randomly selects 12 grids within 5 grids ... within 1 grid of each, hitting at least 4 times"):
       // picks with replacement from the cells in reach, the first `min` on cells whose strike reaches an enemy
       const cells = [];
-      if (sp.from === 'aim') { for (const [dx, dy, d] of DIAMOND) { if (d > sp.R) break; const x = pl.ax + dx, y = pl.ay + dy; if (x >= 0 && y >= 0 && x < W && y < H) cells.push([x, y]); } }
+      if (sp.from === 'aim') { for (const [dx, dy, d] of diaOf(u)) { if (d > sp.R) break; const x = pl.ax + dx, y = pl.ay + dy; if (x >= 0 && y >= 0 && x < W && y < H) cells.push([x, y]); } }
       else if (sp.fw) { const dir = pl.dir != null ? pl.dir : aimDir(u, targets[0]), tf = { t: 'F', w: sp.fw, h: sp.fh }; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (cellIn(tf, u.x, u.y, dir, x, y)) cells.push([x, y]); }
       else for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const d = dAt(u, u.x, u.y, x, y); if (d >= 1 && d <= sp.R) cells.push([x, y]); }
       const struck = new Set();
@@ -1382,7 +1389,7 @@ export function simulate(P, seed, log) {
   function spawnPet(o, p) {
     const dy = (o.team === 0 ? 1 : -1) * (p.mat.front ? 1 : -1);
     let cell = free(o.x, o.y + dy) ? [o.x, o.y + dy] : null;
-    if (!cell) for (const [dx, dyy, d] of DIAMOND) { if (!d) continue; if (d > 4) break; if (free(o.x + dx, o.y + dyy)) { cell = [o.x + dx, o.y + dyy]; break; } }
+    if (!cell) for (const [dx, dyy, d] of diaOf(o)) { if (!d) continue; if (d > 4) break; if (free(o.x + dx, o.y + dyy)) { cell = [o.x + dx, o.y + dyy]; break; } }
     if (!cell) return;
     p.out = false; p.alive = true; p.hp = p.hpMax; p.x = cell[0]; p.y = cell[1]; occ[p.y * W + p.x] = p.id; p.next = B.now + interval(p) * 0.5;
     o.energy = 0; p.spawnT = p.turnNo; p.st = []; recalc(p);
@@ -1393,7 +1400,7 @@ export function simulate(P, seed, log) {
   /* ── summons (FightHitSummon, game data) ── */
   /** [sideways, forward] from the caster: our team faces +y, the other side faces −y */
   const sumCell = (o, lat, fwd) => (o.team === 0 ? [o.x + lat, o.y + fwd] : [o.x - lat, o.y - fwd]);
-  function nearFree(x, y, r = 4) { if (free(x, y)) return [x, y]; for (const [dx, dy, d] of DIAMOND) { if (!d) continue; if (d > r) break; if (free(x + dx, y + dy)) return [x + dx, y + dy]; } return null; }
+  function nearFree(x, y, r = 4, o = null) { if (free(x, y)) return [x, y]; for (const [dx, dy, d] of diaOf(o)) { if (!d) continue; if (d > r) break; if (free(x + dx, y + dy)) return [x + dx, y + dy]; } return null; }
   function dismiss(p) {
     if (!p.alive) return;
     if (!p.clone) sumGone(p);
@@ -1439,7 +1446,7 @@ export function simulate(P, seed, log) {
       if (!foes.length) return false;
       const t = foes.sort((a, b) => (b.sz || 1) - (a.sz || 1) || a.hp / a.hpMax - b.hp / b.hpMax)[0];
       const [p] = sumSlots(u, i, 1); if (!p) return false;
-      const cell = nearFree(...sumCell(u, sm.cells[0][0], sm.cells[0][1])); if (!cell) return false;
+      const cell = nearFree(...sumCell(u, sm.cells[0][0], sm.cells[0][1]), 4, u); if (!cell) return false;
       // the clone takes the linked unit's side and its stats (summon_monster_add_prop 4600 × rank factor + the fixed HP part)
       const c = sm.cr;
       sumStats(p, { hp: t.hpMax, atk: t.atk, def: t.def, spd: t.spd }, c, p.rkLv, u.level);
@@ -1456,11 +1463,11 @@ export function simulate(P, seed, log) {
     let cells;
     if (sm.near) {
       let best = null; const r = (sm.cr.aura && sm.cr.aura.r) || 4;
-      for (const [dx, dy, d] of DIAMOND) { if (d > sm.near) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!free(x, y)) continue; const n = alliesOf(u).filter((a) => !a.sum && dist(a.x, a.y, x, y) <= r).length; if (!best || n > best.n) best = { n, x, y }; }
+      for (const [dx, dy, d] of diaOf(u)) { if (d > sm.near) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!free(x, y)) continue; const n = alliesOf(u).filter((a) => !a.sum && dist(a.x, a.y, x, y) <= r).length; if (!best || n > best.n) best = { n, x, y }; }
       cells = best ? [[best.x, best.y]] : [];
     } else cells = sm.cells.map(([a, b]) => sumCell(u, a, b));
     const placed = [];
-    pick.forEach((p, j) => { const c = cells[j] && nearFree(cells[j][0], cells[j][1]); if (c) { occ[c[1] * W + c[0]] = p.id; placed.push([p, c]); } });
+    pick.forEach((p, j) => { const c = cells[j] && nearFree(cells[j][0], cells[j][1], 4, u); if (c) { occ[c[1] * W + c[0]] = p.id; placed.push([p, c]); } });
     for (const [, c] of placed) occ[c[1] * W + c[0]] = -1;
     if (!placed.length) return false;
     B.castId++; u.casts++; label([]);
@@ -1775,7 +1782,7 @@ export function simulate(P, seed, log) {
     const want = u.sum ? 1 : Math.max(1, Math.min(...u.skills.filter((k) => k.s.kind === 'dmg').map((k) => (k.s.tg.t === 'S' || (big && k.s.tg.t === 'T') ? k.s.tg.r : 1)), 99));
     let best = null, bd = near(u.x, u.y);
     if (bd <= want) return;
-    for (const [dx, dy, d] of DIAMOND) { if (d > u.pool) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue; const nd = near(x, y); if (nd < bd && nd >= 1) { bd = nd; best = [x, y]; } }
+    for (const [dx, dy, d] of diaOf(u)) { if (d > u.pool) break; if (!d) continue; const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue; const nd = near(x, y); if (nd < bd && nd >= 1) { bd = nd; best = [x, y]; } }
     if (best) moveTo(u, best[0], best[1]);
   }
   function takeTurn(u) {
@@ -1933,7 +1940,10 @@ export function simulate(P, seed, log) {
     }
     u.above50 = u.hp / u.hpMax >= 0.5;
   }
-  for (const u of U.slice().sort((a, b) => b.spd - a.spd)) {
+  // battle-start casts: highest initial SPD first (the game's note); equal SPD in a random order each fight, so a
+  // mirrored team does not always open on the same side (a battle-start taunt decides who opens under Taunt)
+  const preKey = new Map(U.map((u) => [u, rnd()]));
+  for (const u of U.slice().sort((a, b) => b.spd - a.spd || preKey.get(a) - preKey.get(b))) {
     if (B.over) break;
     for (let i = 0; i < u.skills.length; i++) if (u.skills[i].s.pre && u.alive) tryCast(u, i, true);
   }

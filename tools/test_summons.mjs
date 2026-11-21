@@ -57,9 +57,15 @@ const casts = (r, P, name) => r.events.filter((e) => e.e === 'cast' && (!name ||
   const { P, r } = run([[hero([10097]), ally], [foe({ count: 1, cell: [10, 12] })]], 9);
   const c = P.units.find((u) => u.clone), mob = P.units.find((u) => u.kind === 'mob');
   ok(c && c.team === mob.team, 'the clone stands on the side of the enemy it links to');
-  const onClone = r.events.findIndex((e) => e.e === 'hit' && e.t === c.id && e.d > 0);
-  const linked = onClone >= 0 && r.events.slice(onClone + 1, onClone + 3).some((e) => e.e === 'hit' && e.t === mob.id && e.k === 4);
-  ok(linked, 'a hit on the clone is passed to the linked monster (True DMG)');
+  // over several fights: every hit on the clone is followed by the linked monster's True DMG
+  let hitN = 0, linkN = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const { P: P2, r: r2 } = run([[hero([10097]), ally], [foe({ count: 1, cell: [10, 12] })]], seed);
+    const c2 = P2.units.find((u) => u.clone), m2 = P2.units.find((u) => u.kind === 'mob');
+    const onClone = r2.events.findIndex((e) => e.e === 'hit' && e.t === c2.id && e.d > 0); if (onClone < 0) continue;
+    hitN++; if (r2.events.slice(onClone + 1, onClone + 3).some((e) => e.e === 'hit' && e.t === m2.id && e.k === 4)) linkN++;
+  }
+  ok(hitN > 0 && linkN === hitN, `a hit on the clone is passed to the linked monster (True DMG): ${linkN} of ${hitN} fights`);
 }
 // Blast Spirit: explodes at the end of the caster's turn on an enemy within 2 grids
 {
