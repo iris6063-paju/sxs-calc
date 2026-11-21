@@ -380,7 +380,7 @@ const MAPS = [];
 const mobIndex = new Map();
 // monster elemental stats (affinity / aegis per element, mastery / resistance) for the PvE damage formula
 const KEEP = ['MaxHp', 'Attack', 'Defence', 'Speed', 'CritRatePercent', 'CritPowerPercent', 'CritAvoidPercent', 'BlockPercent', 'BlockValuePercent', 'BlockAvoidPercent', 'DmgAddPercent', 'DmgReducePercent', 'EffectRate', 'EffectDodge',
-  'ElementMaster', 'KongFuMaster', 'ElementResistance', 'KongFuResistance', 'WindDamageAdd', 'WaterDamageAdd', 'FireDamageAdd', 'LightDamageAdd', 'DarkDamageAdd', 'WindDamageReduce', 'WaterDamageReduce', 'FireDamageReduce', 'LightDamageReduce', 'DarkDamageReduce'];
+  'ElementMaster', 'KongFuMaster', 'ElementResistance', 'KongFuResistance', 'WindDamageAdd', 'WaterDamageAdd', 'FireDamageAdd', 'LightDamageAdd', 'DarkDamageAdd', 'WindDamageReduce', 'WaterDamageReduce', 'FireDamageReduce', 'LightDamageReduce', 'DarkDamageReduce', 'PlayerSkillDmgReduceScale', 'ProSkillDmgReduceScale'];
 let droppedSkills = 0, keptSkills = 0;
 // the five per-element columns are usually identical: keep one (EleAdd / EleRed) when they are
 function foldEle(out) {

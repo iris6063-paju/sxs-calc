@@ -37,12 +37,12 @@ const label = (runs, name) => runs.reduce((a, { r }) => a + r.events.filter((e) 
 }
 // Shadow Vengeance: the first lethal hit leaves 1 HP and Shadow Form
 {
-  const runs = many([[hero({ skills: [], hp: b.hp * 3, def: b.def, charms: [{ id: 10586, rank: 6 }] })], [foe({ count: 5, level: L + 10 })]], 10, 12);
+  const runs = many([[hero({ skills: [], hp: b.hp * 1.5, def: b.def, charms: [{ id: 10586, rank: 6 }] })], [foe({ count: 5, level: L + 10 })]], 10, 12);
   ok(label(runs, '섀도우 형태') > 0, `Shadow Vengeance saves once (${label(runs, '섀도우 형태')}×)`);
 }
 // Rejuvenating Elixir: an ally dropping under 50% drinks a potion
 {
-  const weak = hero({ uid: 'w', name: '약함', hp: b.hp * 6, def: b.def, skills: [], cell: [10, 9] });
+  const weak = hero({ uid: 'w', name: '약함', hp: b.hp * 3, def: b.def, skills: [], cell: [10, 9] });
   const runs = many([[weak, hero({ uid: 'e', name: '약사', skills: [], hp: b.hp * 400, charms: [{ id: 10632, rank: 6 }], cell: [12, 8] })], [foe({ count: 5, level: L + 8 })]], 10, 12);
   ok(label(runs, '재생의 영약') > 0, `Rejuvenating Elixir heals (${label(runs, '재생의 영약')}×)`);
 }

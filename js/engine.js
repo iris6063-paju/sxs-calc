@@ -2,7 +2,7 @@
 // Pure module: runs in the page, in a Web Worker and in Node.
 import { LV, FLAT, RANK_Q, RANK_R, SKILLS, MOBS, CURVES, MAPS, MAXLV, CLASSES } from './gamedata.js';
 
-import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV, RANK_BASE, SUMMONS, SUMCURVE, TRIG } from './gamedata2.js';
+import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV, RANK_BASE, SUMMONS, SUMCURVE, TRIG, PVPR, PVP_GOV } from './gamedata2.js';
 export { MOB_PV };
 
 // official Korean client names / descriptions + extra tables
@@ -47,6 +47,8 @@ export function stFrom(a, level) {
   // (older 14-number blocks, e.g. saved setups, leave them at 0)
   if (a.length >= 28) st.ele = eleOf(a[14], a[15], a[16], a[17], a.slice(18, 23), a.slice(23, 28));
   else if (a.length >= 20) st.ele = eleOf(a[14], a[15], a[16], a[17], Array(5).fill(a[18]), Array(5).fill(a[19]));
+  // 22 / 30 numbers: then the monster's PlayerSkill / ProSkillDmgReduceScale
+  if (a.length === 22 || a.length === 30) st.sd = [a[a.length - 2], a[a.length - 1]];
   return st;
 }
 export function mobStats(key, level, sr) {
@@ -66,6 +68,8 @@ export function mobStats(key, level, sr) {
     dmgBoost: get('DmgAddPercent') / 100, dmgRes: get('DmgReducePercent') / 100, effHit: (get('EffectRate') / (LV.eres[lvi(level)] || 1)) * 100, effRes: (get('EffectDodge') / (LV.eres[lvi(level)] || 1)) * 100,
     ele: eleOf(get('ElementMaster'), get('KongFuMaster'), get('ElementResistance'), get('KongFuResistance'),
       ELS.map((e) => get(e[0].toUpperCase() + e.slice(1) + 'DamageAdd') || get('EleAdd')), ELS.map((e) => get(e[0].toUpperCase() + e.slice(1) + 'DamageReduce') || get('EleRed'))),
+    // the curve's own skill-DMG reduction pair (rank-like, not scaled by the monster's factors); none → the sub-rank's
+    sd: ['PlayerSkillDmgReduceScale', 'ProSkillDmgReduceScale'].some((k) => k in cv.v || k in cv.c) ? [get('PlayerSkillDmgReduceScale'), get('ProSkillDmgReduceScale')] : null,
   };
 }
 /* PvE rank gap (BattleFormulaHandler.DamageRankOffsetDamage): 1 + |a − b| from this table, the higher rank deals ×,
@@ -85,6 +89,12 @@ export function rankGap(ra, rb, demon) {
 /** the bases a character's stats-screen numbers are read against: its sub-rank's, or the level's when no rank is set */
 export const statBases = (level, rank) => { const r = rank && RANK_BASE && RANK_BASE[rank]; return { val: r ? r[2] : LV.crit[lvi(level)] || 1, eff: r ? r[3] : LV.eres[lvi(level)] || 1 }; };
 export const SUBRANKS = RANK_BASE ? Object.keys(RANK_BASE) : [];
+/** the lowest sub-rank a character of this level can hold (the first whose level cap reaches it) */
+export const subOfLevel = (level) => SUBRANKS.find((k) => RANK_BASE[k][4] >= Math.floor(level)) || SUBRANKS[SUBRANKS.length - 1];
+/** a sub-rank's PlayerSkill / ProSkillDmgReduceScale (the defender's divisors in Damage()) */
+const sdrOf = (sub) => { const r = sub && RANK_BASE && RANK_BASE[sub]; return r && r.length > 6 ? [r[5], r[6]] : [0, 0]; };
+const setSdr = (u, sd) => { u.psdr = 1 + (sd[0] || 0) / 10000; u.prosdr = 1 + (sd[1] || 0) / 10000; };
+const copySdr = (u, h) => { u.psdr = h.psdr || 1; u.prosdr = h.prosdr || 1; };
 export function heroBase(level) {
   const l = lvi(level);
   return { atk: LV.atk[l], def: LV.def[l], hp: LV.hp[l], spd: LV.spd[l] };
@@ -120,6 +130,10 @@ function buildHero(d, opts) {
   // affinity and aegis per element (physical hits use their mean)
   const l0 = lvi(u.level), sr = d.rank && RANK_BASE && RANK_BASE[d.rank] ? d.rank : null;
   if (sr) { u.sr = sr; u.rk = rankGroup(sr); u.bMas = RANK_BASE[sr][0]; u.bAff = RANK_BASE[sr][1]; }
+  // Damage(): the defender's rank divides the skill DMG it takes (no rank set: the lowest sub-rank of the level)
+  u.sub = sr || subOfLevel(u.level); setSdr(u, sdrOf(u.sub));
+  // the ranks of the equipped Techniques and Charms (Beauty of Balance II compares their average with the server's)
+  u.skRanks = [...(d.skills || []), ...(d.charms || [])].filter((x) => x && !x.custom && x.id).map((x) => clamp(x.rank || 1, 1, 34));
   const vb = sr ? RANK_BASE[sr][2] : LV.crit[l0] || 1, eb = sr ? RANK_BASE[sr][3] : LV.eres[l0] || 1, num = (v) => (v != null && v !== '' ? +v || 0 : null);
   u.critRate += (num(d.critRateV) || 0) / vb; u.critRes += (num(d.critResV) || 0) / vb; u.blockRate += (num(d.blockRateV) || 0) / vb; u.acc += (num(d.accV) || 0) / vb;
   u.critPowV = num(d.critDmgV) || 0; u.blockValV = num(d.blockEffV) || 0;
@@ -159,6 +173,7 @@ function compileCharms(list, u) {
     const r = clamp(sl.rank || 1, 1, 34), q = RANK_Q[r - 1], R = RANK_R[r - 1], A = flatBase(c.g, u.level);
     const coef = c.c ? c.c[q] / 100 : 0, flat = (c.fm || 0) * R * A, healPct = c.hv ? c.hv[q] / 100 : 0, healFlat = (c.hfm || 0) * R * A * CURE_BASE;
     const pct = (a) => (Array.isArray(a) ? a[q] / 100 : 0);
+    const k0 = new Set(Object.keys(ch)), sh0 = ch.shields.length, ls0 = u.lsAll;
     for (const f of c.fx) {
       switch (f[0]) {
         case 'stat': if (f[1] === 'healUp') u.healUp += pct(f[2]); else u[f[1]] += pct(f[2]); break;
@@ -224,6 +239,13 @@ function compileCharms(list, u) {
         case 'elixir': ch.elixir = { start: f[1], max: f[2], every: f[3], healPct, healFlat }; break;
       }
     }
+    // PvP rate of the heals / shields / lifesteal this Charm makes ([rate, governed], duel.json pvp): on the hooks it added
+    const pr = PVPR && PVPR[c.id];
+    if (pr) {
+      for (const k of Object.keys(ch)) if (!k0.has(k)) (ch.pvk = ch.pvk || {})[k] = pr;
+      for (let i = sh0; i < ch.shields.length; i++) ch.shields[i].pv = pr;
+      if (u.lsAll !== ls0) u.lsPv = Math.min(u.lsPv || 1, pr[0]);
+    }
   }
   return any ? ch : null;
 }
@@ -245,7 +267,7 @@ function buildSummon(h, k) {
   for (const f of PCT) u[f] = h[f];
   for (const f of RAW) u[f] = h[f];
   for (const f of ['critPowV', 'blockValV', 'healBoost', 'pvpAdd', 'pvpRes']) u[f] = h[f] || 0;
-  sumStats(u, { hp: h.hpMax, atk: h.atk, def: h.def, spd: h.spd }, c, k.rank - 1, h.level);
+  sumStats(u, { hp: h.hpMax, atk: h.atk, def: h.def, spd: h.spd }, c, k.rank - 1, h.level); copySdr(u, h);
   u.skills = (c.sk || []).map((x) => {
     if (x.kind === 'heal') return { s: { id: x.id, en: x.en, ko: x.ko, kind: 'heal', el: 'none', tg: x.tg }, n: { healPct: x.hv, healFlat: 0 }, cd: x.cd || 0, init: 0 };
     if (x.kind === 'advance') return { s: { id: x.id, en: x.en, ko: x.ko, kind: 'advance', el: 'none', r: x.r }, n: { v: x.v }, cd: x.cd || 0, init: 0 };
@@ -260,6 +282,7 @@ function buildClone(h, k) {
   const u = { kind: 'summon', sum: true, clone: true, pet: true, name: c.ko, art: 'doll', cr: c.id, level: h.level, move: 0, sz: 1, ch: null, healUp: 0, lsAll: 0, affEl: {}, aegisEl: {}, skills: [], hpMax: 1, atk: 1, def: 0, spd: 1, rkLv: k.rank - 1 };
   for (const f of PCT) u[f] = 0;
   for (const f of RAW) u[f] = 0;
+  copySdr(u, h);
   return u;
 }
 /** Fantomon: a dormant companion unit (support skill, and materialization for adults) */
@@ -267,7 +290,7 @@ function buildPet(d, owner) {
   const p = PET.get(d.id); if (!p) return null;
   const r = clamp(d.rank || 1, 1, 34), q = RANK_Q[r - 1], R = RANK_R[r - 1];
   const u = { kind: 'pet', name: p.ko, petId: p.id, level: owner.level, move: 4, pet: true, affEl: {}, healUp: 0, lsAll: 0, ch: null, rk: owner.rk, sr: owner.sr, bMas: owner.bMas, bAff: owner.bAff };
-  u.atk = Math.max(1, +d.atk || 1); u.def = Math.max(0, +d.def || 0); u.hpMax = Math.max(1, +d.hp || 1); u.spd = Math.max(1, +d.spd || 1);
+  u.atk = Math.max(1, +d.atk || 1); u.def = Math.max(0, +d.def || 0); u.hpMax = Math.max(1, +d.hp || 1); u.spd = Math.max(1, +d.spd || 1); copySdr(u, owner);
   for (const k of PCT) u[k] = HERO_DEFAULTS[k] / 100;
   for (const k of RAW) u[k] = 0;
   const adult = !!(d.adult && p.mat);
@@ -311,6 +334,7 @@ function buildMob(key, level, opts, sr, fix, uws) {
   const sub = mob.map ? MAP.get(mob.map).sr : sr || mob.sr;
   if (sub && RANK_BASE && RANK_BASE[sub]) { u.bMas = RANK_BASE[sub][0]; u.bAff = RANK_BASE[sub][1]; }
   u.rk = rankGroup(sub); u.demon = !!mob.map; // Fantasia Ascent: the second rank table
+  setSdr(u, st.sd || sdrOf(sub)); // its curve's skill-DMG reduction pair, or its sub-rank's
   const mc = opts.mobCoef != null ? opts.mobCoef : 1;
   // boss kit (Hieromon, raid boss): the game's own hit configs, coefficients (per hit) and cooldowns; the opening
   // cooldown is CD + 1. Summons are not simulated.
@@ -436,7 +460,48 @@ export function prepare(setup) {
   for (const u of units) { if (u.ownerRef) { u.owner = u.ownerRef.id; delete u.ownerRef; } if (u.petRef) { u.petI = u.petRef.id; delete u.petRef; } }
   const pvp = setup.mode === 'pvp';
   // prank: the party's rank group for the PvE rank gap (null = same rank as each monster, no gap)
-  return { units, pvp, balance: pvp && setup.pvpBalance !== false, roundCap: Math.max(1, +setup.roundCap || (pvp ? 100 : 15)), prank: !pvp && RANK_ORDER.includes(setup.rank) ? setup.rank : null };
+  // days: server age, for Beauty of Balance II's expected skill rank (purrwikimania.com's default 150)
+  const days = setup.serverDays != null && setup.serverDays !== '' && isFinite(+setup.serverDays) ? Math.max(0, Math.round(+setup.serverDays)) : 150;
+  return { units, pvp, balance: pvp && setup.pvpBalance !== false, days, roundCap: Math.max(1, +setup.roundCap || (pvp ? 100 : 15)), prank: !pvp && RANK_ORDER.includes(setup.rank) ? setup.rank : null };
+}
+
+/** Beauty of Balance II (PVPSkillPropsScaleOnBattleProcessor, as purrwikimania.com's team simulator reads it): one factor
+ *  per match on skill DMG, healing and shields = survival × rankScale × balance, from the characters on the field.
+ *  survival: the lowest output-to-survivability ratio (ATK²/(ATK+DEF)/HP × crit × block × elements × DMG bonus) above
+ *  0.1 → 0.1 ÷ ratio; rankScale: decay[server's average skill rank] ÷ decay[fight's skill rank], at most 1 (the fight's:
+ *  per side the highest of its characters' average Technique + Charm rank, then the mean of the two sides);
+ *  balance: the mean of the characters' balance[rank][level] (Legend 46.6–99.5%, Angel 83–99%, else 100%). */
+export function pvpGovernor(units, days) {
+  const G = PVP_GOV, hs = units.filter((u) => u.kind === 'hero');
+  if (!G || !hs.length) return { scale: 1, survival: 1, ratio: 0, rankScale: 1, fightRank: 0, serverRank: 0, balance: 1 };
+  const minBA = Math.min(...hs.map((s) => s.acc)), minCA = Math.min(...hs.map((s) => s.critRes));
+  const ratio = Math.min(...hs.map((s) => {
+    const l = lvi(s.level), bAff = s.bAff || LV.aff[l] || 1, bMas = s.bMas || LV.mas[l] || 1;
+    const p = clamp(0.05 + s.critRate - minCA, 0, 1), m = Math.max(s.critDmg - minCA, 1.3);
+    const b = clamp(s.blockRate - minBA, 0, 1), bv = Math.max(s.blockEff - minBA, 1.5);
+    let r = (s.atk * s.atk) / (s.atk + s.def) / s.hpMax;
+    r *= 1 - p + p * m; r /= 1 - b + b * bv;
+    const affAvg = ELS.reduce((a, e) => a + (s.aff || 0) + ((s.affEl && s.affEl[e]) || 0), 0) / 5;
+    const aegAvg = ELS.reduce((a, e) => a + (s.aegis || 0) + ((s.aegisEl && s.aegisEl[e]) || 0), 0) / 5;
+    r *= (1 + affAvg / bAff + (s.phyMastery / bMas + s.mastery / bMas) / 2) / (1 + aegAvg / bAff + (s.phyRes / bMas + s.res / bMas) / 2);
+    r *= (1 + s.dmgBoost + (s.pvpAdd || 0)) / (1 + s.dmgRes + (s.pvpRes || 0));
+    return r;
+  }));
+  const survival = ratio > G.minSurvival ? G.minSurvival / ratio : 1;
+  const facMax = [0, 0];
+  for (const s of hs) { const rs = s.skRanks || []; const avg = rs.length ? Math.floor(rs.reduce((a, b) => a + b, 0) / rs.length) : 0; facMax[s.team] = Math.max(facMax[s.team], avg); }
+  const fightRank = Math.floor((facMax[0] + facMax[1]) / 2);
+  const serverRank = G.avgSkillRank[Math.min(Math.max(0, days | 0), G.avgSkillRank.length - 1)];
+  const dF = G.decay[fightRank] || 0, dS = G.decay[serverRank] || 0;
+  const rankScale = dF > 0 ? Math.min(1, dS / dF) : 1;
+  const bal = hs.map((s) => {
+    const row = G.balance[RANK_ORDER.indexOf(rankGroup(s.sub)) + 1], lv = Math.floor(s.level);
+    if (!row || lv < row.lo) return 1;
+    if (lv <= row.flatTo) return row.v0 / 10000;
+    const v = row.v[lv - row.flatTo - 1]; return v ? v / 10000 : 1;
+  });
+  const balance = bal.reduce((a, b) => a + b, 0) / bal.length;
+  return { scale: survival * rankScale * balance, survival, ratio, rankScale, fightRank, serverRank, balance };
 }
 
 /* ───────── battle ───────── */
@@ -456,7 +521,14 @@ export function simulate(P, seed, log) {
     dmg: 0, taken: 0, healed: 0, kills: 0, lastAil: -9, ailStreak: 0,
     casts: 0, eye: 0, stone: 0, marks: 0, lossAcc: 0, supTurn: -1, supN: 0, petStk: 0, undyingUsed: false, above50: true, voidUsed: false, energy: 0, reactCast: -1,
   }));
-  const B = { U, pvp: P.pvp, round: 1, pvpScale: 1, healScale: 1, castId: 0, over: false, winner: -1, now: 0, traps: [], trapN: 0, totem: false, cur: null, turnSeq: 0, elixir: [] };
+  const B = { U, pvp: P.pvp, round: 1, pvpScale: 1, sumScale: 1, healScale: 1, gov: 1, castId: 0, over: false, winner: -1, now: 0, traps: [], trapN: 0, totem: false, cur: null, turnSeq: 0, elixir: [] };
+  // Beauty of Balance II: the match's PvP governor on skill DMG / healing / shields (with the PvP stage effects)
+  if (P.balance) B.gov = pvpGovernor(P.units, P.days != null ? P.days : 150).scale;
+  /** a skill's PvP rate on its heals / shields, times the governor (Techniques are governed) */
+  const skR = (s) => (P.pvp ? ((s && PVPR[s.id] && PVPR[s.id][0]) || 1) * B.gov : 1);
+  /** a Charm hook's PvP rate ([rate, governed] from compileCharms) */
+  const pvOf = (x) => (P.pvp && x ? x[0] * (x[1] ? B.gov : 1) : 1);
+  const chR = (u, key) => pvOf(u.ch && u.ch.pvk && u.ch.pvk[key]);
   for (const u of U) if (!u.out) setOcc(u, u.id);
   const aliveCount = [0, 0];
   const proxU = U.filter((u) => u.mp && u.mp.prox); // units with an on-enter proximity passive
@@ -475,7 +547,10 @@ export function simulate(P, seed, log) {
   const dUU = (a, b) => { if (!(a.sz > 1)) return dU(b, a.x, a.y); if (!(b.sz > 1)) return dU(a, b.x, b.y); let m = 99; for (const [dx, dy] of fpOf(a)) m = Math.min(m, dU(b, a.x + dx, a.y + dy)); return m; };
   const setBalance = () => {
     if (!P.balance) return;
+    // Beauty of Balance I: FinalCharacterDamageScale −80%, FinalSummonDamageScale −40%; Swift Resolution I: +10% each
+    // from round 12 (both); Swift Resolution II: healing and shields −20% each from round 12 (4 stacks)
     B.pvpScale = B.round < 12 ? 0.2 : 0.2 + 0.1 * Math.min(99, B.round - 11);
+    B.sumScale = B.round < 12 ? 0.6 : 0.6 + 0.1 * Math.min(99, B.round - 11);
     B.healScale = B.round < 12 ? 1 : Math.max(0.2, 1 - 0.2 * (B.round - 11));
   };
   setBalance();
@@ -531,7 +606,7 @@ export function simulate(P, seed, log) {
   function kill(t, by) {
     // Resurrection (an allied adventurer's charm, once per battle): the fallen character is revived and healed
     if (t.kind === 'hero' && !B.over) for (const r of U) if (r !== t && r.alive && r.team === t.team && r.ch && r.ch.resurrect && !r.resUsed) {
-      r.resUsed = true; t.hp = 1; pvLabel(r, '리바이벌'); heal(r, t, r.hpMax * r.ch.resurrect.healPct + r.ch.resurrect.healFlat); return;
+      r.resUsed = true; t.hp = 1; pvLabel(r, '리바이벌'); heal(r, t, r.hpMax * r.ch.resurrect.healPct + r.ch.resurrect.healFlat, chR(r, 'resurrect')); return;
     }
     if (t.sum && !t.clone) sumGone(t);
     t.alive = false; t.hp = 0; setOcc(t, -1);
@@ -549,9 +624,10 @@ export function simulate(P, seed, log) {
       if (c.killSplash) { const k = c.killSplash, cx = t.x, cy = t.y; for (const f of U) if (f.alive && f.team !== by.team && dU(f, cx, cy) <= k.ar) hit(by, f, k.coef, k.flat, k.el, { noProc: 1, noReact: 1 }); }
     }
   }
-  function heal(a, t, v) {
+  function heal(a, t, v, r) {
     if (!t.alive || v <= 0) return 0;
     if (t.shadowF) return 0; // Shadow Form: cannot be healed
+    if (r != null) v *= r; // PvP: the skill's / Charm's PvP rate and the governor
     v = Math.floor(v * B.healScale * (1 + (a.healUp || 0) + (a.healBoost || 0))); // Healing Boost (stats screen) + healing-up effects
     // Potential Vitality: healing received +x per 15% HP lost (up to 5); Healing Shift: +x and the heal becomes a 2-turn shield
     if (t.ch && t.ch.becure) v = Math.floor(v * (1 + t.ch.becure * lost15(t)));
@@ -563,7 +639,8 @@ export function simulate(P, seed, log) {
     if (ev) ev.push({ e: 'heal', a: a.id, t: t.id, v: real, hp: t.hp });
     return real;
   }
-  function addShield(a, t, v, turns) {
+  function addShield(a, t, v, turns, r) {
+    if (r != null) v *= r;
     v = Math.floor(v * B.healScale); if (v <= 0) return;
     addStatus(t, { k: 'shield', v, exp: t.turnNo + turns, buff: true, src: a.id });
     if (ev) ev.push({ e: 'shield', t: t.id, v, sh: t.shield });
@@ -615,7 +692,7 @@ export function simulate(P, seed, log) {
     else if (hpDmg >= t.hp && t.ch && t.ch.shadowVeng && !t.svUsed) { t.svUsed = true; shadow = true; hpDmg = t.hp - 1; }
     t.hp -= hpDmg; a.dmg += hpDmg; t.taken += hpDmg;
     if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d, k: o.kind || 0, hp: t.hp, sh: t.shield, el: o.el });
-    if (o.ls && hpDmg > 0) heal(a, a, hpDmg * o.ls);
+    if (o.ls && hpDmg > 0) heal(a, a, hpDmg * o.ls); // lifesteal: the PvP rate is in o.ls, the governor already in the DMG
     // Decoy Clone: the HP it loses, the linked unit loses too (True DMG; shields still take it)
     if (t.clone && hpDmg > 0 && U[t.link] && U[t.link].alive) applyDamage(a, U[t.link], Math.max(1, Math.floor(hpDmg * (t.linkV || 1))), { el: o.el, kind: 4 });
     if (t.hp <= 0) { kill(t, a); return hpDmg; }
@@ -623,13 +700,13 @@ export function simulate(P, seed, log) {
     if (hadShield && t.shield <= 0 && t.ch && t.ch.ripple && !B.over) chRipple(t);
     if (hpDmg > 0 && t.ch && (t.ch.overload || t.ch.shadowstep)) chLossStacks(t, hpDmg);
     if (hpDmg > 0 && B.elixir.length && t.hp < t.hpMax * 0.5 && t.hp + hpDmg >= t.hpMax * 0.5) chElixir(t);
-    if (saved) { const c = t.ch.undying; heal(t, t, t.hpMax * c.healPct + c.healFlat); if (c.indom) addStatus(t, { k: 'dmgRed', v: 0.9, exp: t.turnNo + 2, buff: true }); }
+    if (saved) { const c = t.ch.undying; heal(t, t, t.hpMax * c.healPct + c.healFlat, chR(t, 'undying')); if (c.indom) addStatus(t, { k: 'dmgRed', v: 0.9, exp: t.turnNo + 2, buff: true }); }
     // HP-threshold charms
     const below = t.hp / t.hpMax < 0.5;
     if (t.ch && below && t.above50) for (const s of t.ch.shields) {
       if (s.when === 'below50' || (s.when === 'below50once' && !t.voidUsed)) {
         if (s.when === 'below50once') t.voidUsed = true;
-        addShield(t, t, (s.by === 'hp' ? t.hpMax : eDef(t)) * s.v, s.t);
+        addShield(t, t, (s.by === 'hp' ? t.hpMax : eDef(t)) * s.v, s.t, pvOf(s.pv));
         if (s.opt.dodge) addStatus(t, { k: 'dodgeUp', v: 0.5, exp: t.turnNo + s.opt.dodge, buff: true, uniq: 1 });
       }
     }
@@ -735,7 +812,7 @@ export function simulate(P, seed, log) {
       for (const f of list) { hit(a, f, p.coef, p.flat, p.el, { noProc: 1, noReact: 1 }); if (p.opt.eff && f.alive) for (const e of p.opt.eff) tryStatus(a, f, e); }
     }
     if (t.alive) for (const i of c.inflicts) if ((!i.cond || i.cond === el) && rnd() < i.p) tryStatus(a, t, { ...i.e, p: 1 });
-    if (c.critHeal && kind === 1) heal(a, a, a.hpMax * c.critHeal.healPct + c.critHeal.healFlat);
+    if (c.critHeal && kind === 1) heal(a, a, a.hpMax * c.critHeal.healPct + c.critHeal.healFlat, chR(a, 'critHeal'));
     if (c.mark && t.alive) { t.marks++; if (t.marks >= 10) { t.marks = 0; hit(a, t, c.mark.coef, c.mark.flat, 'phy', { noProc: 1, noReact: 1 }); } }
   }
   /** defender-side charm reactions (at most one round of counters per incoming cast) */
@@ -749,7 +826,7 @@ export function simulate(P, seed, log) {
       fired = true;
       if (r.inflict) tryStatus(t, a, r.inflict);
       else if (r.aoe) { for (const f of U.filter((x) => x.alive && x.team !== t.team && dUU(x, t) <= r.aoe)) hit(t, f, r.coef, r.flat, r.el, { noProc: 1, noReact: 1 }); }
-      else hit(t, a, r.coef, r.flat, r.el, { base: (r.by === 'def' ? eDef(t) : eAtk(t)) * r.coef + r.flat, noProc: 1, noReact: 1, mult: 1 + (c.counterUp || 0) });
+      else hit(t, a, r.coef, r.flat, r.el, { base: (r.by === 'def' ? eDef(t) : eAtk(t)) * r.coef, noProc: 1, noReact: 1, mult: 1 + (c.counterUp || 0) });
     }
     if (c.reflect && t.shield > 0 && a.alive) { fired = true; applyDamage(t, a, Math.max(1, Math.floor(d * c.reflect)), { el: 'light', kind: 4 }); }
     if (fired) t.reactCast = B.castId;
@@ -777,7 +854,10 @@ export function simulate(P, seed, log) {
     if (t.ch) for (const [m, v] of t.ch.dmgRed) redX *= 1 - Math.min(0.9, v * redMode(m, a, t));
     const em = elemMult(a, t, el);
     if (em <= 0) { if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d: 0, k: 5, hp: t.hp, sh: t.shield, el }); return 0; } // element immunity (비전)
-    let d = (o.base != null ? o.base : atk * coef + flat) * (atk / (atk + def));
+    // Damage(): (ATK × coefficient (or a custom value) ÷ (1 + the defender's PlayerSkillDmgReduceScale) + flat) × ATK/(ATK+DEF),
+    // the flat Crit DMG / Block Efficiency parts over the same scaler, and all of it ÷ (1 + its ProSkillDmgReduceScale)
+    const psdr = t.psdr || 1;
+    let d = ((o.base != null ? o.base : atk * coef) / psdr + flat) * (atk / (atk + def));
     d *= em;
     // PvE Bonus DMG (against a monster) / PvE DMG RES (from a monster): the character screen's MonsterDmgAdd/ReduceScale;
     // PvP Bonus DMG / PvP DMG RES between characters
@@ -789,13 +869,14 @@ export function simulate(P, seed, log) {
     let kind = 0;
     const bc = t.blockRate + t.bBlock - 0.1 * t.riven - acc;
     // the flat Block Efficiency / Crit DMG numbers of the stats screen join outside the DEF term, times the coefficient
-    if (bc > 0 && rnd() < bc) { if (t.blockValV) d = Math.max(0.1 * d, d - t.blockValV * coef * mul); d /= Math.max(1.5, 1 + t.blockEff - acc); kind = 2; }
-    else { const cc = 0.05 + a.critRate + a.bCrit - t.critRes; if (cc > 0 && rnd() < cc) { if (a.critPowV) d += a.critPowV * coef * mul; d *= Math.max(1.3, 1 + a.critDmg - t.critRes); kind = 1; } }
-    d *= levelOffset(a, t);
-    if (P.balance && t.kind === 'hero') d *= B.pvpScale;
+    if (bc > 0 && rnd() < bc) { if (t.blockValV) d = Math.max(0.1 * d, d - t.blockValV * coef * mul / psdr); d /= Math.max(1.5, 1 + t.blockEff - acc); kind = 2; }
+    else { const cc = 0.05 + a.critRate + a.bCrit - t.critRes; if (cc > 0 && rnd() < cc) { if (a.critPowV) d += a.critPowV * coef * mul / psdr; d *= Math.max(1.3, 1 + a.critDmg - t.critRes); kind = 1; } }
+    d *= levelOffset(a, t) / (t.prosdr || 1);
+    // PvP stage: Beauty of Balance I / Swift Resolution on characters and summons (not on a Fantomon), Beauty of Balance II
+    if (P.balance) d *= (t.kind === 'hero' ? B.pvpScale : t.sum ? B.sumScale : 1) * B.gov;
     d *= o.mult || 1;
     d = Math.max(1, Math.floor(d));
-    const dealt = applyDamage(a, t, d, { doom: o.doom, kind, el, ls: (o.ls || 0) + (o.noProc ? 0 : (a.lsAll || 0) + (a.sipN ? a.sipN * a.sipV : 0)) });
+    const dealt = applyDamage(a, t, d, { doom: o.doom, kind, el, ls: (o.ls || 0) + (o.noProc ? 0 : (a.lsAll || 0) * (P.pvp && a.lsPv ? a.lsPv : 1) + (a.sipN ? a.sipN * a.sipV : 0)) });
     if (!o.noProc && t.mp) mobPassiveStacks(t);
     // Element Shift (Yoldra): Fire technique DMG flips Frostchill → Blazing, Water technique DMG flips it back
     if (!o.noProc && t.alive && t.mp && t.mp.elShift) {
@@ -826,7 +907,7 @@ export function simulate(P, seed, log) {
     else if (p < 1 || CONTROL[k]) p *= (1 + a.effHit) / (1 + t.effRes);
     if (CONTROL[k]) {
       if (k === 'freeze' && t.wet) p *= 1.3;
-      if (P.balance && t.kind === 'hero') p /= 3;
+      if (P.balance) p /= 3; // Beauty of Balance I: the caster's AbnormalDebuffRateScale −66.66%
       if (t.turnNo - t.lastAil <= 1) p *= Math.pow(0.5, t.ailStreak);
       if (k === 'freeze' && has(t, 'freeze')) return;
     }
@@ -863,8 +944,8 @@ export function simulate(P, seed, log) {
   function dotTick(t, s) {
     const a = U[s.src]; if (!a || !t.alive) return;
     const atk = eAtk(a), def = eDef(t);
-    let d = atk * DOT_COEF * (atk / (atk + def)) * elemMult(a, t, s.el) * ((1 + a.dmgBoost + a.bDmg) / (1 + t.dmgRes)) * (1 + t.vuln) * t.red * levelOffset(a, t);
-    if (P.balance && t.kind === 'hero') d *= B.pvpScale;
+    let d = ((atk * DOT_COEF) / (t.psdr || 1)) * (atk / (atk + def)) * elemMult(a, t, s.el) * ((1 + a.dmgBoost + a.bDmg) / (1 + t.dmgRes)) * (1 + t.vuln) * t.red * levelOffset(a, t) / (t.prosdr || 1);
+    if (P.balance) d *= (t.kind === 'hero' ? B.pvpScale : t.sum ? B.sumScale : 1) * B.gov;
     applyDamage(a, t, Math.max(1, Math.floor(d)), { el: s.el, kind: 4 });
   }
 
@@ -1174,7 +1255,7 @@ export function simulate(P, seed, log) {
     if (ce) ev.push(ce);
     let targets = pl.targets;
     if (s.pull) { const px = s.pull === 'c' ? u.x : pl.ax, py = s.pull === 'c' ? u.y : pl.ay; for (const t of targets) pullTo(t, px, py); }
-    const o = { doom: s.doom, ls: s.ls || 0, blind: u.blind, acc: 0, boost: 0, single: (s.hits || 1) + (s.h2 || 0) === 1 && !s.sp };
+    const o = { doom: s.doom, ls: (s.ls || 0) * (P.pvp && PVPR[s.id] ? PVPR[s.id][0] : 1), blind: u.blind, acc: 0, boost: 0, single: (s.hits || 1) + (s.h2 || 0) === 1 && !s.sp };
     const na = has(u, 'nextAcc'), nd = has(u, 'nextDoom');
     if (na) { o.acc += na.v; o.boost += na.dmg || 0; }
     if (nd) { o.doom = 1; o.boost += nd.v; }
@@ -1188,7 +1269,7 @@ export function simulate(P, seed, log) {
     const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e.k === 'lacer' ? { ...e, coef: n.tc, flat: n.tf } : e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
     if (sp.k === 'shieldBurst') {
       let sh = 0; for (let i = u.st.length - 1; i >= 0; i--) if (u.st[i].k === 'shield') { sh += u.st[i].v; u.st.splice(i, 1); } recalc(u);
-      o.base = sh * n.coef + n.flat;
+      o.base = sh * n.coef;
     }
     if (sp.k === 'waves') {
       const seen = new Map();
@@ -1488,7 +1569,7 @@ export function simulate(P, seed, log) {
     if (t.lossSeq !== t.turnNo) { t.lossSeq = t.turnNo; t.lossAcc2 = 0; t.lossN15 = 0; t.lossN10 = 0; }
     t.lossAcc2 += d;
     const c = t.ch;
-    if (c.overload) while (t.lossAcc2 >= (t.lossN15 + 1) * 0.15 * t.hpMax) { t.lossN15++; addShield(t, t, t.hpMax * c.overload, 2); }
+    if (c.overload) while (t.lossAcc2 >= (t.lossN15 + 1) * 0.15 * t.hpMax) { t.lossN15++; addShield(t, t, t.hpMax * c.overload, 2, chR(t, 'overload')); }
     if (c.shadowstep) while (t.lossAcc2 >= (t.lossN10 + 1) * 0.1 * t.hpMax) {
       t.lossN10++;
       const s = t.st.find((x) => x.k === 'shStep');
@@ -1503,13 +1584,13 @@ export function simulate(P, seed, log) {
   function chElixir(t) {
     if (t.sum || t.pet) return;
     const o = B.elixir.find((x) => x.alive && x.team === t.team && x.potions > 0); if (!o) return;
-    o.potions--; pvLabel(o, '재생의 영약'); heal(o, t, o.hpMax * o.ch.elixir.healPct + o.ch.elixir.healFlat);
+    o.potions--; pvLabel(o, '재생의 영약'); heal(o, t, o.hpMax * o.ch.elixir.healPct + o.ch.elixir.healFlat, chR(o, 'elixir'));
   }
   /** a summon died or faded: Soul Impact (Dark DMG around it), Soulbond Restoration (the owner heals) */
   function sumGone(p) {
     const o = U[p.owner]; if (!o || !o.alive || !o.ch || B.over) return;
     if (o.ch.soulImpact) { const c = o.ch.soulImpact; pvLabel(o, '소울 임팩트'); for (const f of U) if (f.alive && f.team !== o.team && dU(f, p.x, p.y) <= c.r) { hit(o, f, c.coef, c.flat, 'dark', { noProc: 1, noReact: 1 }); if (B.over) break; } }
-    if (o.ch.soulbond && o.alive) heal(o, o, o.hpMax * o.ch.soulbond.healPct + o.ch.soulbond.healFlat);
+    if (o.ch.soulbond && o.alive) heal(o, o, o.hpMax * o.ch.soulbond.healPct + o.ch.soulbond.healFlat, chR(o, 'soulbond'));
     if (o.ch.sumPresence) chSumPresence(o, p);
   }
   /** Soul Pact Resonance: ATK up while one of the caster's summons stands */
@@ -1522,7 +1603,7 @@ export function simulate(P, seed, log) {
   function chOnCast(u, s) {
     const c = u.ch;
     // Holy Restoration: Renewing Light per Light technique, a heal at 6 stacks
-    if (c.holyRestore && s.el === 'light') { u.hrN = (u.hrN || 0) + 1; if (u.hrN >= c.holyRestore.n) { u.hrN = 0; pvLabel(u, '성령의 치유'); heal(u, u, u.hpMax * c.holyRestore.healPct + c.holyRestore.healFlat); } }
+    if (c.holyRestore && s.el === 'light') { u.hrN = (u.hrN || 0) + 1; if (u.hrN >= c.holyRestore.n) { u.hrN = 0; pvLabel(u, '성령의 치유'); heal(u, u, u.hpMax * c.holyRestore.healPct + c.holyRestore.healFlat, chR(u, 'holyRestore')); } }
     // Scarlet Zeal: Battle Zeal stacks (ATK +1/10 of the charm value each), at 6 Scarlet Zeal (the full value) for 2 turns
     if (c.zeal && !has(u, 'zealR')) {
       const z = u.st.find((x) => x.k === 'zeal');
@@ -1535,7 +1616,7 @@ export function simulate(P, seed, log) {
   function chTurnStart(u) {
     const c = u.ch;
     // Frost Guard: Icebound ends at the start of the turn with a heal
-    const ice = u.st.findIndex((x) => x.ice); if (ice >= 0) { removeStatus(u, ice); recalc(u); heal(u, u, u.hpMax * c.frostGuard.healPct + c.frostGuard.healFlat); }
+    const ice = u.st.findIndex((x) => x.ice); if (ice >= 0) { removeStatus(u, ice); recalc(u); heal(u, u, u.hpMax * c.frostGuard.healPct + c.frostGuard.healFlat, chR(u, 'frostGuard')); }
     // Flaming Path: 30% at turn start — burning ground on the cells within 1 grid
     if (c.burnAura && rnd() < c.burnAura.p) burnCells(u, around(u.x, u.y, 1), c.burnAura.coef, c.burnAura.flat, 3);
     // Oath of Vigil: the ally with the lowest HP share is guarded until this unit's next turn
@@ -1553,9 +1634,9 @@ export function simulate(P, seed, log) {
     // Frost Guard: no technique this turn → Icebound (DMG RES) until the next turn starts
     if (c.frostGuard && idle) addStatus(u, { k: 'dmgRed', v: c.frostGuard.v, exp: 1e9, buff: true, nd: 1, ice: 1 });
     // Holy Recuperation: no technique this turn → a heal, and +50% DMG next turn
-    if (c.holyRecup && idle) { heal(u, u, u.hpMax * c.holyRecup.healPct + c.holyRecup.healFlat); addStatus(u, { k: 'dmgUp', v: c.holyRecup.dmg, exp: u.turnNo + 1, buff: true }); }
+    if (c.holyRecup && idle) { heal(u, u, u.hpMax * c.holyRecup.healPct + c.holyRecup.healFlat, chR(u, 'holyRecup')); addStatus(u, { k: 'dmgUp', v: c.holyRecup.dmg, exp: u.turnNo + 1, buff: true }); }
     // Fiery Rejuvenation: burning cells within 2 grids → a heal, +10% for each one beyond the first (up to 5)
-    if (c.fieryRejuv) { const n = B.traps.filter((t) => t.burn && dist(t.x, t.y, u.x, u.y) <= 2).length; if (n) heal(u, u, (u.hpMax * c.fieryRejuv.healPct + c.fieryRejuv.healFlat) * (1 + 0.1 * Math.min(4, n - 1))); }
+    if (c.fieryRejuv) { const n = B.traps.filter((t) => t.burn && dist(t.x, t.y, u.x, u.y) <= 2).length; if (n) heal(u, u, (u.hpMax * c.fieryRejuv.healPct + c.fieryRejuv.healFlat) * (1 + 0.1 * Math.min(4, n - 1)), chR(u, 'fieryRejuv')); }
   }
   /** after an active move: the mover's Flaming Heel / Flaming Path, and enemies' Repelling Wind it stepped into */
   function chMoved(u, from) {
@@ -1610,19 +1691,19 @@ export function simulate(P, seed, log) {
     if (s.kind === 'heal') {
       const amt = (t, m) => { let v = (u.hpMax * n.healPct + n.healFlat) * m; if (s.sp && s.sp.k === 'lowBonus' && t.hp / t.hpMax < s.sp.th) v *= 1 + s.sp.v; return v; };
       for (const t of targets) {
-        heal(u, t, amt(t, 1)); if (s.dispel) cleanse(t, s.dispel);
-        if (u.ch && u.ch.overheal && rnd() < u.ch.overheal.p) for (const b of alliesOf(u)) if (dist(b.x, b.y, t.x, t.y) <= 1) heal(u, b, u.hpMax * u.ch.overheal.healPct + u.ch.overheal.healFlat); // Overhealing
+        heal(u, t, amt(t, 1), skR(s)); if (s.dispel) cleanse(t, s.dispel);
+        if (u.ch && u.ch.overheal && rnd() < u.ch.overheal.p) for (const b of alliesOf(u)) if (dist(b.x, b.y, t.x, t.y) <= 1) heal(u, b, u.hpMax * u.ch.overheal.healPct + u.ch.overheal.healFlat, chR(u, 'overheal')); // Overhealing
         // Fantomon extras: Cure All random +10% ATK/DEF/SPD for 1 turn, Crystal Energy grants Purity
         if (s.rbuff) { const r = Math.floor(rnd() * 3); addStatus(t, { k: r === 0 ? 'atkUp' : r === 1 ? 'defUp' : 'spdUp', v: (r === 0 ? t.atk : r === 1 ? t.def : t.spd) * s.rbuff, exp: t.turnNo + 1, buff: true }); }
         if (s.purity && u.sup && u.sup.v.StatusDmgReducePer && !has(t, 'purity')) addStatus(t, { k: 'purity', v: u.sup.v.StatusDmgReducePer, exp: 1e9, buff: true });
       }
       if (s.sp && s.sp.k === 'healChain') {
         const cnt = new Map([[targets[0].id, 1]]); let last = targets[0];
-        for (let i = 0; i < s.sp.n; i++) { const c = allies.filter((a) => a.alive && a !== last && a.hp < a.hpMax && dist(a.x, a.y, last.x, last.y) <= tg.r); if (!c.length) break; last = c[Math.floor(rnd() * c.length)]; const h = cnt.get(last.id) || 0; heal(u, last, amt(last, Math.pow(1 - s.sp.decay, h))); cnt.set(last.id, h + 1); }
+        for (let i = 0; i < s.sp.n; i++) { const c = allies.filter((a) => a.alive && a !== last && a.hp < a.hpMax && dist(a.x, a.y, last.x, last.y) <= tg.r); if (!c.length) break; last = c[Math.floor(rnd() * c.length)]; const h = cnt.get(last.id) || 0; heal(u, last, amt(last, Math.pow(1 - s.sp.decay, h)), skR(s)); cnt.set(last.id, h + 1); }
       }
       return true;
     }
-    if (s.kind === 'shield') { for (const t of targets) addShield(u, t, u.def * n.bv + (n.bflat || 0) * CURE_BASE, s.shT || 2); return true; }
+    if (s.kind === 'shield') { for (const t of targets) addShield(u, t, u.def * n.bv + (n.bflat || 0) * CURE_BASE, s.shT || 2, skR(s)); return true; }
     const b = s.buff, T = b.t;
     for (const t of targets) {
       const base = { exp: t.turnNo + T, buff: true, uniq: 1, src: u.id };
@@ -1633,7 +1714,7 @@ export function simulate(P, seed, log) {
         case 'hpUp': { const add = Math.floor(u.hpMax * n.bv + (n.bflat || 0) * STAT_BASE); const pct = t.hp / t.hpMax; addStatus(t, { ...base, k: 'hpUp', v: add }); t.hpMax += add; t.hp = Math.round(t.hpMax * pct); if (pct < 0.3) heal(u, t, t.hpMax * 0.05); break; }
         case 'nextAcc': addStatus(t, { ...base, k: 'nextAcc', v: n.bv, dmg: b.dmg }); break;
         case 'nextDoom': addStatus(t, { ...base, k: 'nextDoom', v: n.bv }); break;
-        case 'hot': addStatus(t, { ...base, k: 'hot', v: u.hpMax * n.healPct + n.healFlat }); break;
+        case 'hot': addStatus(t, { ...base, k: 'hot', v: (u.hpMax * n.healPct + n.healFlat) * skR(s) }); break;
         case 'swords': addStatus(t, { ...base, k: 'swords', n: b.n, coef: n.coef, flat: n.flat, exp: 1e9 }); break;
         case 'flame': addStatus(t, { ...base, k: 'flame', coef: n.coef, flat: n.flat }); flameBurst(t); break;
       }
@@ -1711,7 +1792,7 @@ export function simulate(P, seed, log) {
     if (u.alive && !B.over && B.traps.length) burnCheck(u);
     u.stone = 0;
     if (u.alive && !B.over && u.ch) {
-      if (u.ch.regen) heal(u, u, u.hpMax * u.ch.regen.healPct + u.ch.regen.healFlat);
+      if (u.ch.regen) heal(u, u, u.hpMax * u.ch.regen.healPct + u.ch.regen.healFlat, chR(u, 'regen'));
       if (u.ch.omen) for (const f of U) if (f.alive && f.team !== u.team && dU(f, u.x, u.y) <= 5) tryStatus(u, f, { k: 'vuln', v: 0.25, p: 0.5, t: 1 });
     }
     // monster passives at the start of the monster's turn
@@ -1832,7 +1913,7 @@ export function simulate(P, seed, log) {
     }
     const c = u.ch, perm = { exp: 1e9, buff: true };
     if (c) {
-      for (const s of c.shields) if (s.when === 'pre') addShield(u, u, (s.by === 'hp' ? u.hpMax : u.def) * s.v, s.t);
+      for (const s of c.shields) if (s.when === 'pre') addShield(u, u, (s.by === 'hp' ? u.hpMax : u.def) * s.v, s.t, pvOf(s.pv));
       if (c.soulProt) { const h = Math.floor(u.hp * 0.5); u.hp -= h; addStatus(u, { ...perm, k: 'shield', v: h, src: u.id }); }
       if (c.soulfire) { u.hp = Math.max(1, Math.ceil(u.hp * 0.5)); addStatus(u, { ...perm, k: 'dmgRed', v: c.soulfire }); }
       if (c.rapid) for (let i = 0; i < u.cds.length; i++) if (u.cds[i] > 0) u.cds[i]--;

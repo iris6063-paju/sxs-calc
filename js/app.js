@@ -1,6 +1,6 @@
 // UI: team builder (skills, charms, Fantomon), encounter presets, Monte Carlo runner and results.
 import { CLASSES, SKILLS, MAPS, RANKS, MAXLV } from './gamedata.js';
-import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH, rankGap, rankGroup, statBases, SUBRANKS } from './engine.js';
+import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH, rankGap, rankGroup, statBases, SUBRANKS, prepare, pvpGovernor } from './engine.js';
 import { createStage, GROUND_LIST } from './scene.js';
 import { ST_KO } from './status.js';
 import { loadSheets, designOf, sheet, sheetURL, faceIndex } from './sheets.js';
@@ -89,7 +89,7 @@ function newHero(cls = 'Huwei', level = 40, name = '캐릭터', mult = 2.5) {
 }
 function petDefaults(h, id) { const p = PET.get(id); return { id, rank: 3, adult: false, hp: Math.round(h.hp * p.base[0] / 100), atk: Math.round(h.atk * p.base[1] / 100), def: Math.round(h.def * p.base[2] / 100), spd: Math.round(h.spd * p.base[3] / 100) }; }
 function demo() {
-  return { v: 2, mode: 'pve', runs: 1000, roundCap: { pve: 15, pvp: 100 }, mobCoef: 100, pvpBalance: true, pvEst: true, preset: { mode: 'fantasia', group: 'fa1', n: 71 }, teams: [[newHero('Huwei', 40, '나')], floorUnits('fa1', 71)] };
+  return { v: 2, mode: 'pve', runs: 1000, roundCap: { pve: 15, pvp: 100 }, mobCoef: 100, pvpBalance: true, serverDays: 150, pvEst: true, preset: { mode: 'fantasia', group: 'fa1', n: 71 }, teams: [[newHero('Huwei', 40, '나')], floorUnits('fa1', 71)] };
 }
 const b64e = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const b64d = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
@@ -119,6 +119,7 @@ function sanitize(s) {
   const d = demo();
   const out = { ...d, ...s, v: 2, roundCap: { ...d.roundCap, ...(s.roundCap || {}) }, preset: { ...d.preset, ...(s.preset && s.preset.mode ? s.preset : {}) } };
   out.mode = out.mode === 'pvp' ? 'pvp' : 'pve';
+  out.serverDays = Number.isFinite(+s.serverDays) && s.serverDays !== '' && s.serverDays != null ? Math.max(0, Math.min(400, Math.round(+s.serverDays))) : 150;
   delete out.prank; // the old party rank became each character's own rank (moved onto the heroes below)
   // the stone colosseum is the default ground since 2026-11-21; setups saved on the old default forest move to it once
   out.ground = GROUND_LIST.some(([k]) => k === s.ground) && !(s.ground === 'forest' && !s.gv) ? s.ground : 'colosseum'; out.gv = 1;
@@ -127,7 +128,8 @@ function sanitize(s) {
   out.teams = s.teams.map((t) => (Array.isArray(t) ? t : []).filter((u) => u && (u.kind === 'mob' ? MOB.has(u.key) : CLS.has(u.cls))).map((u) => {
     if (u.kind === 'mob') {
       const m = { uid: u.uid || uid(), kind: 'mob', key: u.key, level: +u.level || 1, count: Math.max(1, Math.min(20, +u.count || 1)), sr: u.sr || MOB.get(u.key).sr };
-      if (Array.isArray(u.fix) && [14, 20, 28].includes(u.fix.length) && u.fix.every((x) => typeof x === 'number' && isFinite(x))) m.fix = u.fix.length === 14 ? upgradeFix(u.key, u.fix) : u.fix;
+      // 22 / 30 numbers carry the monster's skill-DMG reduction pair; older blocks take the current one of the same floor
+      if (Array.isArray(u.fix) && [14, 20, 22, 28, 30].includes(u.fix.length) && u.fix.every((x) => typeof x === 'number' && isFinite(x))) m.fix = [22, 30].includes(u.fix.length) ? u.fix : upgradeFix(u.key, u.fix);
       if (u.uws) m.uws = 1;
       if (cellOf(u.cell)) m.cell = cellOf(u.cell);
       return m;
@@ -150,7 +152,7 @@ let saveT = 0, rosterT = 0, lastRes = null, lastSetup = null, running = false;
 
 function toSetup() {
   return {
-    mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, mobCoef: state.mobCoef / 100, pvEst: state.pvEst !== false,
+    mode: state.mode, roundCap: state.roundCap[state.mode], pvpBalance: state.pvpBalance, serverDays: state.serverDays, mobCoef: state.mobCoef / 100, pvEst: state.pvEst !== false,
     teams: state.teams.map((t) => t.map((u) => (u.kind === 'mob' ? { kind: 'mob', uid: u.uid, key: u.key, level: u.level, count: u.count, sr: u.sr, fix: u.fix, uws: u.uws, cell: u.cell }
       : { kind: 'hero', uid: u.uid, name: u.name, cls: u.cls, level: u.level, rank: u.rank || '', atk: u.atk, def: u.def, hp: u.hp, spd: u.spd, ...u.adv, skills: u.skills, charms: u.charms, pet: u.pet, cell: u.cell }))),
   };
@@ -634,6 +636,7 @@ function syncSettings() {
   $$('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === state.mode));
   $('#runsSel').value = String(state.runs); $('#capInp').value = state.roundCap[state.mode]; $('#mobCoefInp').value = state.mobCoef; $('#balChk').checked = state.pvpBalance; $('#pvChk').checked = state.pvEst !== false;
   $('#balLabel').hidden = state.mode !== 'pvp';
+  $('#daysInp').value = state.serverDays; $('#daysLabel').hidden = state.mode !== 'pvp' || !state.pvpBalance;
   const hasMob = state.teams.some((t) => t.some((u) => u.kind === 'mob'));
   $('#mobCoefLabel').hidden = !hasMob;
   $('#pvLabel').hidden = !hasMob || !state.teams.some((t) => t.some((u) => u.kind === 'mob' && (MOB.get(u.key).pv || []).some((id) => MOB_PV[id] && MOB_PV[id].est)));
@@ -653,7 +656,8 @@ $('#modeSeg').addEventListener('click', (e) => { const b = e.target.closest('but
 $('#runsSel').addEventListener('change', (e) => { state.runs = +e.target.value; touch(true); });
 $('#capInp').addEventListener('change', (e) => { state.roundCap[state.mode] = Math.max(1, Math.min(200, Math.round(+e.target.value || 15))); e.target.value = state.roundCap[state.mode]; touch(true); });
 $('#mobCoefInp').addEventListener('change', (e) => { state.mobCoef = Math.max(10, Math.min(500, +e.target.value || 100)); e.target.value = state.mobCoef; renderTeam(0); renderTeam(1); touch(true); });
-$('#balChk').addEventListener('change', (e) => { state.pvpBalance = e.target.checked; touch(true); });
+$('#balChk').addEventListener('change', (e) => { state.pvpBalance = e.target.checked; syncSettings(); touch(true); });
+$('#daysInp').addEventListener('change', (e) => { const v = Math.round(+e.target.value); state.serverDays = Number.isFinite(v) ? Math.max(0, Math.min(400, v)) : 150; e.target.value = state.serverDays; touch(true); });
 $('#pvChk').addEventListener('change', (e) => { state.pvEst = e.target.checked; renderTeam(0); renderTeam(1); touch(true); });
 $('#resetBtn').addEventListener('click', () => { state = demo(); openSet.clear(); lastRes = null; $('#results').innerHTML = ''; $('#winTag').hidden = true; renderAll(); touch(); toast('예시 구성으로 되돌렸습니다'); });
 $('#shareBtn').addEventListener('click', async () => {
@@ -891,7 +895,13 @@ function actLine(a, nm, M) {
 }
 function fieldChips(setup) {
   const c = [];
-  if (setup.mode === 'pvp' && setup.pvpBalance !== false) { c.push(['균형의 미 · 캐릭터 대상 대미지 ×0.2', 'PvP 전장 효과 (Beauty of Balance)']); c.push(['12라운드부터 라운드마다 대미지 +10%p · 치유·실드 감소', 'PvP 전장 효과 (Swift Resolution)']); }
+  if (setup.mode === 'pvp' && setup.pvpBalance !== false) {
+    c.push(['균형의 미 I · 캐릭터 대상 대미지 ×0.2 · 소환수 ×0.6 · 제어 확률 ×⅓', 'PvP 전장 효과 (Beauty of Balance I)']);
+    // Beauty of Balance II: the match's governor from the fighters on the field
+    let g = null; try { g = pvpGovernor(prepare(setup).units, setup.serverDays); } catch (e) { g = null; }
+    if (g) c.push([`균형의 미 II · 스킬 대미지·치유·실드 ×${g.scale.toFixed(3)}`, `PvP 전장 효과 (Beauty of Balance II): 생존 비율 ×${g.survival.toFixed(3)} (출력/생존 ${g.ratio.toFixed(3)}, 0.1 초과분 감소) · 스킬 랭크 ×${g.rankScale.toFixed(3)} (전투 ${g.fightRank} / 서버 ${g.serverRank}) · 랭크 균형 ×${g.balance.toFixed(3)}`]);
+    c.push(['12라운드부터 라운드마다 대미지 +10%p · 치유·실드 −20%', 'PvP 전장 효과 (Swift Resolution I · II)']);
+  }
   if (setup.teams.some((t) => t.some((u) => u.uws))) c.push(['United We Stand · 보스가 첫 3턴 받는 대미지 −99%', '길드 토벌 층 효과']);
   c.push([`라운드 제한 ${setup.roundCap}R`, '한 라운드 = 생존한 전원이 한 번씩 행동']);
   if (setup.teams.some((t) => t.some((u) => u.kind === 'mob'))) { if (setup.mobCoef !== 1) c.push([`몹 스킬 계수 ${Math.round(setup.mobCoef * 100)}%`, '']); if (setup.pvEst === false) c.push(['몹 비전 추정값 꺼짐', '']); const rk = [...new Set(setup.teams[0].filter((u) => u.kind === 'hero' && u.rank).map((u) => SUBRANK_KO(u.rank)))]; if (rk.length && setup.mode !== 'pvp') c.push([`랭크 ${rk.join(' · ')} · 랭크 차이 보정`, '']); }
