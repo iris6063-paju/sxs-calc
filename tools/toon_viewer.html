@@ -5,10 +5,12 @@
 <style>body{margin:0;background:#9fd3ee;font:13px sans-serif}#ui{position:fixed;left:8px;top:8px;display:flex;gap:4px;flex-wrap:wrap;z-index:2}button{padding:4px 10px}canvas{display:block}</style>
 </head><body><div id="ui"></div><canvas id="c"></canvas>
 <script type="module">
-// Dev viewer for assets/toon specs: ?ids=knight,boar  (all states cycle with the buttons)
+// Dev viewer for assets/toon specs: ?ids=knight,boar  (all states cycle with the buttons); glb:knight = the rigged glTF model
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
-import { buildModel, animate, setMood, stateLen } from '../js/toon.js';
+import { buildModel, animate, setMood, stateLen, toonSpec, loadToon } from '../js/toon.js';
+import { loadGlb, buildGlbModel } from '../js/glbmodel.js';
+const glbReady = Promise.all([loadGlb(), loadToon()]);
 const cv = document.getElementById('c'), R = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
 R.setPixelRatio(Math.min(2, devicePixelRatio)); R.setSize(innerWidth, innerHeight); R.shadowMap.enabled = true; R.outputColorSpace = THREE.SRGBColorSpace;
 const S = new THREE.Scene(); S.background = new THREE.Color(0x9fd3ee);
@@ -23,8 +25,9 @@ if (shot) { ids = [ids[0], ids[0]]; document.getElementById('ui').style.display 
 const models = [];
 const N = ids.length, cols = Math.min(N, +(q.get('cols') || 6)), gap = +(q.get('gap') || 2.6);
 await Promise.all(ids.map(async (id, i) => {
-  const spec = await (await fetch(`../assets/toon/${id}.json?` + Date.now())).json();
-  const m = buildModel(spec, {}); const sc = +(q.get('scale') || 1) * (spec.kind === 'hero' ? 1 : (spec.viewScale || 1));
+  let spec, m;
+  if (id.startsWith('glb:')) { await glbReady; m = buildGlbModel(id.slice(4), { raw: q.has('raw') }); if (q.has('raw')) m.raw = 1; spec = { kind: 'hero', style: (toonSpec(id.slice(4)) || {}).style || 'shield' }; }
+  else { spec = await (await fetch(`../assets/toon/${id}.json?` + Date.now())).json(); m = buildModel(spec, {}); } const sc = +(q.get('scale') || 1) * (spec.kind === 'hero' ? 1 : (spec.viewScale || 1));
   m.root.scale.setScalar(sc);
   const holder = new THREE.Group(); holder.add(m.root); holder.position.set(((i % cols) - (cols - 1) / 2) * gap, 0, -Math.floor(i / cols) * gap * 1.2); holder.rotation.y = shot ? (i ? Math.PI + 0.6 : 0.6) : +(q.get('yaw') || 0.5); S.add(holder);
   m.style = spec.style; models.push(m);
@@ -33,11 +36,11 @@ let st = 'idle', t0 = performance.now() / 1000, mood = 'base';
 const ui = document.getElementById('ui');
 for (const s of ['idle', 'move', 'attack', 'skill', 'hit', 'dead']) { const b = document.createElement('button'); b.textContent = s; b.onclick = () => { st = s; t0 = performance.now() / 1000; }; ui.appendChild(b); }
 for (const md of ['base', 'joy', 'angry', 'hit', 'down', 'focus']) { const b = document.createElement('button'); b.textContent = '😀' + md; b.onclick = () => { mood = md; models.forEach((m) => setMood(m, md)); }; ui.appendChild(b); }
-window.__viewer = { setState: (s) => { st = s; t0 = performance.now() / 1000; } };
+window.__viewer = { models, setState: (s) => { st = s; t0 = performance.now() / 1000; } };
 function tick() {
   requestAnimationFrame(tick);
   const t = performance.now() / 1000, el = t - t0;
-  for (const m of models) { const s2 = st === 'dead' ? 'idle' : st; let e = el; if (s2 === 'attack' || s2 === 'skill' || s2 === 'hit') e = el % (stateLen(s2) + 0.5); animate(m, s2, e, t, { style: m.style, dead: st === 'dead' ? Math.min(1, el / 0.5) : 0 }); }
+  for (const m of models) { if (m.raw) continue; const s2 = st === 'dead' ? 'idle' : st; let e = el; if (s2 === 'attack' || s2 === 'skill' || s2 === 'hit') e = el % (stateLen(s2) + 0.5); animate(m, s2, e, t, { style: m.style, dead: st === 'dead' ? Math.min(1, el / 0.5) : 0 }); }
   ctl.update(); R.render(S, cam);
 }
 tick();

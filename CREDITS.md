@@ -48,10 +48,11 @@
   재채색 · 외곽선 · 스티커 테두리 · 합성 · 애니메이션을 더해 **몹 스탠디**와 **영웅의 무기 · 장식 부품**으로 재구성했습니다(`js/icons.js`, `js/sprites.js`).
   사용한 아이콘 이름은 `tools/build_icons.mjs` 에 있습니다.
 - 영웅 캐릭터(기사 · 투사 · 주술사 · 현자 계열)의 몸 · 얼굴 · 의상 리그와 3D 디오라마(섬, 나무, 폭포, 터미널 모놀리스)는 이 프로젝트에서 새로 그린 것입니다.
+- **기사 3D 모델(`assets/models/knight.glb`)** — 사용자가 제공한 SD 에셋 시트의 기사 4방향 그림(원본 시트는 저장소 미포함)으로 Higgsfield의 Meshy 다중 이미지 → 3D(텍스처 · 리깅)가 생성한 모델입니다. 텍스처를 1024px로 줄이고 쓰지 않는 애니메이션 · 접선 자료를 뺐습니다. 게임 그림 · 모델은 쓰지 않았습니다.
 
 ## 라이브러리 · 글꼴
 
-- **three.js** r160 — MIT — `vendor/THREE-LICENSE.txt`
+- **three.js** r160 — MIT — `vendor/THREE-LICENSE.txt` (GLTFLoader · BufferGeometryUtils · SkeletonUtils 포함)
 - **Pretendard** — SIL Open Font License 1.1 (CDN 로드)
 - **JetBrains Mono** — SIL Open Font License 1.1 (Google Fonts 로드)
 

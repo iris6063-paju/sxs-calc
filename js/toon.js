@@ -203,6 +203,7 @@ export function animate(m, st, el, t, o = {}) {
   // blink every few seconds
   if (m.face && m.face.mood !== 'down') { const bl = (T % 3.7) < 0.12; if (bl !== m.face.blink && (m.face.mood === 'base' || m.face.mood === 'focus')) setMood(m, m.face.mood, bl); }
   if (o.dead > 0) { const k = ease(o.dead); B.root.rotation.x = -1.45 * k; B.root.position.y = -0.05 * k; }
+  if (m.apply) m.apply(); // a rigged glTF hero (glbmodel.js): copy the posed rig onto its skeleton
 }
 function heroPose(B, st, el, T, style) {
   const s = Math.sin, caster = style === 'staff' || style === 'book';

@@ -15,6 +15,7 @@ const FXU = {
   sage: { heal: 0, circle: 1, bless: 2, aoe: 3, melee: 3, finish: 3 },       // 치유의 빛 · 지원 진형 · 축복 · 회복의 파동
 };
 import { MOB, PET } from './engine.js';
+import { hasGlb, buildGlbModel } from './glbmodel.js';
 import { ST_SHORT, stOrder } from './status.js';
 
 /* battlefield grounds: board tiles, island top, foliage tint, sky, fog and light */
@@ -296,7 +297,9 @@ export function createStage(canvas) {
     let tex;
     // cel-shaded 3D model (GPT-designed spec) when one exists for this hero design / monster kind
     let spec = null, tscale = 1, recolor = null;
-    if (m.kind === 'hero') { u.design = designOf(m.cls); spec = u.design && toonSpec(u.design); }
+    // a rigged glTF model (Higgsfield, from the user's SD turnaround) replaces the code-built one when it loaded
+    let glbM = null;
+    if (m.kind === 'hero') { u.design = designOf(m.cls); spec = u.design && toonSpec(u.design); glbM = u.design && hasGlb(u.design) ? buildGlbModel(u.design) : null; }
     else if (mob) {
       const md = pet || sumM || MOB.get(m.key), id = toonIdForMob(md.en, pet ? petArtSlug(pet) : mobArtSlug(md));
       spec = id && toonSpec(id);
@@ -307,8 +310,8 @@ export function createStage(canvas) {
         tscale = pet ? 0.62 : sumM ? 0.7 : uniq ? (m.sz >= 5 ? 2.9 : m.sz === 4 ? 2.5 : 2.0) : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
       }
     }
-    if (spec) {
-      u.toon = buildModel(spec, { recolor }); u.style = spec.style || 'sword';
+    if (spec || glbM) {
+      u.toon = glbM || buildModel(spec, { recolor }); u.style = spec ? spec.style || 'sword' : 'shield';
       u.toon.root.scale.setScalar(tscale); u.yaw = m.team ? -1.0 : 1.0; u.yawT = u.yaw;
       u.mat = new THREE.MeshBasicMaterial(); u.card = new THREE.Mesh(new THREE.BufferGeometry(), u.mat); u.tex = null; u.h = Math.max(1, u.toon.h * tscale);
       u.an = { st: 'idle', t0: 0 }; u.lastHit = -9;
