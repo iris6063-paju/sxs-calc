@@ -66,6 +66,11 @@ const duel = (a, b, o = {}) => ({ mode: 'pvp', roundCap: 3, pvpBalance: false, t
   ok(m.prosdr > 1 && h.prosdr > 1, `level 130: monster ÷${m.psdr.toFixed(3)} · ÷${m.prosdr.toFixed(3)}, hero (Gold3) ÷${h.psdr.toFixed(3)} · ÷${h.prosdr.toFixed(3)}`);
   void b;
 }
+// 7. no level gap in PvP (the game's Damage() takes it outside PvP only)
+{
+  const lo = firstHit(duel(hero(100, { rank: 'Silver3' }), hero(100, { rank: 'Silver3' }))).d, hi = firstHit(duel(hero(130, { rank: 'Silver3', atk: heroBase(100).atk * 50, def: heroBase(100).def, hp: heroBase(100).hp * 1000 }), hero(100, { rank: 'Silver3' }))).d;
+  ok(lo > 0 && near(hi, lo, 0.002), `30 levels above the target: ×${(hi / lo).toFixed(3)} in PvP (no level gap)`);
+}
 // how much lower a Legend-level duel now is than before the fix (Beauty of Balance I only, no divisors, no governor)
 {
   const L = 170, a = hero(L, { rank: 'Legend1' }), b = hero(L, { rank: 'Legend1' });

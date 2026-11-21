@@ -659,6 +659,8 @@ export function simulate(P, seed, log) {
   // level gap: 4% a level up to 4 levels, 16% for 5–20 levels, 10% beyond 20 (the game's level offset table);
   // PvE also applies the rank gap (party rank set in the setup; a monster's rank comes from its sub-rank)
   function levelOffset(a, t) {
+    // Damage() takes the level and rank gaps outside PvP only (purrwikimania team.js: `if (PVE) pct *= pveGap(att, def)`)
+    if (P.pvp) return 1;
     const g = Math.floor(a.level) - Math.floor(t.level), ag = Math.abs(g);
     let f = g ? 1 + (ag > 20 ? 0.1 : 0.04 * Math.min(4, ag)) : 1;
     f = g > 0 ? f : g < 0 ? 1 / f : 1;
