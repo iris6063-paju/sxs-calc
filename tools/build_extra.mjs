@@ -126,6 +126,15 @@ const CH = {
   10619: [['proc', 'crit', 1, 'wind', 0]], 10620: [['dmgUp', 'tgtAbove70', 'ST:StatusDmgAddPer']],
   10596: [['aff', 'water', 'WaterDamageAdd']], 10624: [['thunder', 0.5]], 10626: [['dmgRed', 'always', 'ST:StatusDmgReducePer']], 10627: [['aff', 'fire', 'FireDamageAdd']],
   10630: [['aff', 'dark', 'DarkDamageAdd'], ['killSplash', 'dark', 1]], 10631: [['omen']], 10633: [['reactInflict', 'hurt', { k: 'dot', el: 'dark', t: 3, p: 0.5 }]],
+  // 2026-11-21: charms modelled from their game hooks (duel.json passive hooks, trigger skills, status props)
+  10566: [['repel', 0.75, 'wind', 2, 2]], 10605: [['frostGuard', 'ST:StatusDmgReducePer']], 10561: [['burnAura', 0.3]], 10563: [['ripple', 2]],
+  10589: [['becure', 'ST:BeCureAddPercent']], 10569: [['windEcho', 0.3]], 10576: [['wildfire', 0.2]], 10530: [['soulImpact', 2]], 10531: [['resurrect']],
+  10603: [['sumAtk', 'ST:AttackScale', 2]], 10527: [['sumAtk', 'ST:AttackScale', 0]], 10570: [['overheal', 0.3]], 10585: [['erodeTwice', 0.6]],
+  10586: [['shadowVeng', 'ST:StatusDmgAddPer']], 10580: [['vigil', 'ST:FinalDamageReducePercent']], 10608: [['ownTurnRed', 'ST:StatusDmgReducePer']],
+  10557: [['shatter']], 10573: [['overload', 'ST:ShieldByTargetHp']], 10597: [['fieryRejuv']], 10591: [['sumPresence', 'ST:AttackScale']], 10600: [['soulbond']],
+  10610: [['mantra', 'ST:StatusDmgAddPer']], 10611: [['darkStar', 'ST:AttackScale', 'ST:MaxHpScale', 'ST:SpeedScale']], 10612: [['counterUp', 'ST:StatusDmgAddPer']],
+  10613: [['healShift', 'ST:BeCureAddPercent']], 10615: [['holyRestore', 6]], 10616: [['holyRecup', 0.5]], 10621: [['shadowstep', 'ST:SpeedScale', 'ST:StatusDmgReducePer']],
+  10622: [['flamingHeel', 1]], 10623: [['zeal', 'ST:AttackScale']], 10584: [['sumPact', 'ST:MaxHpScale']], 10632: [['elixir', 3, 5, 3]],
 };
 const CLS18 = ['Zhanshi', 'Fashi', 'Huwei', 'Doushi', 'Shushi', 'Xianzhe', 'Dunjiashi', 'Kuangzhanshi', 'Modaoshi', 'Mishushi', 'Shouhuzhe', 'Zhengfuzhe', 'Huimiezhe', 'Zhangkongzhe', 'LegendShouhuzhe', 'LegendZhengfuzhe', 'LegendHuimiezhe', 'LegendZhangkongzhe'];
 const CHARMS = [];

@@ -15,11 +15,13 @@ const FXU = {
   sage: { heal: 0, circle: 1, bless: 2, aoe: 3, melee: 3, finish: 3 },       // 치유의 빛 · 지원 진형 · 축복 · 회복의 파동
 };
 import { MOB, PET } from './engine.js';
-import { hasGlb, buildGlbModel } from './glbmodel.js';
+import { hasGlb, buildGlbModel, buildGlbCreature, needGlb, loadEnv, OUTLINE_G } from './glbmodel.js';
 import { ST_SHORT, stOrder } from './status.js';
 
 /* battlefield grounds: board tiles, island top, foliage tint, sky, fog and light */
 const GROUNDS = {
+  // the stone colosseum built in Blender (tools/blender_arena.py): pale stone checker tiles, the island dressing hidden
+  colosseum: { ko: '콜로세움', tile: [0xe6dcc8, 0xd6cbb4], grass: 0x8fbf63, leaf: null, sky: [0x3f8fe0, 0xa9dbf3, 0xffedcc], fog: 0xd5ecf2, hemi: [0xf2f4ff, 0x8a8170, 1.15], sun: [0xfff1d6, 2.35], exp: 1.06, env: 1 },
   forest: { ko: '숲 섬', tile: [0xa7d77a, 0x9bcf6f], grass: 0x86c45c, leaf: null, sky: [0x3f8fe0, 0xa9dbf3, 0xffedcc], fog: 0xd5ecf2, hemi: [0xe6f6ff, 0x6f9050, 1.15], sun: [0xfff1d6, 2.3], exp: 1.08 },
   moon: { ko: '달밤 숲', tile: [0x5d7f6a, 0x557662], grass: 0x40604f, leaf: [0x2e5a4a, 0.55], sky: [0x0a1430, 0x2b3c6b, 0x5a4a7a], fog: 0x26345a, hemi: [0x9fb4ff, 0x1d2a2a, 0.8], sun: [0xc8d6ff, 1.25], exp: 1.05 },
   duel: { ko: '결투장 (게임풍)', tile: [0xdc9f63, 0xcb8c53], grass: 0xb98452, leaf: [0xa6a457, 0.35], sky: [0x6aa6e0, 0xf2dcb4, 0xffe8c4], fog: 0xf0dcbc, hemi: [0xfff3e0, 0x9a7048, 1.12], sun: [0xfff2d8, 2.35], exp: 1.03, sand: 1 },
@@ -183,7 +185,8 @@ export function createStage(canvas) {
     for (const [gx, gy] of [[5, 4], [14, 5], [7, 8], [12, 7], [9, 12], [15, 13], [6, 15], [11, 16], [16, 9], [4, 11]]) { const m = new THREE.Mesh(geo, mat); m.rotation.x = -Math.PI / 2; m.rotation.z = (gx * 7 + gy) % 4 * 1.57; m.position.set(wx(gy), 0.085, wz(gx)); cracks.add(m); } }
   const inArena = (x, z, pad = 0.6) => Math.abs(x) < 8.4 + pad + 0.6 && Math.abs(z) < 7.2 + pad + 0.6;
 
-  /* trees, rocks, flowers, grass */
+  /* trees, rocks, flowers, grass — the island dressing; the colosseum ground hides it */
+  const decor = new THREE.Group(); world.add(decor);
   const trunkMat = std(0x7a5536), pineMat = [std(0x3f8a4d, { flatShading: true }), std(0x4c9c57, { flatShading: true })];
   const leafMats = [0x5fae4a, 0x74bf52, 0x4e9a45, 0x8fcf5a, 0xf2a7c3, 0xf0b54a].map((c) => std(c, { flatShading: true }));
   const trunkGeo = new THREE.CylinderGeometry(0.13, 0.22, 1, 6), coneGeo = new THREE.ConeGeometry(1, 1.25, 7), blobGeo = new THREE.IcosahedronGeometry(1, 0);
@@ -200,7 +203,7 @@ export function createStage(canvas) {
       for (let i = 0; i < 3; i++) { const b = ink(new THREE.Mesh(blobGeo, mat)); const k = 0.95 - i * 0.16; b.scale.set(k * (0.9 + R() * 0.3), k * 0.85, k * (0.9 + R() * 0.3)); b.position.set((R() - 0.5) * 0.9, 0.35 + i * 0.5, (R() - 0.5) * 0.9); b.rotation.set(R() * 3, R() * 3, R() * 3); b.castShadow = true; crown.add(b); }
     }
     g.rotation.y = R() * 6.28; sways.push([crown, R() * 6.28, 0.5 + R() * 0.5]);
-    world.add(g); return g;
+    decor.add(g); return g;
   }
   const spots = [];
   for (let i = 0; i < 400 && spots.length < 34; i++) {
@@ -213,7 +216,7 @@ export function createStage(canvas) {
     spots.push([x, z]); tree(x, z, 0.95 + R() * 0.75);
   }
   const rockGeo = new THREE.IcosahedronGeometry(1, 0), rockMat = [std(0x9a9a92, { flatShading: true }), std(0x7f837c, { flatShading: true }), std(0xb3ad9c, { flatShading: true })];
-  function boulder(x, z, s) { const m = ink(new THREE.Mesh(rockGeo, rockMat[Math.floor(R() * 3)])); m.position.set(x, s * 0.35, z); m.scale.set(s * (0.8 + R() * 0.5), s * (0.5 + R() * 0.4), s * (0.8 + R() * 0.5)); m.rotation.set(R() * 3, R() * 3, R() * 3); m.castShadow = m.receiveShadow = true; world.add(m); return m; }
+  function boulder(x, z, s) { const m = ink(new THREE.Mesh(rockGeo, rockMat[Math.floor(R() * 3)])); m.position.set(x, s * 0.35, z); m.scale.set(s * (0.8 + R() * 0.5), s * (0.5 + R() * 0.4), s * (0.8 + R() * 0.5)); m.rotation.set(R() * 3, R() * 3, R() * 3); m.castShadow = m.receiveShadow = true; decor.add(m); return m; }
   for (let i = 0; i < 26; i++) { const a = R() * 6.283, r = 9.8 + R() * 9, x = Math.cos(a) * r, z = Math.sin(a) * r; if (!inArena(x, z, 0.8) && !(z < -7 && Math.abs(x) < 4.6)) boulder(x, z, 0.35 + R() * 0.7); }
   const tuft = new THREE.InstancedMesh(new THREE.ConeGeometry(0.07, 0.42, 4), std(0x5fa648), 900);
   const flowerHead = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.09, 0), std(0xffffff), 260);
@@ -225,20 +228,20 @@ export function createStage(canvas) {
     if (nt < 900 && R() < 0.8) { e.set((R() - 0.5) * 0.5, R() * 6, (R() - 0.5) * 0.5); q.setFromEuler(e); const k = 0.7 + R() * 1.1; m4.compose(ps.set(x, 0.2 * k, z), q, sc.set(k, k, k)); tuft.setMatrixAt(nt, m4); tuft.setColorAt(nt, tc.setHSL(0.27 + R() * 0.06, 0.5, 0.36 + R() * 0.12)); nt++; }
     else if (nf < 260) { m4.compose(ps.set(x, 0.16 + R() * 0.1, z), q.identity(), sc.setScalar(0.7 + R() * 0.8)); flowerHead.setMatrixAt(nf, m4); flowerHead.setColorAt(nf, tc.set(fcols[Math.floor(R() * fcols.length)])); nf++; }
   }
-  tuft.count = nt; flowerHead.count = nf; world.add(tuft, flowerHead);
+  tuft.count = nt; flowerHead.count = nf; decor.add(tuft, flowerHead);
   // mushrooms
   const capGeo = new THREE.SphereGeometry(0.2, 10, 6, 0, 6.3, 0, 1.6), stemGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.22, 6), capMat = std(0xe2483c), stemMat = std(0xfff3dc);
-  for (let i = 0; i < 14; i++) { const [tx, tz] = spots[Math.floor(R() * spots.length)]; const x = tx + (R() - 0.5) * 1.8, z = tz + (R() - 0.5) * 1.8; if (inArena(x, z, 0.3)) continue; const s = 0.8 + R() * 0.9; const st = new THREE.Mesh(stemGeo, stemMat); st.position.set(x, 0.11 * s, z); st.scale.setScalar(s); const cp = ink(new THREE.Mesh(capGeo, capMat)); cp.position.set(x, 0.2 * s, z); cp.scale.setScalar(s); cp.castShadow = true; world.add(st, cp); }
+  for (let i = 0; i < 14; i++) { const [tx, tz] = spots[Math.floor(R() * spots.length)]; const x = tx + (R() - 0.5) * 1.8, z = tz + (R() - 0.5) * 1.8; if (inArena(x, z, 0.3)) continue; const s = 0.8 + R() * 0.9; const st = new THREE.Mesh(stemGeo, stemMat); st.position.set(x, 0.11 * s, z); st.scale.setScalar(s); const cp = ink(new THREE.Mesh(capGeo, capMat)); cp.position.set(x, 0.2 * s, z); cp.scale.setScalar(s); cp.castShadow = true; decor.add(st, cp); }
 
   /* pond + waterfall */
   const water = new THREE.Mesh(new THREE.CircleGeometry(3, 28), new THREE.MeshStandardMaterial({ color: 0x4bb8e8, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.88 }));
-  water.rotation.x = -Math.PI / 2; water.position.set(-13.5, 0.04, 6.5); water.scale.set(1, 0.82, 1); world.add(water);
+  water.rotation.x = -Math.PI / 2; water.position.set(-13.5, 0.04, 6.5); water.scale.set(1, 0.82, 1); decor.add(water);
   for (let i = 0; i < 9; i++) { const a = i * 0.7 + R() * 0.3; boulder(-13.5 + Math.cos(a) * 3.1, 6.5 + Math.sin(a) * 2.6, 0.28 + R() * 0.3); }
   const fall = textTexture(64, 256); { const c = fall.ctx; c.fillStyle = '#58bdea'; c.fillRect(0, 0, 64, 256); for (let i = 0; i < 70; i++) { c.fillStyle = `rgba(255,255,255,${0.15 + R() * 0.5})`; c.fillRect(R() * 64, R() * 256, 2 + R() * 4, 14 + R() * 46); } }
   fall.tex.wrapS = fall.tex.wrapT = THREE.RepeatWrapping; fall.tex.repeat.set(1, 1.6);
   const fallMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 15), new THREE.MeshBasicMaterial({ map: fall.tex, transparent: true, opacity: 0.86, side: THREE.DoubleSide }));
-  { const dir = new THREE.Vector3(-13.5, 0, 6.5).normalize(); const edge = 20.9 * wob(Math.atan2(dir.z, dir.x)); fallMesh.position.set(dir.x * edge, -7.6, dir.z * edge); fallMesh.rotation.y = Math.atan2(dir.x, dir.z); world.add(fallMesh);
-    const stream = new THREE.Mesh(new THREE.PlaneGeometry(1.7, edge - Math.hypot(13.5, 6.5) - 2.2), new THREE.MeshStandardMaterial({ color: 0x4bb8e8, roughness: 0.15, transparent: true, opacity: 0.88 })); stream.rotation.x = -Math.PI / 2; stream.rotation.z = -Math.atan2(dir.x, dir.z); const mid = (edge + Math.hypot(13.5, 6.5) + 2.2) / 2; stream.position.set(dir.x * mid, 0.035, dir.z * mid); world.add(stream); }
+  { const dir = new THREE.Vector3(-13.5, 0, 6.5).normalize(); const edge = 20.9 * wob(Math.atan2(dir.z, dir.x)); fallMesh.position.set(dir.x * edge, -7.6, dir.z * edge); fallMesh.rotation.y = Math.atan2(dir.x, dir.z); decor.add(fallMesh);
+    const stream = new THREE.Mesh(new THREE.PlaneGeometry(1.7, edge - Math.hypot(13.5, 6.5) - 2.2), new THREE.MeshStandardMaterial({ color: 0x4bb8e8, roughness: 0.15, transparent: true, opacity: 0.88 })); stream.rotation.x = -Math.PI / 2; stream.rotation.z = -Math.atan2(dir.x, dir.z); const mid = (edge + Math.hypot(13.5, 6.5) + 2.2) / 2; stream.position.set(dir.x * mid, 0.035, dir.z * mid); decor.add(stream); }
 
   /* clouds + islets + fireflies */
   const cloudMat = toonMat(0xffffff, { flatShading: true, fog: false });
@@ -249,8 +252,8 @@ export function createStage(canvas) {
     const g = new THREE.Group(); g.position.set(x, y, z);
     const tp = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.03, 0.5, 14), std(0x86c45c)); const bt = new THREE.Mesh(new THREE.ConeGeometry(r * 1.02, r * 2.2, 9), std(0x6a4a34, { flatShading: true })); bt.rotation.x = Math.PI; bt.position.y = -r * 1.1 - 0.25;
     g.add(tp, bt); scene.add(g); islets.push([g, y, R() * 6]);
-    const t1 = tree(0, 0, 0.9, 'pine'); world.remove(t1); t1.position.set(r * 0.2, 0.25, 0); g.add(t1);
-    const b1 = boulder(0, 0, 0.5); world.remove(b1); b1.position.set(-r * 0.4, 0.4, r * 0.3); g.add(b1);
+    const t1 = tree(0, 0, 0.9, 'pine'); decor.remove(t1); t1.position.set(r * 0.2, 0.25, 0); g.add(t1);
+    const b1 = boulder(0, 0, 0.5); decor.remove(b1); b1.position.set(-r * 0.4, 0.4, r * 0.3); g.add(b1);
   });
   const flyN = 70, flyPos = new Float32Array(flyN * 3), flySeed = [];
   for (let i = 0; i < flyN; i++) flySeed.push([(R() - 0.5) * 34, 0.6 + R() * 4.5, (R() - 0.5) * 30, R() * 6.28, 0.3 + R() * 0.7]);
@@ -263,7 +266,7 @@ export function createStage(canvas) {
   [[-9.6, 0], [9.6, 1]].forEach(([x, t]) => [-6.4, 6.4].forEach((z) => {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 3.4, 6), std(0x5b4636)); pole.position.set(x, 1.7, z); pole.castShadow = true;
     const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.5, 6, 1), toonMat(TEAM[t], { side: THREE.DoubleSide })); cloth.position.set(x + (t ? -0.6 : 0.6), 2.55, z); cloth.castShadow = true;
-    world.add(pole, cloth); banners.push([cloth, R() * 6]);
+    decor.add(pole, cloth); banners.push([cloth, R() * 6]);
   }));
 
   /* Claude-Code-style terminal monolith */
@@ -280,6 +283,23 @@ export function createStage(canvas) {
   const glowL = new THREE.PointLight(0xffc7a3, 14, 13, 1.6); glowL.position.set(0, 3.6, 2.2); tg.add(glowL);
   for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(blobGeo, leafMats[i % 4]); const side = i % 2 ? 1 : -1; b.scale.setScalar(0.35 + R() * 0.4); b.position.set(side * (3.6 + R() * 0.9), 1.2 + R() * (i < 4 ? 4.6 : 1.2), 0.2 + R() * 0.5); tg.add(b); }
   tree(-6.3, -11.6, 1.7, 'pine'); tree(6.5, -11.9, 1.9, 'pine'); tree(-8.6, -9.2, 1.3); tree(8.9, -9.0, 1.4);
+
+  /* the stone colosseum (built in Blender from code: tools/blender_arena.py) — the default ground */
+  const envG = new THREE.Group(); envG.visible = false; world.add(envG);
+  const envFire = [];
+  let groundKey = 'colosseum';
+  loadEnv('env_colosseum').then((g) => {
+    if (!g) return;
+    const meshes = []; g.scene.traverse((o) => { if (o.isMesh) meshes.push(o); }); // collect first: outlines are added below
+    meshes.forEach((o) => {
+      const nm = (o.material && o.material.name) || o.name, col = o.material.color ? o.material.color.clone() : new THREE.Color(0xcccccc);
+      if (nm === 'fire') { o.material = new THREE.MeshBasicMaterial({ color: 0xffa64a, toneMapped: false }); envFire.push(o); return; }
+      o.material = nm === 'crystal' ? toonMat(col, { emissive: col, emissiveIntensity: 0.55 }) : toonMat(col);
+      o.castShadow = nm !== 'grass'; o.receiveShadow = true;
+      if (nm !== 'grass') o.add(new THREE.Mesh(o.geometry, OUTLINE_G));
+    });
+    envG.add(g.scene); setGround(groundKey);
+  });
 
   /* units */
   const unitsG = new THREE.Group(); scene.add(unitsG);
@@ -299,7 +319,7 @@ export function createStage(canvas) {
     let spec = null, tscale = 1, recolor = null;
     // a rigged glTF model (Higgsfield, from the user's SD turnaround) replaces the code-built one when it loaded
     let glbM = null;
-    if (m.kind === 'hero') { u.design = designOf(m.cls); spec = u.design && toonSpec(u.design); glbM = u.design && hasGlb(u.design) ? buildGlbModel(u.design) : null; }
+    if (m.kind === 'hero') { u.design = designOf(m.cls); spec = u.design && toonSpec(u.design); u.glbWant = u.design; glbM = u.design && hasGlb(u.design) ? buildGlbModel(u.design) : null; }
     else if (mob) {
       const md = pet || sumM || MOB.get(m.key), id = toonIdForMob(md.en, pet ? petArtSlug(pet) : mobArtSlug(md));
       spec = id && toonSpec(id);
@@ -308,6 +328,12 @@ export function createStage(canvas) {
         if (!uniq) { const p = pet ? petPalette(pet) : mobPalette(md); recolor = { MAIN: p[0], LIGHT: p[1], DARK: p[2] }; }
         // Hieromon fill their 4×4 / 5×5 bodies
         tscale = pet ? 0.62 : sumM ? 0.7 : uniq ? (m.sz >= 5 ? 2.9 : m.sz === 4 ? 2.5 : 2.0) : mob.ty === 2 ? 1.6 : mob.ty === 1 ? 1.12 : 0.88;
+        // the textured monster / boss model (Tripo, from an original concept) when it loaded; a light tint keeps kinds apart
+        u.glbWant = id;
+        if (hasGlb(id)) {
+          const tint = recolor ? new THREE.Color(0xffffff).lerp(new THREE.Color(recolor.LIGHT), 0.3) : null;
+          glbM = buildGlbCreature(id, { tint, size: uniq ? (m.sz * T * 0.8) / tscale : null });
+        }
       }
     }
     if (spec || glbM) {
@@ -395,7 +421,14 @@ export function createStage(canvas) {
     else if (e && --e.c <= 0) m.delete(ev.k);
   }
   function disposeUnits() { for (const u of units) { unitsG.remove(u.g); u.card.geometry.dispose(); u.mat.dispose(); u.bar.tex.dispose(); if (u.sprite) u.tex.dispose(); if (u.toon) { u.toon.mats.forEach((m) => m.dispose()); if (u.toon.face) u.toon.face.tex.dispose(); } } units = []; }
-  function setRoster(meta) { disposeUnits(); clearTraps(); units = meta.map(makeUnit); ring.visible = false; }
+  function setRoster(meta) {
+    disposeUnits(); clearTraps(); units = meta.map(makeUnit); ring.visible = false;
+    // fetch the glTF models this fight shows; the units are rebuilt (same replay moment) once they arrive
+    const want = units.map((u) => u.glbWant).filter(Boolean);
+    if (want.length) needGlb(want).then((got) => { if (got && units.length && units[0].m === meta[0]) refreshModels(); });
+  }
+  /** rebuild the unit models in place (glTF models arrived) and return to the same replay moment */
+  function refreshModels() { if (!units.length) return; const meta = units.map((u) => u.m), at = play ? play.i : null, was = paused; setRoster(meta); if (play && at != null) { seek(at); paused = was; } }
   /* Blast Spirit charges (grid items: they stand on a cell without blocking it) */
   const trapG = new THREE.Group(); scene.add(trapG);
   const trapM = new Map(), trapGeo = new THREE.IcosahedronGeometry(0.24, 1), trapMat = toonMat(0xff8a3c, { emissive: 0xff5a1a, emissiveIntensity: 0.55 });
@@ -658,6 +691,7 @@ export function createStage(canvas) {
     stepReplay(dt);
     const a = paused ? 0 : dt * speed;
     animT += a;
+    if (envFire.length && envG.visible) { const k = 0.85 + Math.sin(tAll * 11) * 0.08 + Math.sin(tAll * 23) * 0.05; envFire[0].material.color.setRGB(1, 0.62 * k, 0.22 * k); for (const f of envFire) f.scale.y = 0.92 + Math.sin(tAll * 9 + f.id) * 0.08; }
     for (const g of trapM.values()) { if (g.userData.flat) { g.children[0].material.opacity = 0.7 + Math.sin(animT * 6 + g.userData.ph) * 0.15; continue; } g.position.y = 0.45 + Math.sin(animT * 4 + g.userData.ph) * 0.07; g.children[0].rotation.y += a * 2.2; }
     for (const u of units) {
       const g = u.g;
@@ -737,7 +771,9 @@ export function createStage(canvas) {
   /* ground theme + camera presets */
   const leafAll = [...leafMats, ...pineMat], leafOrig = leafAll.map((m) => m.color.clone()), tmpC = new THREE.Color();
   function setGround(key) {
+    groundKey = key;
     const g = GROUNDS[key] || GROUNDS.forest;
+    envG.visible = !!g.env && envG.children.length > 0; decor.visible = !envG.visible; banners.forEach(([c]) => { c.visible = !envG.visible; });
     paintTiles(g.tile);
     tiles.material.map = g.sand ? sandTex : null; tiles.material.needsUpdate = true; cracks.visible = !!g.sand;
     grass.material.color.set(g.grass);
@@ -751,7 +787,7 @@ export function createStage(canvas) {
   return {
     term, setRoster, setGround, setTopView, isTopView: () => topView,
     /** rebuild the unit models in place (the glTF heroes arrived) and return to the same replay moment */
-    refreshModels() { if (!units.length) return; const meta = units.map((u) => u.m), at = play ? play.i : null, was = paused; setRoster(meta); if (play && at != null) { seek(at); paused = was; } },
+    refreshModels,
     play: startReplay,
     stop() { play = null; ring.visible = false; },
     setSpeed(v) { speed = v; }, setPaused(v) { paused = v; }, isPaused: () => paused, isPlaying: () => !!(play && !play.done),

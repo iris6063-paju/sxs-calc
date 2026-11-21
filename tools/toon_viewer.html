@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { buildModel, animate, setMood, stateLen, toonSpec, loadToon } from '../js/toon.js';
-import { loadGlb, buildGlbModel } from '../js/glbmodel.js';
+import { loadGlb, needGlb, buildGlbModel, buildGlbCreature } from '../js/glbmodel.js';
 const glbReady = Promise.all([loadGlb(), loadToon()]);
 const cv = document.getElementById('c'), R = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
 R.setPixelRatio(Math.min(2, devicePixelRatio)); R.setSize(innerWidth, innerHeight); R.shadowMap.enabled = true; R.outputColorSpace = THREE.SRGBColorSpace;
@@ -26,7 +26,11 @@ const models = [];
 const N = ids.length, cols = Math.min(N, +(q.get('cols') || 6)), gap = +(q.get('gap') || 2.6);
 await Promise.all(ids.map(async (id, i) => {
   let spec, m;
-  if (id.startsWith('glb:')) { await glbReady; m = buildGlbModel(id.slice(4), { raw: q.has('raw') }); if (q.has('raw')) m.raw = 1; spec = { kind: 'hero', style: (toonSpec(id.slice(4)) || {}).style || 'shield' }; }
+  if (id.startsWith('glb:')) {
+    const gid = id.slice(4); await glbReady; await needGlb([gid]);
+    if (/^(mob|boss)_/.test(gid)) { m = buildGlbCreature(gid); spec = { kind: 'creature' }; }
+    else { m = buildGlbModel(gid, { raw: q.has('raw') }); if (q.has('raw')) m.raw = 1; spec = { kind: 'hero', style: (toonSpec(gid) || {}).style || 'shield' }; }
+  }
   else { spec = await (await fetch(`../assets/toon/${id}.json?` + Date.now())).json(); m = buildModel(spec, {}); } const sc = +(q.get('scale') || 1) * (spec.kind === 'hero' ? 1 : (spec.viewScale || 1));
   m.root.scale.setScalar(sc);
   const holder = new THREE.Group(); holder.add(m.root); holder.position.set(((i % cols) - (cols - 1) / 2) * gap, 0, -Math.floor(i / cols) * gap * 1.2); holder.rotation.y = shot ? (i ? Math.PI + 0.6 : 0.6) : +(q.get('yaw') || 0.5); S.add(holder);

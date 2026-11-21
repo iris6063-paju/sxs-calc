@@ -120,7 +120,8 @@ function sanitize(s) {
   const out = { ...d, ...s, v: 2, roundCap: { ...d.roundCap, ...(s.roundCap || {}) }, preset: { ...d.preset, ...(s.preset && s.preset.mode ? s.preset : {}) } };
   out.mode = out.mode === 'pvp' ? 'pvp' : 'pve';
   delete out.prank; // the old party rank became each character's own rank (moved onto the heroes below)
-  out.ground = GROUND_LIST.some(([k]) => k === s.ground) ? s.ground : 'forest';
+  // the stone colosseum is the default ground since 2026-11-21; setups saved on the old default forest move to it once
+  out.ground = GROUND_LIST.some(([k]) => k === s.ground) && !(s.ground === 'forest' && !s.gv) ? s.ground : 'colosseum'; out.gv = 1;
   const cellOf = (c) => (Array.isArray(c) && c.length === 2 && c.every((v) => Number.isInteger(v)) ? [c[0], c[1]] : undefined);
   const four =(arr, ok) => { const a = (Array.isArray(arr) ? arr : []).slice(0, 4).map((x) => (x && ok(x) ? x : null)); while (a.length < 4) a.push(null); return a; };
   out.teams = s.teams.map((t) => (Array.isArray(t) ? t : []).filter((u) => u && (u.kind === 'mob' ? MOB.has(u.key) : CLS.has(u.cls))).map((u) => {
@@ -286,6 +287,38 @@ function charmTags(c, rank) {
       case 'thunder': t.push(tag('적이 전투 스킬 사용 시 50% 낙뢰')); break;
       case 'mark10': t.push(tag('10회 타격마다 추가 물리 대미지')); break;
       case 'reflect': t.push(tag('실드 보유 중 받은 대미지 반사')); break;
+      // 2026-11-21: modelled from the game hooks
+      case 'repel': t.push(tag(`적이 ${f[3]}칸 안에 들어오면 ${Math.round(f[1] * 100)}% ${EL[f[2]].ko} 대미지 ${c.c ? c.c[q] + '%' : ''} · ${f[4]}칸 넉백`)); break;
+      case 'frostGuard': t.push(tag(`전투 스킬 없이 턴 종료 시 빙봉: 받는 대미지 −${pc(f[1])}, 다음 턴 시작에 치유`)); break;
+      case 'burnAura': t.push(tag(`턴 시작 · 이동 시 ${Math.round(f[1] * 100)}% 주변 1칸 작열 바닥`)); break;
+      case 'ripple': t.push(tag(`실드가 모두 깨지면 ${f[1]}칸 물 원소 대미지 ${c.c ? c.c[q] + '%' : ''} · 냉기 3중첩`)); break;
+      case 'becure': t.push(tag(`잃은 생명 15%당 받는 치유 +${pc(f[1])} (최대 5)`)); break;
+      case 'windEcho': t.push(tag(`바람 전투 스킬 3타마다 ${Math.round(f[1] * 100)}% 추가 바람 대미지 · 행동 지연`)); break;
+      case 'wildfire': t.push(tag(`불 전투 스킬 시 ${Math.round(f[1] * 100)}% 범위에 작열 바닥`)); break;
+      case 'soulImpact': t.push(tag(`소환수가 사라지면 ${f[1]}칸 어둠 원소 대미지 ${c.c ? c.c[q] + '%' : ''}`)); break;
+      case 'resurrect': t.push(tag('아군 모험가 사망 시 1회 부활 + 치유')); break;
+      case 'sumAtk': t.push(tag(`소환수 공격력 +${pc(f[1])}${f[2] ? ` · 존재 ${f[2]}턴 감소` : ''}`)); break;
+      case 'overheal': t.push(tag(`치유 시 ${Math.round(f[1] * 100)}% 대상 주변 1칸 아군 추가 치유`)); break;
+      case 'erodeTwice': t.push(tag(`침식 부여 시 ${Math.round(f[1] * 100)}% 침식 1개 추가`)); break;
+      case 'shadowVeng': t.push(tag(`첫 치명 대미지에 생명 1로 생존 · 섀도우 형태(면역, 대미지 +${pc(f[1])})`)); break;
+      case 'vigil': t.push(tag(`턴 시작 시 생명 비율 낮은 아군의 대미지 50% 대신 받음 (−${pc(f[1])}, 방어력 우위만큼 추가 감소)`)); break;
+      case 'ownTurnRed': t.push(tag(`자신의 턴 동안 받는 대미지 −${pc(f[1])}`)); break;
+      case 'shatter': t.push(tag(`내가 건 빙결이 풀리면 물 원소 대미지 ${c.c ? c.c[q] + '%' : ''}`)); break;
+      case 'overload': t.push(tag(`한 턴에 최대 생명 15% 잃을 때마다 실드 (최대 생명의 ${pc(f[1])})`)); break;
+      case 'fieryRejuv': t.push(tag('턴 종료 시 2칸 안 작열 바닥이 있으면 치유 (칸당 +10%, 최대 5)')); break;
+      case 'sumPresence': t.push(tag(`소환수가 있으면 공격력 +${pc(f[1])}`)); break;
+      case 'soulbond': t.push(tag('소환수가 사라지면 자신 치유')); break;
+      case 'mantra': t.push(tag(`턴 시작 시 공격력 가장 높은 아군 대미지 +${pc(f[1])}`)); break;
+      case 'darkStar': t.push(tag(`턴 시작 시 무작위 버프 (공격력 · 최대 생명 · 속도 +${pc(f[1])})`)); break;
+      case 'counterUp': t.push(tag(`반격 대미지 +${pc(f[1])}`)); break;
+      case 'healShift': t.push(tag(`받는 치유 +${pc(f[1])} · 치유를 2턴 실드로 전환 (남으면 생명으로)`)); break;
+      case 'holyRestore': t.push(tag(`빛 전투 스킬 ${f[1]}회마다 자신 치유`)); break;
+      case 'holyRecup': t.push(tag(`전투 스킬 없이 턴 종료 시 치유 · 다음 턴 대미지 +${Math.round(f[1] * 100)}%`)); break;
+      case 'shadowstep': t.push(tag(`한 턴에 생명 10% 잃을 때마다 받는 대미지 −${pc(f[2])} · 속도 +${pc(f[1])} (최대 5)`)); break;
+      case 'flamingHeel': t.push(tag(`이동 후 ${f[1]}칸 불 원소 대미지 ${c.c ? c.c[q] + '%' : ''}`)); break;
+      case 'zeal': t.push(tag(`전투 스킬마다 투지(공격력) · 6중첩에 홍련의 투지 +${pc(f[1])} 2턴`)); break;
+      case 'sumPact': t.push(tag(`소환 시 최대 생명 2% 소모 · 소환수 생명 +${pc(f[1])}`)); break;
+      case 'elixir': t.push(tag(`물약 ${f[1]}병(${f[3]}턴마다 +1, 최대 ${f[2]}) · 아군 생명 50% 미만 시 치유`)); break;
     }
   }
   return t.join('');
@@ -1018,7 +1051,7 @@ $('#stepFwd').addEventListener('click', () => { if (cur) stage.stepAction(1); sy
 $('#tlRange').addEventListener('input', (e) => { if (!cur) return; const k = +e.target.value; stage.setPaused(true); stage.seek(k >= cur.acts.length ? cur.r.events.length : cur.acts[k].i); syncPause(); });
 $('#logList').addEventListener('click', (e) => { const l = e.target.closest('.lg[data-a]'); if (!l || !cur) return; stage.setPaused(true); stage.seek(+l.dataset.a); stage.stepAction(1); syncPause(); });
 $('#groundSel').innerHTML = GROUND_LIST.map(([k, ko]) => `<option value="${k}">${ko}</option>`).join('');
-$('#groundSel').value = state.ground || 'forest'; stage.setGround(state.ground || 'forest');
+$('#groundSel').value = state.ground || 'colosseum'; stage.setGround(state.ground || 'colosseum');
 $('#groundSel').addEventListener('change', (e) => { state.ground = e.target.value; stage.setGround(state.ground); touch(true); });
 $('#topBtn').addEventListener('click', () => { stage.setTopView(!stage.isTopView()); $('#topBtn').classList.toggle('on', stage.isTopView()); });
 window.addEventListener('resize', () => { drawStrip(); });

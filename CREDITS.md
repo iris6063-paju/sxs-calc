@@ -48,11 +48,15 @@
   재채색 · 외곽선 · 스티커 테두리 · 합성 · 애니메이션을 더해 **몹 스탠디**와 **영웅의 무기 · 장식 부품**으로 재구성했습니다(`js/icons.js`, `js/sprites.js`).
   사용한 아이콘 이름은 `tools/build_icons.mjs` 에 있습니다.
 - 영웅 캐릭터(기사 · 투사 · 주술사 · 현자 계열)의 몸 · 얼굴 · 의상 리그와 3D 디오라마(섬, 나무, 폭포, 터미널 모놀리스)는 이 프로젝트에서 새로 그린 것입니다.
+- **몹 · 보스 3D 모델(`assets/models/mob_*.glb`, `boss_*.glb`, 49종)** — 이 프로젝트를 위해 새로 쓴 설명으로 Higgsfield의 z_image가 그린 콘셉트 그림을 Tripo(이미지 → 3D)로 바꾼 모델을 Blender에서 다듬었습니다(정면 맞춤 · 감면 · 텍스처 축소 · Draco 압축). 게임 몬스터 그림은 참고하지 않았습니다.
+- **콜로세움 전장(`assets/models/env_colosseum.glb`)** — `tools/blender_arena.py`로 Blender에서 새로 지은 모델입니다.
 - **영웅 3D 모델(`assets/models/*.glb`, 6종)** — 사용자가 제공한 SD 에셋 시트 6종의 4방향 그림(원본 시트는 저장소 미포함)으로 Higgsfield의 Meshy 다중 이미지 → 3D(텍스처 · 리깅)가 생성한 모델입니다. 텍스처를 1024px로 줄이고 쓰지 않는 애니메이션 · 접선 자료를 뺐습니다. 게임 그림 · 모델은 쓰지 않았습니다.
 
 ## 라이브러리 · 글꼴
 
-- **three.js** r160 — MIT — `vendor/THREE-LICENSE.txt` (GLTFLoader · BufferGeometryUtils · SkeletonUtils 포함)
+- **three.js** r160 — MIT — `vendor/THREE-LICENSE.txt` (GLTFLoader · DRACOLoader · BufferGeometryUtils · SkeletonUtils 포함)
+- **Draco 디코더** (`vendor/draco/`, three.js r160 배포본) — Google, Apache License 2.0 — https://github.com/google/draco
+- **Blender** 5.4 — 모델 가공 · 전장 제작 도구로만 사용(결과물에 포함된 Blender 코드 없음)
 - **Pretendard** — SIL Open Font License 1.1 (CDN 로드)
 - **JetBrains Mono** — SIL Open Font License 1.1 (Google Fonts 로드)
 

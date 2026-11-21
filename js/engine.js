@@ -190,6 +190,38 @@ function compileCharms(list, u) {
         case 'thunder': ch.thunder = { p: f[1], coef, flat }; break;
         case 'mark10': ch.mark = { coef, flat }; break;
         case 'reflect': ch.reflect = pct(f[1]); break;
+        // 2026-11-21: from the game hooks (duel.json passives, their trigger skills and status props)
+        case 'repel': ch.repel = { p: f[1], el: f[2], r: f[3], kb: f[4], coef, flat }; break;
+        case 'frostGuard': ch.frostGuard = { v: pct(f[1]), healPct, healFlat }; break;
+        case 'burnAura': ch.burnAura = { p: f[1], coef, flat }; break;
+        case 'ripple': ch.ripple = { r: f[1], coef, flat }; break;
+        case 'becure': ch.becure = pct(f[1]); break;
+        case 'windEcho': ch.windEcho = { p: f[1], coef, flat }; break;
+        case 'wildfire': ch.wildfire = { p: f[1], coef, flat }; break;
+        case 'soulImpact': ch.soulImpact = { r: f[1], coef, flat }; break;
+        case 'resurrect': ch.resurrect = { healPct, healFlat }; break;
+        case 'sumAtk': ch.sumAtk = (ch.sumAtk || 0) + pct(f[1]); if (f[2]) ch.sumLife = (ch.sumLife || 0) + f[2]; break;
+        case 'overheal': ch.overheal = { p: f[1], healPct, healFlat }; break;
+        case 'erodeTwice': ch.erodeTwice = f[1]; break;
+        case 'shadowVeng': ch.shadowVeng = pct(f[1]); break;
+        case 'vigil': ch.vigil = pct(f[1]); break;
+        case 'ownTurnRed': ch.ownTurnRed = pct(f[1]); break;
+        case 'shatter': ch.shatter = { coef, flat }; break;
+        case 'overload': ch.overload = pct(f[1]); break;
+        case 'fieryRejuv': ch.fieryRejuv = { healPct, healFlat }; break;
+        case 'sumPresence': ch.sumPresence = pct(f[1]); break;
+        case 'soulbond': ch.soulbond = { healPct, healFlat }; break;
+        case 'mantra': ch.mantra = pct(f[1]); break;
+        case 'darkStar': ch.darkStar = [pct(f[1]), pct(f[2]), pct(f[3])]; break;
+        case 'counterUp': ch.counterUp = pct(f[1]); break;
+        case 'healShift': ch.healShift = pct(f[1]); break;
+        case 'holyRestore': ch.holyRestore = { n: f[1], healPct, healFlat }; break;
+        case 'holyRecup': ch.holyRecup = { dmg: f[1], healPct, healFlat }; break;
+        case 'shadowstep': ch.shadowstep = { spd: pct(f[1]), red: pct(f[2]) }; break;
+        case 'flamingHeel': ch.flamingHeel = { r: f[1], coef, flat }; break;
+        case 'zeal': ch.zeal = pct(f[1]); break;
+        case 'sumPact': ch.sumPact = pct(f[1]); break;
+        case 'elixir': ch.elixir = { start: f[1], max: f[2], every: f[3], healPct, healFlat }; break;
       }
     }
   }
@@ -424,7 +456,7 @@ export function simulate(P, seed, log) {
     dmg: 0, taken: 0, healed: 0, kills: 0, lastAil: -9, ailStreak: 0,
     casts: 0, eye: 0, stone: 0, marks: 0, lossAcc: 0, supTurn: -1, supN: 0, petStk: 0, undyingUsed: false, above50: true, voidUsed: false, energy: 0, reactCast: -1,
   }));
-  const B = { U, pvp: P.pvp, round: 1, pvpScale: 1, healScale: 1, castId: 0, over: false, winner: -1, now: 0, traps: [], trapN: 0, totem: false };
+  const B = { U, pvp: P.pvp, round: 1, pvpScale: 1, healScale: 1, castId: 0, over: false, winner: -1, now: 0, traps: [], trapN: 0, totem: false, cur: null, turnSeq: 0, elixir: [] };
   for (const u of U) if (!u.out) setOcc(u, u.id);
   const aliveCount = [0, 0];
   const proxU = U.filter((u) => u.mp && u.mp.prox); // units with an on-enter proximity passive
@@ -497,6 +529,11 @@ export function simulate(P, seed, log) {
     if (ev) ev.push({ e: 'st', t: u.id, k: s.k, on: 0 });
   }
   function kill(t, by) {
+    // Resurrection (an allied adventurer's charm, once per battle): the fallen character is revived and healed
+    if (t.kind === 'hero' && !B.over) for (const r of U) if (r !== t && r.alive && r.team === t.team && r.ch && r.ch.resurrect && !r.resUsed) {
+      r.resUsed = true; t.hp = 1; pvLabel(r, '리바이벌'); heal(r, t, r.hpMax * r.ch.resurrect.healPct + r.ch.resurrect.healFlat); return;
+    }
+    if (t.sum && !t.clone) sumGone(t);
     t.alive = false; t.hp = 0; setOcc(t, -1);
     if (by) by.kills++;
     if (ev) ev.push({ e: 'die', u: t.id });
@@ -514,7 +551,11 @@ export function simulate(P, seed, log) {
   }
   function heal(a, t, v) {
     if (!t.alive || v <= 0) return 0;
+    if (t.shadowF) return 0; // Shadow Form: cannot be healed
     v = Math.floor(v * B.healScale * (1 + (a.healUp || 0) + (a.healBoost || 0))); // Healing Boost (stats screen) + healing-up effects
+    // Potential Vitality: healing received +x per 15% HP lost (up to 5); Healing Shift: +x and the heal becomes a 2-turn shield
+    if (t.ch && t.ch.becure) v = Math.floor(v * (1 + t.ch.becure * lost15(t)));
+    if (t.ch && t.ch.healShift && !t.shiftBusy) { v = Math.floor(v * (1 + t.ch.healShift)); t.shiftBusy = 1; addStatus(t, { k: 'shield', v, exp: t.turnNo + 2, buff: true, src: a.id, shift: 1 }); t.shiftBusy = 0; a.healed += v; if (ev) ev.push({ e: 'shield', t: t.id, v, sh: t.shield }); return v; }
     const real = Math.min(v, t.hpMax - t.hp);
     if (real <= 0) return 0;
     t.hp += real; a.healed += real;
@@ -551,6 +592,10 @@ export function simulate(P, seed, log) {
 
   /** raw damage application incl. shields; returns HP damage dealt */
   function applyDamage(a, t, d, o) {
+    if (t.shadowF) { if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d: 0, k: 3, hp: t.hp, sh: t.shield, el: o.el }); return 0; } // Shadow Form: immune
+    // Oath of Vigil: the guardian takes half of the DMG, reduced by its own share (+1% per 1% more DEF than the guarded)
+    if (t.vigilBy != null && !o.vigil) { const g = U[t.vigilBy]; if (g && g.alive && g !== t) { const half = Math.floor(d * 0.5), red = Math.min(0.95, g.ch.vigil + Math.max(0, eDef(g) / Math.max(1, eDef(t)) - 1)); d -= half; applyDamage(a, g, Math.max(1, Math.floor(half * (1 - red))), { ...o, vigil: 1 }); if (!t.alive || B.over) return 0; } }
+    const hadShield = t.shield > 0;
     let hpDmg = d;
     if (t.shield > 0) {
       const mul = o.doom ? 2 : 1;
@@ -564,14 +609,20 @@ export function simulate(P, seed, log) {
       hpDmg = Math.floor(left / mul);
     }
     hpDmg = Math.min(hpDmg, t.hp);
-    let saved = false;
+    let saved = false, shadow = false;
     if (hpDmg >= t.hp && t.ch && t.ch.undying && !t.undyingUsed) { t.undyingUsed = true; saved = true; hpDmg = t.hp - 1; }
+    // Shadow Vengeance: the first lethal DMG leaves 1 HP and Shadow Form until the end of its next turn
+    else if (hpDmg >= t.hp && t.ch && t.ch.shadowVeng && !t.svUsed) { t.svUsed = true; shadow = true; hpDmg = t.hp - 1; }
     t.hp -= hpDmg; a.dmg += hpDmg; t.taken += hpDmg;
     if (ev) ev.push({ e: 'hit', a: a.id, t: t.id, d, k: o.kind || 0, hp: t.hp, sh: t.shield, el: o.el });
     if (o.ls && hpDmg > 0) heal(a, a, hpDmg * o.ls);
     // Decoy Clone: the HP it loses, the linked unit loses too (True DMG; shields still take it)
     if (t.clone && hpDmg > 0 && U[t.link] && U[t.link].alive) applyDamage(a, U[t.link], Math.max(1, Math.floor(hpDmg * (t.linkV || 1))), { el: o.el, kind: 4 });
     if (t.hp <= 0) { kill(t, a); return hpDmg; }
+    if (shadow) { t.shadowF = 1; pvLabel(t, '섀도우 형태'); addStatus(t, { k: 'dmgUp', v: t.ch.shadowVeng, exp: t.turnNo + 1, buff: true, nd: 1, shadow: 1 }); }
+    if (hadShield && t.shield <= 0 && t.ch && t.ch.ripple && !B.over) chRipple(t);
+    if (hpDmg > 0 && t.ch && (t.ch.overload || t.ch.shadowstep)) chLossStacks(t, hpDmg);
+    if (hpDmg > 0 && B.elixir.length && t.hp < t.hpMax * 0.5 && t.hp + hpDmg >= t.hpMax * 0.5) chElixir(t);
     if (saved) { const c = t.ch.undying; heal(t, t, t.hpMax * c.healPct + c.healFlat); if (c.indom) addStatus(t, { k: 'dmgRed', v: 0.9, exp: t.turnNo + 2, buff: true }); }
     // HP-threshold charms
     const below = t.hp / t.hpMax < 0.5;
@@ -676,6 +727,7 @@ export function simulate(P, seed, log) {
   function onDealt(a, t, kind, el) {
     if (a.mp && !B.over) mobPassiveDealt(a, t, kind, el);
     const c = a.ch; if (!c || B.over) return;
+    if (c.windEcho && el === 'wind' && kind !== 3) chWindEcho(a, t);
     for (const p of c.procs) {
       if ((p.on === 'crit' && kind !== 1) || (p.opt.cond && p.opt.cond !== el) || rnd() >= p.p) continue;
       const tx = t.x, ty = t.y;
@@ -697,7 +749,7 @@ export function simulate(P, seed, log) {
       fired = true;
       if (r.inflict) tryStatus(t, a, r.inflict);
       else if (r.aoe) { for (const f of U.filter((x) => x.alive && x.team !== t.team && dUU(x, t) <= r.aoe)) hit(t, f, r.coef, r.flat, r.el, { noProc: 1, noReact: 1 }); }
-      else hit(t, a, r.coef, r.flat, r.el, { base: (r.by === 'def' ? eDef(t) : eAtk(t)) * r.coef + r.flat, noProc: 1, noReact: 1 });
+      else hit(t, a, r.coef, r.flat, r.el, { base: (r.by === 'def' ? eDef(t) : eAtk(t)) * r.coef + r.flat, noProc: 1, noReact: 1, mult: 1 + (c.counterUp || 0) });
     }
     if (c.reflect && t.shield > 0 && a.alive) { fired = true; applyDamage(t, a, Math.max(1, Math.floor(d * c.reflect)), { el: 'light', kind: 4 }); }
     if (fired) t.reactCast = B.castId;
@@ -712,6 +764,7 @@ export function simulate(P, seed, log) {
     if (a.pierceUntil != null && a.pierceUntil >= a.turnNo && a.mp && a.mp.pierce) def *= 1 - a.mp.pierce[0].v;
     // stacking DMG reduction (StatusDmgReducePer): the game divides by 1 + the total (Field Guard 50 × 1.5% → ÷1.75)
     if (t.drN > 0) redX /= 1 + t.drN * t.drV;
+    if (t.ch && t.ch.ownTurnRed && B.cur === t) redX *= 1 - t.ch.ownTurnRed; // Spirit in Fire
     // Dual Surge (Yoldra): Inferno +4% DMG dealt per Fire cast, Tideform +4% DMG reduction per Water cast
     if (a.infN) boost += a.infN * a.mp.dualSurge[0].v;
     if (t.tideN) redX /= 1 + t.tideN * t.mp.dualSurge[0].v;
@@ -797,7 +850,12 @@ export function simulate(P, seed, log) {
       if (ex) { ex.v = Math.max(ex.v, v); ex.exp = Math.max(ex.exp, t.turnNo + turns); recalc(t); stEv(t, ex, true); return; }
       addStatus(t, { k, v, exp: t.turnNo + turns }); return;
     }
-    if (k === 'dot') { addStatus(t, { k, el: e.el || 'dark', src: a.id, exp: t.turnNo + (e.t || 3) }); return; }
+    if (k === 'dot') {
+      addStatus(t, { k, el: e.el || 'dark', src: a.id, exp: t.turnNo + (e.t || 3) });
+      if ((e.el || 'dark') === 'dark' && a.ch && a.ch.erodeTwice && rnd() < a.ch.erodeTwice) addStatus(t, { k, el: 'dark', src: a.id, exp: t.turnNo + (e.t || 3) }); // Linked Misfortune
+      return;
+    }
+    if (k === 'freeze' && a.ch && a.ch.shatter) { addStatus(t, { k, v, exp: t.turnNo + turns, uniq: 1, cast: B.castId, src: a.id, shatter: 1 }); return; }
     if (k === 'taunt') { addStatus(t, { k, src: a.id, exp: t.turnNo + turns, uniq: 1 }); return; }
     if (k === 'lacer') { addStatus(t, { k, src: a.id, coef: e.coef || 0, flat: e.flat || 0, exp: t.turnNo + turns, uniq: 1 }); return; }
     addStatus(t, { k, v, exp: t.turnNo + turns, uniq: 1, cast: B.castId });
@@ -814,7 +872,7 @@ export function simulate(P, seed, log) {
   const foesOf = (u) => { const tn = has(u, 'taunt'); if (tn && U[tn.src] && U[tn.src].alive) return [U[tn.src]]; const o = []; for (const f of U) if (f.alive && f.team !== u.team) o.push(f); return o; };
   const alliesOf = (u) => { const o = []; for (const f of U) if (f.alive && f.team === u.team) o.push(f); return o; };
   /** main-target pool: Stealth "cannot be selected as the main target" while another enemy can */
-  const aimFoes = (u) => { const fs = foesOf(u); if (!fs.some((f) => f.sum)) return fs; const vis = fs.filter((f) => !has(f, 'stealth')); return vis.length ? vis : fs; };
+  const aimFoes = (u) => { const fs = foesOf(u); if (!fs.some((f) => f.sum || f.shadowF)) return fs; const vis = fs.filter((f) => !f.shadowF && !has(f, 'stealth')); return vis.length ? vis : fs; };
   /** the AI's VoodooDollCountWeightChange (+1): a Decoy Clone counts as one more target ("prioritized by allies as an attack target") */
   const wt = (f) => (f.clone ? 2 : 1);
   /** does one cell lie in a caster-anchored area (A / Q / F) */
@@ -954,9 +1012,10 @@ export function simulate(P, seed, log) {
     if (x === u.x && y === u.y) return;
     // Trial by Fire (Flamoenix): an enemy that comes within range of the body is struck
     const prox = proxU.length ? proxU.filter((f) => f.alive && f.team !== u.team && dUU(u, f) > f.mp.prox[0].r) : null;
+    const from = [u.x, u.y];
     setOcc(u, -1); u.x = x; u.y = y; setOcc(u, u.id);
     if (ev) ev.push({ e: 'move', u: u.id, x, y, leap: leap === 1 || leap === true ? 1 : 0, ...(typeof leap === 'string' ? { [leap]: 1 } : {}) });
-    moved(u);
+    moved(u, from, leap);
     if (prox) for (const f of prox) if (u.alive && !B.over && dUU(u, f) <= f.mp.prox[0].r) { const p = f.mp.prox[0]; pvLabel(f, p.name); hit(f, u, p.c, 0, p.el, { noProc: 1, noReact: 1 }); }
   }
   /** DIRS index that points from the unit toward a target */
@@ -1215,6 +1274,7 @@ export function simulate(P, seed, log) {
     // enemy Thunder Judgment reacts to this cast
     for (const f of U) if (f.alive && u.alive && !B.over && f.team !== u.team && f.ch && f.ch.thunder && dUU(f, u) <= 5 && rnd() < f.ch.thunder.p) hit(f, u, f.ch.thunder.coef, f.ch.thunder.flat, 'light', { noProc: 1, noReact: 1 });
     if (s.burn && u.alive && !B.over) placeBurn(u, s, n, pl);
+    if (s.el === 'fire' && u.ch && u.ch.wildfire && u.alive && !B.over && rnd() < u.ch.wildfire.p) burnCells(u, around(pl.ax, pl.ay, 1, true), u.ch.wildfire.coef, u.ch.wildfire.flat, 3);
     petProc(u, targets);
   }
   /** Fantomon support skill that follows the owner's damaging technique */
@@ -1253,6 +1313,7 @@ export function simulate(P, seed, log) {
   function nearFree(x, y, r = 4) { if (free(x, y)) return [x, y]; for (const [dx, dy, d] of DIAMOND) { if (!d) continue; if (d > r) break; if (free(x + dx, y + dy)) return [x + dx, y + dy]; } return null; }
   function dismiss(p) {
     if (!p.alive) return;
+    if (!p.clone) sumGone(p);
     p.alive = false; p.hp = 0; setOcc(p, -1); p.out = true; p.st = []; p.shield = 0;
     if (ev) ev.push({ e: 'die', u: p.id, fade: 1 });
   }
@@ -1264,6 +1325,11 @@ export function simulate(P, seed, log) {
     p.next = sm.imm ? B.now + 1e-6 * (1 + p.slot) : B.now + interval(p);
     if (ev) ev.push({ e: 'spawn', u: p.id, x: p.x, y: p.y, sum: 1, hp: p.hpMax, owner: o.id });
     if (sm.stealth) addStatus(p, { k: 'stealth', exp: 1e9, buff: true, nd: 1 });
+    const oc = o.ch;
+    if (oc && oc.sumAtk) addStatus(p, { k: 'atkUp', v: p.atk * oc.sumAtk, exp: 1e9, buff: true, nd: 1 });
+    if (oc && oc.sumLife && !p.clone && p.life > 0) p.life = Math.max(1, p.life - oc.sumLife);
+    if (oc && oc.sumPact && !p.clone) { const add = Math.floor(p.hpMax * oc.sumPact); addStatus(p, { k: 'hpUp', v: add, exp: 1e9, buff: true, nd: 1 }); p.hpMax += add; p.hp += add; }
+    if (oc && oc.sumPresence) chSumPresence(o);
     if (p.aura) { B.totem = true; for (const a of alliesOf(p)) totemAura(a); }
   }
   /** slots for a cast: free ones first; when every set is standing, the oldest set is replaced */
@@ -1315,6 +1381,7 @@ export function simulate(P, seed, log) {
     for (const [, c] of placed) occ[c[1] * W + c[0]] = -1;
     if (!placed.length) return false;
     B.castId++; u.casts++; label([]);
+    if (u.ch && u.ch.sumPact) { const cost = Math.min(u.hp - 1, Math.floor(u.hpMax * 0.02)); if (cost > 0) { u.hp -= cost; if (ev) ev.push({ e: 'hit', a: u.id, t: u.id, d: cost, k: 4, hp: u.hp, sh: u.shield, el: 'none' }); } } // Summoning Pact: 2% max HP
     for (const [p, c] of placed) spawnSummon(u, p, c, sm);
     return true;
   }
@@ -1393,10 +1460,119 @@ export function simulate(P, seed, log) {
     for (const t of B.traps) if (t.burn && t.team !== u.team && fpOf(u).some(([dx, dy]) => u.x + dx === t.x && u.y + dy === t.y)) { burnHit(t, u); if (!u.alive || B.over) return; }
   }
   /** after any move: Laceration strikes the mover, then a burning cell under it */
-  function moved(u) {
+  function moved(u, from, leap) {
+    if (u.alive && !B.over && from && leap !== 'kb') chMoved(u, from);
     const lc = u.alive && u.st.length ? has(u, 'lacer') : null;
     if (lc && U[lc.src] && !B.over) { if (ev) ev.push({ e: 'cast', u: lc.src, n: '열상', el: 'wind', tg: [u.id], ax: u.x, ay: u.y, sh: 'S', ar: 0, pet: 1 }); hit(U[lc.src], u, lc.coef, lc.flat, 'wind', { noProc: 1, noReact: 1 }); }
     if (B.traps.length && u.alive && !B.over) burnCheck(u);
+  }
+  /* ── charm hooks (2026-11-21) ── */
+  /** cells within r (Manhattan, or a square when sq) around a point, on the board */
+  const around = (x, y, r, sq) => { const o = []; for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { if (!sq && Math.abs(dx) + Math.abs(dy) > r) continue; const cx = x + dx, cy = y + dy; if (cx >= 0 && cy >= 0 && cx < W && cy < H) o.push([cx, cy]); } return o; };
+  /** burning ground on cells (Flaming Path, Raging Wildfire): the same ground as Meteoric Flames, the charm's numbers */
+  function burnCells(u, cells, coef, flat, life) {
+    for (const [x, y] of cells) {
+      if (B.traps.some((t) => t.burn && t.x === x && t.y === y && t.team === u.team)) continue;
+      const t = { id: ++B.trapN, burn: 1, x, y, team: u.team, src: u.id, coef, flat, life, seen: new Set() };
+      B.traps.push(t); if (ev) ev.push({ e: 'trap', id: t.id, x, y, team: u.team, on: 1, burn: 1 });
+      const o = occ[y * W + x]; if (o >= 0 && U[o].alive && U[o].team !== u.team) burnHit(t, U[o]);
+    }
+  }
+  function chRipple(t) {
+    const c = t.ch.ripple; pvLabel(t, '웨이브 임팩트');
+    for (const f of U) if (f.alive && f.team !== t.team && dUU(f, t) <= c.r) { hit(t, f, c.coef, c.flat, 'water', { noProc: 1, noReact: 1 }); for (let i = 0; i < 3 && f.alive; i++) tryStatus(t, f, { k: 'cold', p: 1, t: 2 }); if (B.over) break; }
+  }
+  /** Overload Protection (a shield per 15% max HP lost) / Shadowstep (DMG RES + SPD per 10%) between the holder's turns */
+  function chLossStacks(t, d) {
+    // "within a single turn": counted from the holder's own turn to its next one (the hpAcc hook resets on its turn)
+    if (t.lossSeq !== t.turnNo) { t.lossSeq = t.turnNo; t.lossAcc2 = 0; t.lossN15 = 0; t.lossN10 = 0; }
+    t.lossAcc2 += d;
+    const c = t.ch;
+    if (c.overload) while (t.lossAcc2 >= (t.lossN15 + 1) * 0.15 * t.hpMax) { t.lossN15++; addShield(t, t, t.hpMax * c.overload, 2); }
+    if (c.shadowstep) while (t.lossAcc2 >= (t.lossN10 + 1) * 0.1 * t.hpMax) {
+      t.lossN10++;
+      const s = t.st.find((x) => x.k === 'shStep');
+      if (s) { s.n = Math.min(5, s.n + 1); s.exp = t.turnNo + 2; } else addStatus(t, { k: 'shStep', n: 1, exp: t.turnNo + 2, buff: true });
+      const n = t.st.find((x) => x.k === 'shStep').n;
+      for (let i = t.st.length - 1; i >= 0; i--) if (t.st[i].shStepPart) t.st.splice(i, 1);
+      t.st.push({ k: 'dmgRed', v: c.shadowstep.red * n, exp: t.turnNo + 2, buff: true, shStepPart: 1 }, { k: 'spdUp', v: t.spd * c.shadowstep.spd * n, exp: t.turnNo + 2, buff: true, shStepPart: 1 });
+      recalc(t);
+    }
+  }
+  /** Rejuvenating Elixir: an ally falling under 50% HP drinks one of the owner's potions */
+  function chElixir(t) {
+    if (t.sum || t.pet) return;
+    const o = B.elixir.find((x) => x.alive && x.team === t.team && x.potions > 0); if (!o) return;
+    o.potions--; pvLabel(o, '재생의 영약'); heal(o, t, o.hpMax * o.ch.elixir.healPct + o.ch.elixir.healFlat);
+  }
+  /** a summon died or faded: Soul Impact (Dark DMG around it), Soulbond Restoration (the owner heals) */
+  function sumGone(p) {
+    const o = U[p.owner]; if (!o || !o.alive || !o.ch || B.over) return;
+    if (o.ch.soulImpact) { const c = o.ch.soulImpact; pvLabel(o, '소울 임팩트'); for (const f of U) if (f.alive && f.team !== o.team && dU(f, p.x, p.y) <= c.r) { hit(o, f, c.coef, c.flat, 'dark', { noProc: 1, noReact: 1 }); if (B.over) break; } }
+    if (o.ch.soulbond && o.alive) heal(o, o, o.hpMax * o.ch.soulbond.healPct + o.ch.soulbond.healFlat);
+    if (o.ch.sumPresence) chSumPresence(o, p);
+  }
+  /** Soul Pact Resonance: ATK up while one of the caster's summons stands */
+  function chSumPresence(o, leaving) {
+    const on = U.some((p) => p.sum && !p.clone && p.alive && p !== leaving && p.owner === o.id);
+    const i = o.st.findIndex((x) => x.spa);
+    if (on && i < 0) addStatus(o, { k: 'atkUp', v: o.atk * o.ch.sumPresence, exp: 1e9, buff: true, nd: 1, spa: 1 });
+    else if (!on && i >= 0) { removeStatus(o, i); recalc(o); }
+  }
+  function chOnCast(u, s) {
+    const c = u.ch;
+    // Holy Restoration: Renewing Light per Light technique, a heal at 6 stacks
+    if (c.holyRestore && s.el === 'light') { u.hrN = (u.hrN || 0) + 1; if (u.hrN >= c.holyRestore.n) { u.hrN = 0; pvLabel(u, '성령의 치유'); heal(u, u, u.hpMax * c.holyRestore.healPct + c.holyRestore.healFlat); } }
+    // Scarlet Zeal: Battle Zeal stacks (ATK +1/10 of the charm value each), at 6 Scarlet Zeal (the full value) for 2 turns
+    if (c.zeal && !has(u, 'zealR')) {
+      const z = u.st.find((x) => x.k === 'zeal');
+      if (z) { z.n++; z.v = u.atk * c.zeal * 0.1 * z.n; } else addStatus(u, { k: 'zeal', n: 1, v: u.atk * c.zeal * 0.1, exp: 1e9, buff: true, nd: 1 });
+      const z2 = u.st.find((x) => x.k === 'zeal');
+      if (z2.n >= 6) { u.st.splice(u.st.indexOf(z2), 1); pvLabel(u, '홍련의 투지'); addStatus(u, { k: 'zealR', v: u.atk * c.zeal, exp: u.turnNo + 2, buff: true, nd: 1 }); }
+      recalc(u);
+    }
+  }
+  function chTurnStart(u) {
+    const c = u.ch;
+    // Frost Guard: Icebound ends at the start of the turn with a heal
+    const ice = u.st.findIndex((x) => x.ice); if (ice >= 0) { removeStatus(u, ice); recalc(u); heal(u, u, u.hpMax * c.frostGuard.healPct + c.frostGuard.healFlat); }
+    // Flaming Path: 30% at turn start — burning ground on the cells within 1 grid
+    if (c.burnAura && rnd() < c.burnAura.p) burnCells(u, around(u.x, u.y, 1), c.burnAura.coef, c.burnAura.flat, 3);
+    // Oath of Vigil: the ally with the lowest HP share is guarded until this unit's next turn
+    if (c.vigil) { for (const f of U) if (f.vigilBy === u.id) f.vigilBy = null; const al = U.filter((f) => f.alive && f.team === u.team && f !== u && f.kind === 'hero'); if (al.length) al.reduce((b, f) => (f.hp / f.hpMax < b.hp / b.hpMax ? f : b), al[0]).vigilBy = u.id; }
+    // Mantra of Blessings / Falling Dark Star: until this unit's next turn
+    for (const f of U) for (let i = f.st.length - 1; i >= 0; i--) if (f.st[i].tillSrc === u.id) { removeStatus(f, i); recalc(f); }
+    if (c.mantra) { const al = U.filter((f) => f.alive && f.team === u.team && !f.sum && !f.pet); if (al.length) addStatus(al.reduce((b, f) => (eAtk(f) > eAtk(b) ? f : b), al[0]), { k: 'dmgUp', v: c.mantra, exp: 1e9, buff: true, nd: 1, tillSrc: u.id }); }
+    if (c.darkStar) { const r = Math.floor(rnd() * 3), v = c.darkStar[r]; if (r === 0) addStatus(u, { k: 'atkUp', v: u.atk * v, exp: 1e9, buff: true, nd: 1, tillSrc: u.id }); else if (r === 1) { const add = Math.floor(u.hpMax * v); addStatus(u, { k: 'hpUp', v: add, exp: 1e9, buff: true, nd: 1, tillSrc: u.id }); u.hpMax += add; u.hp += add; } else addStatus(u, { k: 'spdUp', v: u.spd * v, exp: 1e9, buff: true, nd: 1, tillSrc: u.id }); }
+    if (c.sumPresence) chSumPresence(u);
+    // Rejuvenating Elixir: one more potion every 3 turns (up to 5)
+    if (c.elixir && u.turnNo % c.elixir.every === 0) u.potions = Math.min(c.elixir.max, (u.potions || 0) + 1);
+  }
+  function chTurnEnd(u) {
+    const c = u.ch, idle = (u.tCasts || 0) === u.tc0;
+    // Frost Guard: no technique this turn → Icebound (DMG RES) until the next turn starts
+    if (c.frostGuard && idle) addStatus(u, { k: 'dmgRed', v: c.frostGuard.v, exp: 1e9, buff: true, nd: 1, ice: 1 });
+    // Holy Recuperation: no technique this turn → a heal, and +50% DMG next turn
+    if (c.holyRecup && idle) { heal(u, u, u.hpMax * c.holyRecup.healPct + c.holyRecup.healFlat); addStatus(u, { k: 'dmgUp', v: c.holyRecup.dmg, exp: u.turnNo + 1, buff: true }); }
+    // Fiery Rejuvenation: burning cells within 2 grids → a heal, +10% for each one beyond the first (up to 5)
+    if (c.fieryRejuv) { const n = B.traps.filter((t) => t.burn && dist(t.x, t.y, u.x, u.y) <= 2).length; if (n) heal(u, u, (u.hpMax * c.fieryRejuv.healPct + c.fieryRejuv.healFlat) * (1 + 0.1 * Math.min(4, n - 1))); }
+  }
+  /** after an active move: the mover's Flaming Heel / Flaming Path, and enemies' Repelling Wind it stepped into */
+  function chMoved(u, from) {
+    if (u.ch && u.ch.flamingHeel) { const c = u.ch.flamingHeel; const tg = U.filter((f) => f.alive && f.team !== u.team && dUU(f, u) <= c.r); if (tg.length) { pvLabel(u, '불꽃 발걸음'); for (const f of tg) { hit(u, f, c.coef, c.flat, 'fire', { noProc: 1, noReact: 1 }); if (B.over) return; } } }
+    if (u.ch && u.ch.burnAura && u.alive && rnd() < u.ch.burnAura.p) burnCells(u, around(u.x, u.y, 1), u.ch.burnAura.coef, u.ch.burnAura.flat, 3);
+    for (const g of U) {
+      if (!u.alive || B.over) return;
+      if (!g.alive || g.team === u.team || !g.ch || !g.ch.repel) continue;
+      const r = g.ch.repel, was = dU(g, from[0], from[1]), now = dUU(g, u);
+      if (was > r.r && now <= r.r && rnd() < r.p) { pvLabel(g, '저항의 바람'); hit(g, u, r.coef, r.flat, r.el, { noProc: 1, noReact: 1 }); if (u.alive) knockback(g, u, r.kb); }
+    }
+  }
+  /** Wind's Shadow: every 3rd Wind technique hit has a 30% chance of one more, with a 50% chance of a 20% action delay */
+  function chWindEcho(a, t) {
+    a.windN = (a.windN || 0) + 1; if (a.windN % 3 || rnd() >= a.ch.windEcho.p || !t.alive) return;
+    hit(a, t, a.ch.windEcho.coef, a.ch.windEcho.flat, 'wind', { noProc: 1, noReact: 1 });
+    if (t.alive) tryStatus(a, t, { k: 'delay', v: 0.2, p: 0.5 });
   }
   /** a materialized Fantomon fell or faded: Evanescent Phantom bursts, then Fantasmia starts refilling */
   function petGone(p) {
@@ -1435,6 +1611,7 @@ export function simulate(P, seed, log) {
       const amt = (t, m) => { let v = (u.hpMax * n.healPct + n.healFlat) * m; if (s.sp && s.sp.k === 'lowBonus' && t.hp / t.hpMax < s.sp.th) v *= 1 + s.sp.v; return v; };
       for (const t of targets) {
         heal(u, t, amt(t, 1)); if (s.dispel) cleanse(t, s.dispel);
+        if (u.ch && u.ch.overheal && rnd() < u.ch.overheal.p) for (const b of alliesOf(u)) if (dist(b.x, b.y, t.x, t.y) <= 1) heal(u, b, u.hpMax * u.ch.overheal.healPct + u.ch.overheal.healFlat); // Overhealing
         // Fantomon extras: Cure All random +10% ATK/DEF/SPD for 1 turn, Crystal Energy grants Purity
         if (s.rbuff) { const r = Math.floor(rnd() * 3); addStatus(t, { k: r === 0 ? 'atkUp' : r === 1 ? 'defUp' : 'spdUp', v: (r === 0 ? t.atk : r === 1 ? t.def : t.spd) * s.rbuff, exp: t.turnNo + 1, buff: true }); }
         if (s.purity && u.sup && u.sup.v.StatusDmgReducePer && !has(t, 'purity')) addStatus(t, { k: 'purity', v: u.sup.v.StatusDmgReducePer, exp: 1e9, buff: true });
@@ -1500,6 +1677,8 @@ export function simulate(P, seed, log) {
       else if (!castSupport(u, k)) return 0;
     }
     u.cds[i] = k.cd + 1;
+    u.tCasts = (u.tCasts || 0) + 1;
+    if (u.ch && !pre) chOnCast(u, s);
     runeReact(u);
     return 1;
   }
@@ -1520,6 +1699,8 @@ export function simulate(P, seed, log) {
     u.turnNo++;
     if (ev) ev.push({ e: 'turn', u: u.id, r: B.round });
     if (B.totem) totemAura(u);
+    B.cur = u; B.turnSeq++; u.tc0 = u.tCasts || 0;
+    if (u.ch && u.alive) chTurnStart(u);
     // start-of-turn effects
     for (const s of u.st.slice()) {
       if (!u.alive || B.over) break;
@@ -1619,11 +1800,22 @@ export function simulate(P, seed, log) {
     }
     // Blast Spirits act at the end of their caster's turn; a Decoy Clone's life counts its caster's turns
     if (B.traps.length) trapsAfter(u);
+    if (u.ch && u.alive && !B.over) chTurnEnd(u);
     for (const c of U) if (c.clone && c.alive && c.owner === u.id && --c.life <= 0) dismiss(c);
     // a summon's lifespan counts its own turn ends (StatusEndComponent.RemoveApplyEntity)
     if (u.sum && !u.clone && u.alive && --u.life <= 0) { dismiss(u); return; }
     // end of turn: expire statuses
-    if (u.alive) { let ch = 0; for (let i = u.st.length - 1; i >= 0; i--) if (u.turnNo >= u.st[i].exp) { removeStatus(u, i); ch = 1; } if (ch) recalc(u); }
+    if (u.alive) {
+      let ch = 0;
+      for (let i = u.st.length - 1; i >= 0; i--) if (u.turnNo >= u.st[i].exp) {
+        const s = u.st[i];
+        removeStatus(u, i); ch = 1;
+        if (s.k === 'shield' && s.shift && s.v > 0) { const real = Math.min(s.v, u.hpMax - u.hp); if (real > 0) { u.hp += real; if (ev) ev.push({ e: 'heal', a: u.id, t: u.id, v: real, hp: u.hp }); } } // Healing Shift: what is left of the shield comes back as HP, 1:1
+        if (s.shatter && U[s.src] && U[s.src].alive && !B.over && u.alive) { const a = U[s.src]; pvLabel(a, '얼음 파편'); hit(a, u, a.ch.shatter.coef, a.ch.shatter.flat, 'water', { noProc: 1, noReact: 1 }); } // Shattering Ice
+        if (s.shadow) u.shadowF = 0;
+      }
+      if (ch) recalc(u);
+    }
   }
 
   /* ── pre-battle: charms, Fantomon passives, then "casts before battle" skills ── */
@@ -1644,6 +1836,7 @@ export function simulate(P, seed, log) {
       if (c.soulProt) { const h = Math.floor(u.hp * 0.5); u.hp -= h; addStatus(u, { ...perm, k: 'shield', v: h, src: u.id }); }
       if (c.soulfire) { u.hp = Math.max(1, Math.ceil(u.hp * 0.5)); addStatus(u, { ...perm, k: 'dmgRed', v: c.soulfire }); }
       if (c.rapid) for (let i = 0; i < u.cds.length; i++) if (u.cds[i] > 0) u.cds[i]--;
+      if (c.elixir) { u.potions = c.elixir.start; B.elixir.push(u); }
       if (c.ironFort) for (const f of U) if (f.alive && f.team === u.team && f.kind === 'hero' && Math.max(Math.abs(f.x - u.x), Math.abs(f.y - u.y)) <= 3) addStatus(f, { ...perm, k: 'defUp', v: u.def * c.ironFort });
     }
     if (u.petI != null) {
