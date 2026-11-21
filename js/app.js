@@ -1033,5 +1033,7 @@ renderAll();
 term.line('> 팀을 구성하고 「승률 계산」을 누르세요', '#9b978b');
 loadArt().then(() => { drawAvatars(); if (!running && !stage.isPlaying()) showRoster(); });
 // SD class sheets (sprites, faces, effects): the first auto-run waits for them (at most 4 s)
-const sheetsP = Promise.all([loadSheets(), loadToon(), loadGlb()]).then(() => { if (!running && !stage.isPlaying()) renderAll(); else drawAvatars(); });
+const sheetsP = Promise.all([loadSheets(), loadToon()]).then(() => { if (!running && !stage.isPlaying()) renderAll(); else drawAvatars(); });
+// the glTF hero models (~8 MB) load in the background: the board redraws with them when they arrive (not mid-replay)
+Promise.all([sheetsP, loadGlb()]).then(() => { if (!running && !stage.isPlaying()) showRoster(); else stage.refreshModels(); });
 if (state.teams[0].length && state.teams[1].length) Promise.race([sheetsP, new Promise((r) => setTimeout(r, 4000))]).then(() => setTimeout(run, 300));

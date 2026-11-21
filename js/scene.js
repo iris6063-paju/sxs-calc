@@ -750,6 +750,8 @@ export function createStage(canvas) {
 
   return {
     term, setRoster, setGround, setTopView, isTopView: () => topView,
+    /** rebuild the unit models in place (the glTF heroes arrived) and return to the same replay moment */
+    refreshModels() { if (!units.length) return; const meta = units.map((u) => u.m), at = play ? play.i : null, was = paused; setRoster(meta); if (play && at != null) { seek(at); paused = was; } },
     play: startReplay,
     stop() { play = null; ring.visible = false; },
     setSpeed(v) { speed = v; }, setPaused(v) { paused = v; }, isPaused: () => paused, isPlaying: () => !!(play && !play.done),

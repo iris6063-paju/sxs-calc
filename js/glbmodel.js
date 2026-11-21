@@ -8,22 +8,26 @@ import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { clone as cloneSkinned } from '../vendor/SkeletonUtils.js';
 import { charMat } from './toon.js';
 
-/** hero design → model file in assets/models (one so far: the knight pilot) */
-const FILES = { knight: 'knight.glb' };
+/** hero designs with a model: assets/models/index.json lists them, each file is assets/models/<design>.glb */
 /** rig bone → glTF bone name (Mixamo-style skeleton from the Meshy rig) */
 const MAP = { hips: 'Hips', chest: 'Spine', head: 'Head', armL: 'LeftArm', armR: 'RightArm', handL: 'LeftHand', handR: 'RightHand', legL: 'LeftUpLeg', legR: 'RightUpLeg' };
 /** per-model tuning: how far the A-pose arms are lowered (0 keeps the A-pose, 1 hangs them straight down) and how much of
- *  the rig's arm motion they take. The knight's braid is fused with its right arm in the generated mesh, so big arm turns
- *  drag the braid along; its arms stay near the A-pose and swing at half strength. */
-const TUNE = { knight: { armCorr: 0.3, armGain: 0.5 } };
+ *  the rig's arm motion they take. Generated meshes fuse long hair with the arms (the knight's braid, the casters' long
+ *  hair), so big arm turns drag the hair along: by default the arms stay near the A-pose and swing at half strength.
+ *  The short-haired warrior moves its arms more freely. The sorcerer's and the sage's rigs put one arm chain out along the
+ *  book / staff (shoulder line ~42° off the hips), so their arms keep the rest pose and only sway a little. */
+const TUNE_DEFAULT = { armCorr: 0.3, armGain: 0.5 };
+const TUNE = { warrior: { armCorr: 0.8, armGain: 0.8 }, sorcerer: { armCorr: 0, armGain: 0.3 }, sage: { armCorr: 0, armGain: 0.3 } };
 const DOWN = new THREE.Vector3(0, -1, 0), ID = new THREE.Quaternion();
 const H_TARGET = 1.78; // the code-built knight stands 1.76 tall (incl. hair)
 const GLB = new Map();
 
 export async function loadGlb() {
   const base = new URL('../assets/models/', import.meta.url), loader = new GLTFLoader();
-  await Promise.all(Object.entries(FILES).map(async ([d, f]) => {
-    try { GLB.set(d, await loader.loadAsync(new URL(f, base).href)); } catch (e) { /* keep the code-built model */ }
+  let list = [];
+  try { list = await (await fetch(new URL('index.json', base))).json(); } catch (e) { return; }
+  await Promise.all(list.map(async (d) => {
+    try { GLB.set(d, await loader.loadAsync(new URL(d + '.glb', base).href)); } catch (e) { /* keep the code-built model */ }
   }));
 }
 export const hasGlb = (design) => GLB.has(design);
@@ -63,7 +67,7 @@ export function buildGlbModel(design, opt = {}) {
   const s = H_TARGET / Math.max(0.1, box.max.y - box.min.y);
   holder.scale.setScalar(s); holder.position.y = -box.min.y * s; pose.updateMatrixWorld(true);
   // rest data in the rig frame (the pose group at identity)
-  const bones = { root: pose }, links = [], T = { armCorr: 1, armGain: 1, ...(TUNE[design] || {}) };
+  const bones = { root: pose }, links = [], T = { ...TUNE_DEFAULT, ...(TUNE[design] || {}) };
   for (const [k, name] of Object.entries(MAP)) {
     const b = byName[name]; const proxy = new THREE.Object3D(); proxy.userData.rest = new THREE.Vector3(); bones[k] = proxy;
     if (!b) continue;
