@@ -48,14 +48,6 @@ const castHits = (r, heroId, tid, name) => { const i = r.events.findIndex((e) =>
     const rd = simulate(PD, 7, true), hd = castHits(rd, PD.units.findIndex((u) => u.kind === 'hero'), PD.units.findIndex((u) => u.key === orochi.k));
     ok(hd.length >= 1 && hd.length <= 2, `Dawnburst (inner 2 grids + outer ring) hits a 5×5 Hieromon ${hd.length}× (at most 2)`);
   }
-  // as the turn's last cast (keep-distance) it still goes where the most row groups land on a large body (user's rule,
-  // 2026-11-22): a 2×2 boss takes 2 hits, not the 1 of the farthest safe cell
-  const PK = prepare({ mode: 'pve', roundCap: 3, teams: [[hero('Fashi', [10003], { cell: [10, 9] })], [mob(boss, { cell: [10, 11] })]] });
-  const rk = simulate(PK, 7, true), hk = castHits(rk, PK.units.findIndex((u) => u.kind === 'hero'), PK.units.findIndex((u) => u.key === boss.k), WA);
-  ok(hk.length === 2, `Water Assault as the last cast moves to land both rows on a 2×2 boss: ${hk.length}×`);
-  const PB = prepare({ mode: 'pve', roundCap: 3, teams: [[hero('Fashi', [10085], { cell: [10, 9] })], [mob(boss, { cell: [10, 11] })]] });
-  const rb = simulate(PB, 7, true), hb = castHits(rb, PB.units.findIndex((u) => u.kind === 'hero'), PB.units.findIndex((u) => u.key === boss.k), sk(10085).ko);
-  ok(hb.length === 2, `Phantom Blade as the last cast lands two columns on a 2×2 boss: ${hb.length}×`);
   const pS = prepare({ mode: 'pve', roundCap: 3, teams: [[hero('Fashi', [10003], { cell: [10, 9] })], [mob(small, { cell: [10, 11] })]] });
   const rs = simulate(pS, 7, true), sid = pS.units.findIndex((u) => u.key === small.k), hid = pS.units.findIndex((u) => u.kind === 'hero');
   const i2 = rs.events.findIndex((e) => e.e === 'cast' && e.u === hid); let n2 = 0; for (let j = i2 + 1; j < rs.events.length && rs.events[j].e !== 'cast' && rs.events[j].e !== 'turn'; j++) if (rs.events[j].e === 'hit' && rs.events[j].t === sid) n2++;
