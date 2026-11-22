@@ -1081,6 +1081,10 @@ export function simulate(P, seed, log) {
     // shapes anchored on the caster: A / Q / F
     let best = null, bestN = 0, bestSafe = -99;
     const dirs = tg.t === 'F' ? DIR_ORDER[u.team === 1 ? 1 : 0] : [0];
+    /* "Large targets may take multiple hits" against a 2×2-or-larger body (bosses): the cell where the most hit groups
+       land, keep-distance included (the user's rule, 2026-11-22; the game's AI counts targets, MoreHitCount). With
+       1×1 targets a hit is a target, so nothing changes there. */
+    const multiBig = !!(s.parts && foes.some((f) => f.sz > 1));
     for (const [dx, dy, d] of diaOf(u)) {
       if (d > reach) break;
       const x = u.x + dx, y = u.y + dy;
@@ -1088,11 +1092,11 @@ export function simulate(P, seed, log) {
       const sc = keep ? safer(u, x, y) : 0;
       for (const k of dirs) {
         let n = 0, big = 0;
-        for (const f of foes) if (inShape(tg, x, y, k, f, u)) { n += wt(f); if (f.sz > 1) big = 1; }
+        for (const f of foes) if (inShape(tg, x, y, k, f, u)) { n += wt(f) * (multiBig && f.sz > 1 ? partHits(s.parts, tg, x, y, k, f) || 1 : 1); if (f.sz > 1) big = 1; }
         const score = n + (bigF && big ? 100 : 0);
         if (score > bestN || (keep && score && score === bestN && sc > bestSafe)) { bestN = score; bestSafe = sc; best = [x, y, d, k]; }
       }
-      if (!keep && bestN >= foes.length && !bigF) break;
+      if (!keep && !multiBig && bestN >= foes.length && !bigF) break;
     }
     if (!best) return null;
     const [x, y, d, k] = best, cnt = new Map();
