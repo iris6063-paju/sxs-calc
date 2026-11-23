@@ -43,15 +43,18 @@ export function moveAndSize(d, o) {
   while ((m = kb.exec(d))) (o.eff = o.eff || []).push({ k: 'kb', n: +m[2], p: m[1] ? +m[1] / 100 : 1, side: m[3] ? 1 : 0 });
 }
 
-// Korean names for monster self-buff skills (translations: no official Korean text was found for monster skills)
-const MOB_SK_KO = { 'Momentum Backlash': '기세 반격', 'Reflection Mask': '반사 가면' };
-/** a monster's self counter state, kept as a buff skill (2026-11-23): Momentum Backlash lasts until the start of the
- *  caster's next turn, Reflection Mask 1 turn; a Technique hit on the caster is answered with one hit on the attacker.
- *  e: the enemy skill ({ n, i }), d: its plain description, EL: English element → key. Returns the skill or null. */
-export function counterSkill(e, d, EL) {
-  const a = /enters a counterattack state until the start of the caster's next turn[\s\S]*?deals (\w+) DMG once to the attacker/.exec(d);
-  const b = /Grants the caster a buff for (\d+) turns?\. When the caster takes Technique DMG, deals (\w+) DMG once to the attacker/.exec(d);
-  const el = a ? EL[a[1]] : b ? EL[b[2]] : null;
-  if (!el) return null;
-  return { en: e.n, ko: MOB_SK_KO[e.n] || e.n, el, ic: e.i, kind: 'counterSt', ...(a ? { next: 1 } : { t: +b[1] }), ...(/cannot be dispelled/i.test(d) ? { nd: 1 } : {}) };
+/** a monster skill from tools/mobskills.mjs (buffs, heals, shields, stances, ground effects, summons) as the mob's
+ *  skill entry; counter states keep their own kind. sid: the enemy skill id, e: its record ({ n, i }). */
+export function mobSkillEntry(sid, e, row) {
+  const [ko, d, fx] = row;
+  const base = { id: sid, en: e.n, ko, d, ic: e.i, el: fx.el || 'none' };
+  if (fx.k === 'counterSt') return { ...base, kind: 'counterSt', ...(fx.next ? { next: 1 } : { t: fx.t || 1 }), ...(fx.nd ? { nd: 1 } : {}) };
+  if (fx.k === 'none') return { ...base, kind: 'none', why: fx.why };
+  return { ...base, kind: 'mobfx', fx, ...(fx.est ? { est: 1 } : {}) };
+}
+/** Swordlion's stance skills: "(Twin Blades)" / "(Greatsword)", "… Starter)" opens the stance */
+export function stanceTag(s) {
+  const m = /\((Twin Blades|Greatsword)( Starter)?\)/.exec(s.en || '');
+  if (m) { s.stance = m[1] === 'Twin Blades' ? 'tb' : 'gs'; if (m[2]) s.starter = 1; }
+  return s;
 }

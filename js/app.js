@@ -472,7 +472,10 @@ function mobHtml(u) {
   };
   // a self counter state (Momentum Backlash, Reflection Mask)
   const csTags = (s) => { const e = EL[s.el] || EL.none; return `<span class="tag el" style="background:${e.c}">${e.ko}</span>` + tag('자신 · 반격 태세') + tag(s.next ? '다음 자기 턴 시작까지' : `${s.t || 1}턴`) + tag(`전투 스킬에 맞으면 공격자에게 ${e.ko} 대미지 1회`) + (s.nd ? tag('해제 불가') : ''); };
-  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.ko || s.en)}</b>${s.ko ? ` <small class="en">${esc(s.en)}</small>` : ''}${s.h && s.d ? `<div class="desc" style="margin-top:2px">${esc(s.d)}</div>` : ''}<div class="sum" style="margin:3px 0 0">${s.h ? kitTags(s) : s.kind === 'counterSt' ? csTags(s) : skillTags({ ...s, kind: 'dmg', cd: 0 }, null) + (s.sp && s.sp.k === 'scatter' ? tag(`무작위 ${s.sp.n}회${s.sp.min ? ` (최소 ${s.sp.min})` : ''}`) : '') + (s.rage ? tag('격노 상태 전용') : '')}</div></div></div></div>`).join('');
+  // buffs, heals, shields, stances, ground effects, summons (tools/mobskills.mjs): their text and whether the sizes are estimates
+  const fxTags = (s) => (s.kind === 'none' ? tag(`⚠ 미반영 · ${s.why || '자료 없음'}`, 'warn') : s.est ? (state.pvEst !== false ? tag('추정 수치로 반영', 'est') : tag('추정값 꺼짐 · 미반영', 'warn')) : tag('반영', 'ok'));
+  const STANCE_KO = { tb: '쌍검 자세', gs: '대검 자세' };
+  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.ko || s.en)}</b>${s.ko ? ` <small class="en">${esc(s.en)}</small>` : ''}${(s.h || s.kind) && s.d ? `<div class="desc" style="margin-top:2px">${esc(s.d)}</div>` : ''}<div class="sum" style="margin:3px 0 0">${s.h ? kitTags(s) : s.kind === 'counterSt' ? csTags(s) : s.kind === 'mobfx' || s.kind === 'none' ? fxTags(s) : skillTags({ ...s, kind: 'dmg', cd: 0 }, null) + (s.sp && s.sp.k === 'scatter' ? tag(`무작위 ${s.sp.n}회${s.sp.min ? ` (최소 ${s.sp.min})` : ''}`) : '') + (s.rage ? tag('격노 상태 전용') : '') + (s.stance ? tag(STANCE_KO[s.stance] + (s.starter ? ' 시작 스킬' : '')) : '')}</div></div></div></div>`).join('');
   const pvs = (mob.pv || []).map((id) => MOB_PV[id]).filter(Boolean);
   const pvBadge = (p) => (p.k === 'none' ? tag(`⚠ 미반영 · ${p.why || '효과 비공개'}`, 'warn') : p.est ? (state.pvEst !== false ? tag('추정 수치로 반영', 'est') : tag('추정값 꺼짐 · 미반영', 'warn')) : tag('반영', 'ok'));
   const pvHtml = pvs.length ? `<div class="sec"><span>비전 (패시브 ${pvs.length})</span></div>` + pvs.map((p) => `<div class="skill"><div class="mobsk">${p.i ? MOBSKILL_ICON({ ic: p.i, el: p.el || 'none' }) : '<span class="ico mob"><em>✦</em></span>'}<div><b>${esc(p.ko)}</b> <small class="en">${esc(p.en)}</small><div class="desc" style="margin-top:2px">${esc(p.d)}</div><div class="sum" style="margin:4px 0 0">${pvBadge(p)}</div></div></div></div>`).join('') : '';
@@ -910,7 +913,7 @@ function fieldChips(setup) {
   }
   if (setup.teams.some((t) => t.some((u) => u.uws))) c.push(['United We Stand · 보스가 첫 3턴 받는 대미지 −99%', '길드 토벌 층 효과']);
   c.push([`라운드 제한 ${setup.roundCap}R`, '한 라운드 = 생존한 전원이 한 번씩 행동']);
-  if (setup.teams.some((t) => t.some((u) => u.kind === 'mob'))) { if (setup.mobCoef !== 1) c.push([`몹 스킬 계수 ${Math.round(setup.mobCoef * 100)}%`, '']); if (setup.pvEst === false) c.push(['몹 비전 추정값 꺼짐', '']); const rk = [...new Set(setup.teams[0].filter((u) => u.kind === 'hero' && u.rank).map((u) => SUBRANK_KO(u.rank)))]; if (rk.length && setup.mode !== 'pvp') c.push([`랭크 ${rk.join(' · ')} · 랭크 차이 보정`, '']); }
+  if (setup.teams.some((t) => t.some((u) => u.kind === 'mob'))) { if (setup.mobCoef !== 1) c.push([`몹 스킬 계수 ${Math.round(setup.mobCoef * 100)}%`, '']); if (setup.pvEst === false) c.push(['몹 비전·스킬 추정값 꺼짐', '']); const rk = [...new Set(setup.teams[0].filter((u) => u.kind === 'hero' && u.rank).map((u) => SUBRANK_KO(u.rank)))]; if (rk.length && setup.mode !== 'pvp') c.push([`랭크 ${rk.join(' · ')} · 랭크 차이 보정`, '']); }
   return c.map(([t, title]) => `<span class="fchip" title="${esc(title)}">${t}</span>`).join('');
 }
 function playSeed(setup, seed) {

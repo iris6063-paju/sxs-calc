@@ -339,8 +339,20 @@ function buildMob(key, level, opts, sr, fix, uws) {
   // boss kit (Hieromon, raid boss): the game's own hit configs, coefficients (per hit) and cooldowns; the opening
   // cooldown is CD + 1. Summons are not simulated.
   if (mob.kit) u.skills = mob.sk.filter((s) => !s.sum).map((s) => ({ s: { ...s, kind: 'kit' }, n: { coef: s.c, flat: 0 }, cd: s.cd || 0, init: (s.cd || 0) + 1 }));
-  // a self counter state (Momentum Backlash, Reflection Mask): a buff skill whose counter hits with the mob-skill coefficient
-  else u.skills = mob.sk.map((s, i) => s.kind === 'counterSt' ? { s: { ...s, kind: 'buff', ko: s.ko || s.en, buff: { st: 'counterSt', to: 'self', t: s.t || 1, next: s.next || 0 } }, n: { coef: mc, flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 } : ({ s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 }));
+  // a self counter state (Momentum Backlash, Reflection Mask): a buff skill whose counter hits with the mob-skill coefficient;
+  // other non-damage skills (tools/mobskills.mjs): 'mobfx', the estimated ones only while estimates are on; 'none' is not simulated
+  else {
+    const est = opts.pvEst !== false;
+    u.skills = mob.sk.filter((s) => s.kind !== 'none' && (est || !s.est)).map((s, i) => {
+      const cd = i ? 2 : 0, init = i ? i + 1 : 0;
+      if (s.kind === 'counterSt') return { s: { ...s, kind: 'buff', ko: s.ko || s.en, buff: { st: 'counterSt', to: 'self', t: s.t || 1, next: s.next || 0 } }, n: { coef: mc, flat: 0 }, cd, init };
+      if (s.kind === 'mobfx') return { s: { ...s, ko: s.ko || s.en, pre: s.fx.pre ? 1 : 0 }, n: { coef: mc, flat: 0 }, cd, init: s.fx.open ? 0 : init };
+      // Swordlion: a stance's Starter skill is ready when the stance begins
+      return { s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd, init: s.starter ? 0 : init };
+    });
+    if (u.skills.some((k) => k.s.stance)) { u.stance = 'tb'; u.stFresh = 1; } // starts in Twin Blades (assumption)
+  }
+  u.sr0 = sub || null; // for its summons
   compileMobPassives(u, mob, mc, opts.pvEst !== false);
   return u;
 }
@@ -454,6 +466,20 @@ export function prepare(setup) {
     for (let j = 0; j < sm.cells.length * 2; j++) {
       const p = sm.kind === 'clone' ? buildClone(h, k) : buildSummon(h, k);
       p.team = sm.kind === 'clone' ? 1 - h.team : h.team; p.x = -1; p.y = -1; p.out = true; p.ownerRef = h; p.sumSk = i; p.slot = j; p.ref = `${h.ref}:s${i}:${j}`;
+      units.push(p);
+    }
+  });
+  // monster summons (tools/mobskills.mjs): dormant copies of the summoned monster at the caster's level and rank (its
+  // stats are our assumption), two sets per skill; Kitsune Double's clones cannot move or act and burst when they go
+  for (const h of units.slice()) if (h.kind === 'mob' && !h.sum) h.skills.forEach((k, i) => {
+    const fx = k.s.kind === 'mobfx' ? k.s.fx : null; if (!fx || (fx.k !== 'summon' && fx.k !== 'clone')) return;
+    const own = MOB.get(h.key), vs = ALL_MOBS.filter((m) => m.en === fx.mob);
+    const v = vs.find((m) => own.map && m.map === own.map) || vs.find((m) => m.sr && m.sr === h.sr0) || vs.find((m) => m.map) || vs[0];
+    if (!v) return;
+    for (let j = 0; j < fx.n * (fx.k === 'clone' ? 1 : 2); j++) {
+      let p; try { p = buildMob(v.k, h.level, opts, h.sr0); } catch (e) { return; }
+      p.sum = true; p.pet = true; p.team = h.team; p.x = -1; p.y = -1; p.out = true; p.ownerRef = h; p.sumSk = i; p.slot = j; p.nth = j; p.ref = `${h.ref}:${h.nth || 0}:m${i}:${j}`;
+      if (fx.k === 'clone') { p.name = k.s.ko; p.skills = []; p.move = 0; p.boom = { el: fx.el, r: fx.r }; p.mp = null; p.ch = null; }
       units.push(p);
     }
   });
@@ -583,6 +609,7 @@ export function simulate(P, seed, log) {
         case 'blockUp': bBlock += s.v; break;
         case 'critUp': bCrit += s.v; break;
         case 'dmgUp': bDmg += s.v; break;
+        case 'boon': bDmg += s.v * s.n; break; // Underground Boon stacks
         case 'dmgRed': red *= 1 - s.v; break;
         case 'vuln': vuln += s.v; break;
         case 'sigil': sigil = Math.max(sigil, s.v); break;
@@ -620,6 +647,7 @@ export function simulate(P, seed, log) {
       r.resUsed = true; t.hp = 1; pvLabel(r, '리바이벌'); heal(r, t, r.hpMax * r.ch.resurrect.healPct + r.ch.resurrect.healFlat, chR(r, 'resurrect')); return;
     }
     if (t.sum && !t.clone) sumGone(t);
+    if (t.boom) cloneBoom(t);
     t.alive = false; t.hp = 0; setOcc(t, -1);
     if (by) by.kills++;
     if (ev) ev.push({ e: 'die', u: t.id });
@@ -833,6 +861,9 @@ export function simulate(P, seed, log) {
     // a monster's counter state (Momentum Backlash, Reflection Mask): one hit back on the attacker per incoming technique cast
     const cs = t.st.length ? has(t, 'counterSt') : null;
     if (cs && a.alive && !B.over && t.csCast !== B.castId) { t.csCast = B.castId; hit(t, a, cs.coef, 0, cs.el, { noProc: 1, noReact: 1 }); if (B.over || !t.alive) return; }
+    // a monster's defensive stance (Shield Fortification, Fire Shield Stance): a hit back on each blocked technique hit
+    const bc = kind === 2 && t.st.length ? has(t, 'blockCtr') : null;
+    if (bc && a.alive && !B.over) { hit(t, a, bc.coef, 0, bc.el, { noProc: 1, noReact: 1 }); if (B.over || !t.alive) return; }
     const c = t.ch; if (!c || B.over) return;
     t.stone++; t.eye = Math.min(10, t.eye + 1);
     if (t.reactCast === B.castId) return;
@@ -919,6 +950,7 @@ export function simulate(P, seed, log) {
     let k = e.k, v = e.v;
     if (k === 'randDebuff') { const pick = [['weak', 0.3], ['abreak', 0.3], ['slow', 0.3]][Math.floor(rnd() * 3)]; k = pick[0]; v = pick[1]; }
     let p = e.p == null ? 1 : e.p;
+    // e.now: put on at the start of the holder's own turn, so it covers that turn only (Ghostly Seas' Ghost Anchor)
     if (k === 'taunt' && e.mob && t.kind !== 'hero') p = 1;
     else if (p < 1 || CONTROL[k]) p *= (1 + a.effHit) / (1 + t.effRes);
     if (CONTROL[k]) {
@@ -930,7 +962,7 @@ export function simulate(P, seed, log) {
     if (rnd() >= p) return;
     if (k === 'delay') { t.next += v * interval(t); return; } // pushes the target's next action back
     if (k === 'kb') { knockback(a, t, e.n || 1, e.side); return; } // forced move, rolled like a status
-    const turns = e.t || 1;
+    const turns = e.now ? 0 : e.t || 1;
     if (CONTROL[k]) { t.ailStreak = t.turnNo - t.lastAil <= 1 ? t.ailStreak + 1 : 1; t.lastAil = t.turnNo; }
     if (k === 'cold' || k === 'riven') {
       const ex = has(t, k), max = k === 'cold' ? 10 : 3;
@@ -1272,8 +1304,9 @@ export function simulate(P, seed, log) {
     let targets = pl.targets;
     if (s.pull) { const px = s.pull === 'c' ? u.x : pl.ax, py = s.pull === 'c' ? u.y : pl.ay; for (const t of targets) pullTo(t, px, py); }
     const o = { doom: s.doom, ls: (s.ls || 0) * (P.pvp && PVPR[s.id] ? PVPR[s.id][0] : 1), blind: u.blind, acc: 0, boost: 0, single: (s.hits || 1) + (s.h2 || 0) === 1 && !s.sp };
-    const na = has(u, 'nextAcc'), nd = has(u, 'nextDoom');
+    const na = has(u, 'nextAcc'), nd = has(u, 'nextDoom'), cg = has(u, 'charge');
     if (na) { o.acc += na.v; o.boost += na.dmg || 0; }
+    if (cg) o.boost += cg.v; // a monster's Charging state (Self-Sacrifice)
     if (nd) { o.doom = 1; o.boost += nd.v; }
     const sp = s.sp || {};
     let dealt = 0;
@@ -1363,7 +1396,7 @@ export function simulate(P, seed, log) {
     if (s.dash && u.alive && !B.over && !has(u, 'immob')) dashMove(u, pl.dir != null ? pl.dir : aimDir(u, targets[0]), s.dash);
     if (s.retreat && u.alive && !B.over && !has(u, 'immob') && (!s.retreat.within || (targets[0] && dUU(u, targets[0]) <= s.retreat.within))) retreatMove(u, s.retreat.n);
     // consume single-use modifiers
-    for (const key of ['nextAcc', 'nextDoom', 'blind']) { const i = u.st.findIndex((x) => x.k === key); if (i >= 0) removeStatus(u, i); }
+    for (const key of ['nextAcc', 'nextDoom', 'blind', 'charge']) { const i = u.st.findIndex((x) => x.k === key); if (i >= 0) removeStatus(u, i); }
     for (const t of targets) { const i = t.st.findIndex((x) => x.k === 'sigil' && x.cast !== B.castId); if (i >= 0 && t.alive) { removeStatus(t, i); recalc(t); } }
     recalc(u);
     u.eye = 0;
@@ -1408,8 +1441,17 @@ export function simulate(P, seed, log) {
   /** [sideways, forward] from the caster: our team faces +y, the other side faces −y */
   const sumCell = (o, lat, fwd) => (o.team === 0 ? [o.x + lat, o.y + fwd] : [o.x - lat, o.y - fwd]);
   function nearFree(x, y, r = 4, o = null) { if (free(x, y)) return [x, y]; for (const [dx, dy, d] of diaOf(o)) { if (!d) continue; if (d > r) break; if (free(x + dx, y + dy)) return [x + dx, y + dy]; } return null; }
+  /** Kitsune Double: a clone bursts when it goes (faded or felled), Dark DMG to the enemies around it */
+  function cloneBoom(p) {
+    const b = p.boom, o = U[p.owner]; if (!b || B.over) return;
+    const near = U.filter((f) => f.alive && f.team !== p.team && dU(f, p.x, p.y) <= b.r); if (!near.length) return;
+    B.castId++;
+    if (ev) ev.push({ e: 'cast', u: p.id, n: `${p.name} 폭발`, el: b.el, tg: near.map((f) => f.id), ax: p.x, ay: p.y, sh: 'A', ar: b.r });
+    for (const f of near) if (!B.over) hit(p, f, (o && o.mc) || 1, 0, b.el, { noProc: 1, noReact: 1 });
+  }
   function dismiss(p) {
     if (!p.alive) return;
+    if (p.boom) cloneBoom(p);
     if (!p.clone) sumGone(p);
     p.alive = false; p.hp = 0; setOcc(p, -1); p.out = true; p.st = []; p.shield = 0;
     if (ev) ev.push({ e: 'die', u: p.id, fade: 1 });
@@ -1499,6 +1541,121 @@ export function simulate(P, seed, log) {
       if (u.alive) for (const st of u.st.filter((x) => x.k === 'dot' && x.el === 'dark')) if (u.alive) dotTick(u, st);
     }
   }
+  /** may a monster use this skill now: Rage-only skills, Swordlion's stance skills (a Starter only as its stance opens) */
+  function mobReady(u, s) {
+    if (s.rage && !u.raged) return false;
+    if (s.stance && (s.stance !== u.stance || (s.starter && !u.stFresh))) return false;
+    return true;
+  }
+  /* ── monster skills without direct damage of their own (tools/mobskills.mjs; sizes there marked est are estimates) ── */
+  function castMobFx(u, k, i, pre) {
+    const s = k.s, fx = s.fx, T = fx.t || 0;
+    const label = (tg, ax = u.x, ay = u.y, n = s.ko || s.en) => { if (ev) ev.push({ e: 'cast', u: u.id, n, el: s.el || 'none', tg, ax, ay, sh: 'B', sup: 1 }); };
+    const open = () => { B.castId++; u.casts++; };
+    const group = () => (fx.to === 'allies' ? alliesOf(u).filter((a) => (!fx.ex || a !== u) && !a.boom && dUU(a, u) <= fx.r) : [u]);
+    const stat = { defUp: 'def', atkUp: 'atk', spdUp: 'spd' };
+    const put = (t, list) => {
+      const base = { exp: T ? t.turnNo + T : 1e9, buff: true, uniq: 1, src: u.id, sid: s.id, ...(fx.nd ? { nd: 1 } : {}) };
+      for (const [key, v, max] of list) {
+        if (stat[key]) addStatus(t, { ...base, k: key, v: t[stat[key]] * v }); // a share of the holder's own stat
+        else if (key === 'blockCtr') addStatus(t, { ...base, k: 'blockCtr', el: v, coef: k.n.coef });
+        else if (key === 'next') addStatus(t, { ...base, k: 'charge', v });
+        else if (key === 'immob') addStatus(t, { ...base, k: 'immob' });
+        else if (key === 'boon') { const ex = has(t, 'boon'); if (ex) { ex.n = Math.min(max, ex.n + 1); recalc(t); stEv(t, ex, true); } else addStatus(t, { k: 'boon', v, n: 1, exp: 1e9, buff: true, nd: 1, src: u.id }); }
+        else addStatus(t, { ...base, k: key, v }); // blockUp / critUp / dodgeUp / accUp / abreak
+      }
+    };
+    const near = (r) => foesOf(u).some((f) => dUU(f, u) <= r);
+    switch (fx.k) {
+      case 'buff': {
+        const bn = fx.st.find(([key]) => key === 'boon');
+        if (bn && (has(u, 'boon') || { n: 0 }).n >= bn[2]) return false; // Underground Boon at its 10 stacks
+        const tg = group(); open(); label(tg.map((t) => t.id));
+        for (const t of tg) put(t, fx.st);
+        return true;
+      }
+      case 'heal': {
+        const tg = group(), hurt = tg.filter((t) => t.hp < t.hpMax);
+        if (!hurt.length && !fx.st) return false;
+        open(); label(tg.map((t) => t.id));
+        for (const t of hurt) heal(u, t, u.hpMax * fx.v); // a share of the caster's max HP
+        if (fx.st) for (const t of tg) put(t, fx.st);
+        return true;
+      }
+      case 'hot': // Hydration: cast before the battle, then again once it has run out and the caster is hurt
+        if (has(u, 'hot') || (!pre && u.hp >= u.hpMax)) return false;
+        open(); label([u.id]);
+        addStatus(u, { k: 'hot', v: u.hpMax * fx.v, exp: u.turnNo + fx.t, buff: true, uniq: 1, src: u.id, sid: s.id });
+        return true;
+      case 'shield': {
+        const tg = group(); open(); label(tg.map((t) => t.id));
+        for (const t of tg) addShield(u, t, u.hpMax * fx.v, T || 2);
+        return true;
+      }
+      case 'voidShield': { // Sorcery: Void: ATK up, and a share of the current HP turned into a shield
+        const tg = group(); open(); label(tg.map((t) => t.id));
+        for (const t of tg) { put(t, [['atkUp', fx.atk]]); const c = Math.min(t.hp - 1, Math.floor(t.hp * fx.v)); if (c > 0) { t.hp -= c; addShield(u, t, c, T || 2); } }
+        return true;
+      }
+      case 'rage': // Taowu: ATK and DEF up for the battle, opens Earth's Shake
+        if (u.raged) return false;
+        u.raged = true; open(); label([u.id]);
+        for (const [key, v] of fx.st) addStatus(u, { k: key, v: u[stat[key]] * v, exp: 1e9, buff: true, nd: 1, src: u.id });
+        return true;
+      case 'stance': // Swordlion: the other stance, its skills ready at once
+        u.stance = u.stance === 'gs' ? 'tb' : 'gs'; u.stFresh = 1;
+        open(); label([u.id], u.x, u.y, `${s.ko} · ${u.stance === 'tb' ? '쌍검' : '대검'}`);
+        u.skills.forEach((x, j) => { if (x.s.stance === u.stance) u.cds[j] = 0; });
+        return true;
+      case 'bomb': { // Deep Water Bomb: left on the caster's cell, which then backs off; it bursts a turn later
+        if (!near(fx.r + 2)) return false;
+        open(); label([]);
+        const t = { id: ++B.trapN, bomb: 1, x: u.x, y: u.y, team: u.team, src: u.id, coef: k.n.coef, el: fx.el, r: fx.r, life: 2, name: s.ko };
+        B.traps.push(t); if (ev) ev.push({ e: 'trap', id: t.id, x: t.x, y: t.y, team: u.team, on: 1 });
+        if (fx.retreat && !has(u, 'immob')) retreatMove(u, fx.retreat);
+        return true;
+      }
+      case 'web': { // Hunter's Trap: one random cell of the 3×3 in front of the caster
+        const cells = [];
+        for (let fwd = 1; fwd <= 3; fwd++) for (let lat = -1; lat <= 1; lat++) { const [x, y] = sumCell(u, lat, fwd); if (x >= 0 && y >= 0 && x < W && y < H && !B.traps.some((t) => t.web && t.x === x && t.y === y)) cells.push([x, y]); }
+        if (!cells.length || !near(5)) return false;
+        const [x, y] = cells[Math.floor(rnd() * cells.length)];
+        open(); label([], x, y);
+        const t = { id: ++B.trapN, burn: 1, web: 1, x, y, team: u.team, src: u.id, coef: k.n.coef, flat: 0, life: fx.life, el: fx.el, name: s.ko, eff: fx.eff, seen: new Set() };
+        B.traps.push(t); if (ev) ev.push({ e: 'trap', id: t.id, x, y, team: u.team, on: 1, burn: 1, web: 1 });
+        const o = occ[y * W + x]; if (o >= 0 && U[o].alive && U[o].team !== u.team) burnHit(t, U[o]);
+        return true;
+      }
+      case 'burn': // Wildfire: burning cells around the caster, which then backs off
+        if (!near(fx.r + 1)) return false;
+        open(); label([]);
+        burnCells(u, around(u.x, u.y, fx.r, true), k.n.coef, 0, fx.life);
+        if (fx.retreat && !has(u, 'immob')) retreatMove(u, fx.retreat);
+        return true;
+      case 'aura': // Perpetual Stillwater: Ghostly Seas on the caster (enemies near it are struck at their turn start)
+        if (has(u, 'seas')) return false;
+        open(); label([u.id]);
+        addStatus(u, { k: 'seas', el: fx.el, r: fx.r, coef: k.n.coef, eff: fx.eff, exp: u.turnNo + fx.t, buff: true, uniq: 1, src: u.id, sid: s.id });
+        return true;
+      case 'summon': case 'clone': {
+        const uses = (u.fxN = u.fxN || {});
+        if (fx.max && (uses[i] || 0) >= fx.max) return false;
+        if (U.filter((p) => p.sum && p.alive && p.owner === u.id && p.sumSk === i).length >= fx.n) return false; // a set still stands
+        const pick = sumSlots(u, i, fx.n); if (!pick.length) return false;
+        // where (assumptions): "next to the caster" — beside its body, the side facing the enemy first; Command: Summon —
+        // anywhere within 2, at random; Kitsune Double (no place given) — within 3, nearest the enemy
+        const cells = [], foes = foesOf(u), toFoe = (x, y) => Math.min(99, ...foes.map((f) => dU(f, x, y)));
+        const key = (x, y, d) => (fx.around ? (d <= fx.around ? rnd() : 10 + d) : fx.k === 'clone' ? (d <= 3 ? toFoe(x, y) * 10 + d : 1e3 + d) : d * 100 + toFoe(x, y)) + rnd() * 0.5;
+        for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const x = u.x + dx, y = u.y + dy, d = dU(u, x, y); if (d >= 1 && d <= 4 && free(x, y)) cells.push([x, y, key(x, y, d)]); }
+        cells.sort((a, b) => a[2] - b[2]);
+        if (!cells.length) return false;
+        open(); uses[i] = (uses[i] || 0) + 1; label([]);
+        for (const p of pick) { const c = cells.find(([x, y]) => free(x, y)); if (!c) break; spawnSummon(u, p, [c[0], c[1]], { life: fx.life }); }
+        return true;
+      }
+    }
+    return false;
+  }
   /** Frenzy Totem's Inspiration: a random ally within range gets its next turn 20% sooner */
   function castAdvance(u, k) {
     const al = alliesOf(u).filter((a) => a !== u && dist(a.x, a.y, u.x, u.y) <= k.s.r); if (!al.length) return false;
@@ -1522,7 +1679,15 @@ export function simulate(P, seed, log) {
   function trapsAfter(u) {
     for (const t of B.traps.slice()) {
       if (t.src !== u.id) continue;
-      if (!t.burn && u.alive && !B.over) {
+      // a monster's delayed bomb (Deep Water Bomb): bursts at the end of the caster's next turn
+      if (t.bomb) {
+        if (t.life <= 1 && !B.over) {
+          const near = U.filter((f) => f.alive && f.team !== t.team && dU(f, t.x, t.y) <= t.r);
+          B.castId++;
+          if (ev) ev.push({ e: 'cast', u: u.id, n: `${t.name} 폭발`, el: t.el, tg: near.map((f) => f.id), ax: t.x, ay: t.y, sh: 'T', ar: t.r });
+          for (const f of near) if (!B.over) hit(u, f, t.coef, 0, t.el, {});
+        }
+      } else if (!t.burn && u.alive && !B.over) {
         const near = U.filter((f) => f.alive && f.team !== t.team && dU(f, t.x, t.y) <= t.r);
         if (near.length) {
           B.castId++;
@@ -1549,8 +1714,10 @@ export function simulate(P, seed, log) {
   function burnHit(t, f) {
     const key = f.id * 4096 + f.turnNo; if (t.seen.has(key) || B.over) return; t.seen.add(key);
     const a = U[t.src]; if (!a) return;
-    if (ev) ev.push({ e: 'cast', u: a.id, n: '작열', el: 'fire', tg: [f.id], ax: t.x, ay: t.y, sh: 'S', ar: 0, pet: 1 });
-    hit(a, f, t.coef, t.flat, 'fire', { noProc: 1, noReact: 1 });
+    // burning ground, or a monster's web (Hunter's Trap: Water DMG, a chance to Immobilize)
+    if (ev) ev.push({ e: 'cast', u: a.id, n: t.name || '작열', el: t.el || 'fire', tg: [f.id], ax: t.x, ay: t.y, sh: 'S', ar: 0, pet: 1 });
+    hit(a, f, t.coef, t.flat, t.el || 'fire', { noProc: 1, noReact: 1 });
+    if (t.eff && f.alive) for (const e of t.eff) tryStatus(a, f, e);
   }
   function burnCheck(u) {
     if (!u.alive) return;
@@ -1772,6 +1939,7 @@ export function simulate(P, seed, log) {
     else {
       if (has(u, 'taunt')) return 0;
       if (s.kind === 'summon') { if (!castSummon(u, k, i)) return 0; }
+      else if (s.kind === 'mobfx') { if (!castMobFx(u, k, i, pre)) return 0; }
       else if (s.kind === 'advance') { if (!castAdvance(u, k)) return 0; }
       else if (!castSupport(u, k)) return 0;
     }
@@ -1784,7 +1952,7 @@ export function simulate(P, seed, log) {
   function approach(u) {
     const foes = aimFoes(u); if (!foes.length || u.pool <= 0) return;
     // a healing summon (Waterling) stays with its side; an attacking one closes in
-    if (u.sum && !u.skills.some((k) => k.s.kind === 'kit')) return;
+    if (u.sum && u.kind !== 'mob' && !u.skills.some((k) => k.s.kind === 'kit')) return; // a summoned monster closes in
     // a large unit (raid boss) measures from its body and stops once its targeted skills reach
     const big = u.sz > 1;
     const near = (x, y) => { let m = 1e9; for (const f of foes) { const d = big ? Math.min(...fpOf(u).map(([dx, dy]) => dU(f, x + dx, y + dy))) : dU(f, x, y); if (d < m) m = d; } return m; };
@@ -1807,6 +1975,15 @@ export function simulate(P, seed, log) {
       if (!u.alive || B.over) break;
       if (s.k === 'dot') dotTick(u, s);
       else if (s.k === 'hot') heal(u, u, s.v);
+    }
+    // Ghostly Seas (Perpetual Stillwater): an enemy that holds it strikes this unit at its turn start, then Ghost Anchor
+    if (u.alive && !B.over) for (const f of U) {
+      if (!f.alive || f.team === u.team || !f.st.length) continue;
+      const sa = has(f, 'seas'); if (!sa || dUU(f, u) > sa.r) continue;
+      if (ev) ev.push({ e: 'cast', u: f.id, n: '유령 바다', el: sa.el, tg: [u.id], ax: u.x, ay: u.y, sh: 'S', ar: 0, pet: 1 });
+      hit(f, u, sa.coef, 0, sa.el, { noProc: 1, noReact: 1 });
+      if (!u.alive || B.over) break;
+      if (sa.eff) tryStatus(f, u, { ...sa.eff, now: 1 });
     }
     if (u.alive && !B.over && has(u, 'flame')) flameBurst(u);
     if (u.alive && !B.over && B.traps.length) burnCheck(u);
@@ -1841,7 +2018,7 @@ export function simulate(P, seed, log) {
         let cast = 0, waiting = 0;
         if (u.kind === 'mob' && !u.kit) {
           // monsters: one skill a turn, specials first (assumption)
-          for (let i = u.skills.length - 1; i >= 0 && !cast && !B.over; i--) if (u.cds[i] <= 0 && !(u.skills[i].s.rage && !u.raged)) { if (tryCast(u, i)) cast = 1; else waiting = 1; } // "Activate [Rage] to enable this skill"
+          for (let i = u.skills.length - 1; i >= 0 && !cast && !B.over; i--) if (u.cds[i] <= 0 && mobReady(u, u.skills[i].s)) { if (tryCast(u, i)) { cast = 1; if (u.skills[i].s.starter) u.stFresh = 0; } else waiting = 1; } // "Activate [Rage] to enable this skill"
         } else if (u.kit || u.sum) {
           // boss kit / summoned creature: every ready skill in its own order (as the recorded raids show), within its gate / state
           for (let i = 0; i < u.skills.length && u.alive && !B.over; i++) { const s = u.skills[i].s; if (u.cds[i] > 0 || !kitUsable(u, s)) continue; if (tryCast(u, i)) cast++; else waiting = 1; }

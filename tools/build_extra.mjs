@@ -8,7 +8,8 @@ import { PFX } from './pets_fx.mjs';
 import { RAID } from './raid.mjs';
 import { KIT_KO, KIT_STATE, KIT_SKIP } from './bosskits.mjs';
 import { RANK_BASE, PVP_GOV } from './rankbases.mjs';
-import { moveAndSize, mobExtras, counterSkill } from './skilltext.mjs';
+import { moveAndSize, mobExtras, mobSkillEntry, stanceTag } from './skilltext.mjs';
+import { MOB_SKILL } from './mobskills.mjs';
 
 const [, , DL, DL2, OUT] = process.argv;
 const J = (f) => JSON.parse(fs.readFileSync(path.join(DL, f), 'utf8'));
@@ -377,13 +378,13 @@ function addMob(key, def, sr, lv) {
     const e = esk[Math.abs(sid)]; if (!e) continue; const desc = strip(e.d);
     if (sid < 0) { (mob.pv = mob.pv || []).push(-sid); const m = /takes (\d+)% less (\w+) DMG and (\d+)% higher (\w+) DMG/.exec(desc); if (m && EL[m[2]] && EL[m[4]]) mob.er = { [EL[m[2]]]: -m[1] / 100, [EL[m[4]]]: +m[3] / 100 }; continue; }
     if (mob.kit) continue; // skills come from the game-data kit
-    const cs = counterSkill(e, desc, EL); if (cs) { mob.sk.push(cs); continue; } // a self counter state (Momentum Backlash, Reflection Mask)
+    if (MOB_SKILL[sid]) { mob.sk.push(mobSkillEntry(sid, e, MOB_SKILL[sid])); continue; } // buffs, heals, shields, stances, summons (tools/mobskills.mjs)
     const p = parseText(desc), el = elOf(e.d);
     mobExtras(desc.replace(/(\d)\s*[×x]\s*(\d)/g, '$1×$2').replace(/(\d) -(grid|row)/g, '$1-$2'), p);
     if (!p.tg || el === 'none') continue;
-    mob.sk.push({ en: e.n, el, ic: e.i, ...p });
+    mob.sk.push(stanceTag({ en: e.n, el, ic: e.i, ...p }));
   }
-  if (!mob.sk.some((s) => s.kind !== 'counterSt')) mob.sk.unshift({ en: 'Attack', el: 'phy', hits: 1, tg: { t: 'S', r: 1 } }); // a self-buff alone is not a damaging skill
+  if (!mob.sk.length || (!mob.kit && !mob.sk.some((s) => s.tg))) mob.sk.unshift({ en: 'Attack', el: 'phy', hits: 1, tg: { t: 'S', r: 1 } }); // a buff alone is not a damaging skill
   MOBS2.push(mob);
 }
 const DUN_KO = { Auroradrasil: '이그드라실', 'Mecha Summit': '기신산', 'Ocean Palace Ruins': '해저 궁전 유적', 'Aquorigin Shrine': '물의 근원 신전', Hellhold: '지옥 요새', 'Demonseal Gorge': '봉마 협곡', "Warlord's Rest": '장군의 안식처', 'Cloudcrest Temple': '구름마루 사원', Bladeshire: '검의 고을', Celestship: '천상선' };

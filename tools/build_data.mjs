@@ -3,7 +3,8 @@
 // The downloaded pages are treated purely as data; nothing from them is executed.
 import fs from 'node:fs';
 import path from 'node:path';
-import { moveAndSize, mobExtras, counterSkill } from './skilltext.mjs';
+import { moveAndSize, mobExtras, mobSkillEntry, stanceTag } from './skilltext.mjs';
+import { MOB_SKILL } from './mobskills.mjs';
 import { PARTS, FWD0 } from './hitparts.mjs';
 
 const [, , DL, OUT] = process.argv;
@@ -434,19 +435,19 @@ for (const [mid, file, ko, en, sr, rankKo] of MAP_DEF) {
         else passiveUnparsed[e.n] = desc.slice(0, 90);
         continue;
       }
-      const cs = counterSkill(e, desc, EL); // a self counter state (Momentum Backlash, Reflection Mask)
-      if (cs) { keptSkills++; mob.sk.push(cs); continue; }
+      // buffs, heals, shields, stances, ground effects, summons: modelled from tools/mobskills.mjs
+      if (MOB_SKILL[sid]) { keptSkills++; mob.sk.push(mobSkillEntry(sid, e, MOB_SKILL[sid])); continue; }
       const p = parseText(desc);
       mobExtras(desc.replace(/(\d)\s*[×x]\s*(\d)/g, '$1×$2'), p);
-      const elm = /color:#[0-9a-f]{6}\\?">(Physical|Wind|Water|Fire|Light|Dark)</i.exec(e.d);
+      const elm = /color:#[0-9a-f]{6}\\?">\s*(Physical|Wind|Water|Fire|Light|Dark)</i.exec(e.d); // "> Physical" (Flash Slash) too
       if (!p.tg || !['S', 'A', 'Q', 'F', 'T', 'TQ'].includes(p.tg.t) || !elm) { droppedSkills++; log('mob skill dropped:', def.n, '/', e.n, '::', desc.slice(0, 120)); continue; }
       keptSkills++;
       const s = { en: e.n, el: EL[elm[1]], ic: e.i, ...p };
       delete s.zi; delete s.pre;
-      mob.sk.push(s);
+      mob.sk.push(stanceTag(s));
     }
-    // no damaging skill (a self-buff alone is not one): a basic attack first, the buff stays its special
-    if (!mob.sk.some((s) => s.kind !== 'counterSt')) { mob.sk.unshift({ en: 'Attack', el: 'phy', hits: 1, tg: { t: 'S', r: 1 } }); log('mob with fallback skill', def.n); }
+    // no damaging skill (a buff alone is not one): a basic attack first, the buff stays its special
+    if (!mob.sk.some((s) => s.tg)) { mob.sk.unshift({ en: 'Attack', el: 'phy', hits: 1, tg: { t: 'S', r: 1 } }); log('mob with fallback skill', def.n); }
     mobIndex.set(key, mob);
     MOBS.push(mob);
   }

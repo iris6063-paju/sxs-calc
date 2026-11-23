@@ -6,6 +6,7 @@ export const ST_KO = {
   dmgRed: '받는 대미지 감소', hot: '지속 치유', dodgeUp: '회피 증가', critStk: '치명타율 중첩', spdStk: '속도 중첩', hpUp: '최대 생명력 증가',
   swords: '광검 진', flame: '열화', nextAcc: '다음 스킬 명중', nextDoom: '다음 스킬 파멸', purity: '순수', ga: '수호천사', accUp: '봉인 해제(명중)',
   stealth: '잠행', voidRune: '보이드 룬', lacer: '열상', counterSt: '반격 태세',
+  blockCtr: '막기 반격', charge: '충전', boon: '지하의 은총', seas: '유령 바다',
 };
 export const ST_SHORT = {
   abreak: '방어↓', weak: '공격↓', slow: '감속', stun: '스턴', freeze: '빙결', immob: '속박', taunt: '도발', frenzy: '광란', blind: '실명',
@@ -14,6 +15,7 @@ export const ST_SHORT = {
   dmgRed: '피해감소', hot: '재생', dodgeUp: '회피↑', critStk: '치명중첩', spdStk: '속도중첩', hpUp: '생명↑',
   swords: '광검', flame: '열화', nextAcc: '명중강화', nextDoom: '파멸강화', purity: '순수', ga: '수호천사', accUp: '봉인해제',
   stealth: '잠행', voidRune: '룬', lacer: '열상', counterSt: '반격',
+  blockCtr: '막기반격', charge: '충전', boon: '은총', seas: '유령바다',
 };
 /** control effects are shown first, then other debuffs, then buffs */
 export const ST_CONTROL = new Set(['stun', 'freeze', 'immob', 'taunt', 'frenzy']);
