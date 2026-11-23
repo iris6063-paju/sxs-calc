@@ -860,14 +860,15 @@ function buildActs(r) {
   const acts = [], evToAct = new Int32Array(r.events.length + 1).fill(-1), M = r.meta;
   let a = null, started = false;
   const turnN = new Map();
-  const blank = () => ({ casts: [], dmg: 0, taken: 0, heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0, kbs: [], dash: 0, retreat: 0, pulls: 0, mh: 0 });
+  const blank = () => ({ casts: [], dmg: 0, taken: 0, ctrs: [], heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0, kbs: [], dash: 0, retreat: 0, pulls: 0, mh: 0 });
   r.events.forEach((e, i) => {
     // battle-start casts (before the first turn, highest SPD first): one "전투 전" line per caster
     if (!started && e.e === 'cast' && (!a || a.u !== e.u)) { a = { i, u: e.u, r: 0, pre: 1, ...blank() }; acts.push(a); }
-    if (e.e === 'turn') { started = true; turnN.set(e.u, (turnN.get(e.u) || 0) + 1); a = { i, u: e.u, r: e.r, tn: turnN.get(e.u), casts: [], dmg: 0, taken: 0, heal: 0, crit: 0, block: 0, miss: 0, falls: [], move: 0, gains: [], spawn: -1, skip: 0, kbs: [], dash: 0, retreat: 0, pulls: 0, mh: 0 }; acts.push(a); }
+    if (e.e === 'turn') { started = true; turnN.set(e.u, (turnN.get(e.u) || 0) + 1); a = { i, u: e.u, r: e.r, tn: turnN.get(e.u), ...blank() }; acts.push(a); }
     else if (a) {
       switch (e.e) {
         case 'cast': a.casts.push(e); a.mh += e.mh || 0; break;
+        case 'ctr': { const k = `${e.u}|${e.n}`; if (!a.ctrs.some((c) => c.k === k)) a.ctrs.push({ k, u: e.u, n: e.n }); break; }
         case 'hit': if (e.k === 3 || e.k === 5) a.miss++; else if (M[e.a].team === M[a.u].team) { a.dmg += e.d; if (e.k === 1) a.crit++; if (e.k === 2) a.block++; } else a.taken += e.d; break;
         case 'heal': a.heal += e.v; break;
         case 'move': if (e.kb && e.u !== a.u) a.kbs.push(e.u); else if (e.pull && e.u !== a.u) a.pulls++; else if (e.u === a.u) { if (e.dash) a.dash = 1; else if (e.retreat) a.retreat = 1; else a.move++; } break;
@@ -896,7 +897,7 @@ function actLine(a, nm, M) {
   if (a.mh) sub.push(`대형 다단 +${a.mh}회`);
   if (a.crit || a.block || a.miss) sub.push([a.crit && `치명타 ${a.crit}`, a.block && `막기 ${a.block}`, a.miss && `빗나감 ${a.miss}`].filter(Boolean).join(' · '));
   if (a.heal) sub.push(`<span class="hl">치유 +${fmt(a.heal)}</span>`);
-  if (a.taken) sub.push(`반격·반사 −${fmt(a.taken)}`);
+  if (a.taken) sub.push(`<span class="ctr">↩ 반격 ${a.ctrs.map((c) => `${esc(nm[c.u])}「${esc(c.n)}」`).join(', ')}${a.ctrs.length ? ' ' : ''}−${fmt(a.taken)}</span>`);
   for (const g of a.gains) sub.push(`${esc(nm[g.t])}: ${ST_KO[g.k] || g.k}${g.n > 1 ? ' ×' + g.n : ''}`);
   if (a.spawn >= 0) sub.push(`✦ ${esc(nm[a.spawn])} ${M[a.spawn].sum ? '소환' : '실체화'}`);
   for (const f of a.falls) sub.push(`<span class="fl">✝ ${esc(nm[f])} 쓰러짐</span>`);
@@ -976,7 +977,7 @@ function refreshBattle() {
     const a = A[Math.min(A.length - 1, Math.max(0, k))];
     if (pos.done) { const end = cur.r.events[cur.r.events.length - 1]; $('#tlCap').textContent = `전투 종료 · ${resKo(end.w, end.timeout)} · ${end.r}라운드 · 행동 ${A.length}개`; }
     else if (k < 0 || !a) $('#tlCap').textContent = `전투 시작 전 · 막대를 끌거나 ▶▶로 한 행동씩 보세요 · 행동 ${A.length}개`;
-    else $('#tlCap').textContent = `${a.pre ? '전투 전' : '라운드 ' + a.r} · 행동 ${k + 1}/${A.length} · ${cur.nm[a.u]}${a.tn ? ` (${a.tn}번째 턴)` : ''}: ${a.casts.length ? a.casts.map((c) => c.n).join(' · ') : a.skip ? '행동 불가' : a.move ? '이동' : '스킬 대기'}${a.dmg ? ' · −' + fmt(a.dmg) : ''}`;
+    else $('#tlCap').textContent = `${a.pre ? '전투 전' : '라운드 ' + a.r} · 행동 ${k + 1}/${A.length} · ${cur.nm[a.u]}${a.tn ? ` (${a.tn}번째 턴)` : ''}: ${a.casts.length ? a.casts.map((c) => c.n).join(' · ') : a.skip ? '행동 불가' : a.move ? '이동' : '스킬 대기'}${a.dmg ? ' · −' + fmt(a.dmg) : ''}${a.taken ? ` · 반격${a.ctrs.length ? ` (${a.ctrs.map((c) => c.n).join(', ')})` : ''} −${fmt(a.taken)}` : ''}`;
     if (k !== cur.k) {
       const L = cur.lines, old = cur.k; cur.k = k;
       const lo = Math.max(0, Math.min(old, k) + 1), hi = Math.min(L.length - 1, Math.max(old, k));

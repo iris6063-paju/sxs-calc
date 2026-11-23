@@ -91,17 +91,20 @@ function casts(P, r, bid) {
   const hero = { kind: 'hero', uid: 'c', cls: 'Fashi', level: 130, atk: b.atk * 2, def: b.def * 30, hp: b.hp * 3000, spd: b.spd * 2, skills: [{ id: 10000, rank: 6 }, { id: 10028, rank: 6 }], cell: [10, 7] };
   const P = prepare({ mode: 'pve', roundCap: 10, mobCoef: 1, teams: [[hero], [{ kind: 'mob', uid: 'g', key: G.k, level: 130, sr: 'Silver1', count: 1, cell: [10, 10] }]] });
   const gi = P.units.findIndex((u) => u.kind === 'mob');
-  let on = 0, counters = 0, late = 0, offAtTurn = 0;
+  let on = 0, counters = 0, late = 0, offAtTurn = 0, named = 0, dmg = 0;
   for (let seed = 1; seed <= 30; seed++) {
-    const r = simulate(P, seed, true); let active = false, by = null, cnt = 0, turnU = null, castSince = false;
+    const r = simulate(P, seed, true); let active = false, by = null, cnt = 0, turnU = null, castSince = false, ctrEv = false;
     for (const e of r.events) {
       if (e.e === 'turn') { turnU = e.u; castSince = false; continue; }
       if (e.e === 'st' && e.t === gi && e.k === 'counterSt') { if (!e.on && turnU === gi && !castSince) offAtTurn++; active = !!e.on; if (e.on) on++; }
-      if (e.e === 'cast') { by = e.u; cnt = 0; castSince = true; if (e.u === gi && active && e.n !== '기세 반격') late++; }
-      if (e.e === 'hit' && e.a === gi && by != null && by !== gi && !P.units[by].pet) { cnt++; counters++; if (!active || cnt > 1) late++; }
+      if (e.e === 'cast') { by = e.u; cnt = 0; castSince = true; ctrEv = false; if (e.u === gi && active && e.n !== '기세 반격') late++; }
+      // the replay's counter event (named over the monster) comes right before the counter hit
+      if (e.e === 'ctr' && e.u === gi && e.n === '기세 반격') ctrEv = true;
+      if (e.e === 'hit' && e.a === gi && by != null && by !== gi && !P.units[by].pet) { cnt++; counters++; dmg += e.d; if (ctrEv) named++; ctrEv = false; if (!active || cnt > 1) late++; }
     }
   }
   ok(on > 0 && counters > 0 && late === 0 && offAtTurn > 0, `Momentum Backlash: ${on} stances, ${counters} counters (one per hero cast, only while on), removed at its turn start`);
+  ok(named === counters && dmg / counters > 1000, `each counter is named for the replay (${named}/${counters}) and deals damage (avg ${Math.round(dmg / counters)})`);
 }
 console.log(bad ? `FAILURES: ${bad}` : 'all boss kit tests passed');
 process.exit(bad ? 1 : 0);

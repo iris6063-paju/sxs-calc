@@ -131,7 +131,7 @@ select.chip { padding: 4px 8px; color: var(--text); }
 .lg .tn { font: 600 10px var(--mono); color: var(--muted); border: 1px solid #3a372f; border-radius: 6px; padding: 0 4px; margin-right: 5px; } .lg.t1 b { color: #ff9c8f; }
 .lg .dm { font: 800 11.5px var(--mono); color: var(--gold); }
 .lg .sub { color: var(--muted); font-size: 11px; margin-top: 1px; }
-.lg .sub .hl { color: #7dff9a; } .lg .sub .fl { color: #ff9c8f; }
+.lg .sub .hl { color: #7dff9a; } .lg .sub .fl { color: #ff9c8f; } .lg .sub .ctr { color: #ffb347; }
 .lg.now { background: #3a3326; box-shadow: inset 0 0 0 1px rgba(255, 210, 74, .5); }
 .lg.future { opacity: .38; }
 .lg-empty { color: var(--muted); font-size: 12px; padding: 16px 8px; text-align: center; }

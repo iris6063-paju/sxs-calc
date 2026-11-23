@@ -507,10 +507,13 @@ export function createStage(canvas) {
   function flushCast() {
     const p = play; if (!p || !p.cur) return;
     const c = p.cur; p.cur = null;
-    if (!c.sup && !c.n) { term.line(`  ⎿ 빗나감`, '#8f8b80'); return; }
-    if (c.sup) return;
-    const bits = []; if (c.crit) bits.push(`치명타 ${c.crit}`); if (c.block) bits.push(`막기 ${c.block}`); if (c.miss) bits.push(`빗나감 ${c.miss}`);
-    term.line(`  ⎿ −${fmt(c.dmg)}${c.n > 1 ? ` (${c.n}타)` : ''}${bits.length ? ' · ' + bits.join(' · ') : ''}`, c.team ? '#ff9c8f' : '#9cc4ff');
+    if (!c.sup && !c.n) term.line(`  ⎿ 빗나감`, '#8f8b80');
+    else if (!c.sup) {
+      const bits = []; if (c.crit) bits.push(`치명타 ${c.crit}`); if (c.block) bits.push(`막기 ${c.block}`); if (c.miss) bits.push(`빗나감 ${c.miss}`);
+      term.line(`  ⎿ −${fmt(c.dmg)}${c.n > 1 ? ` (${c.n}타)` : ''}${bits.length ? ' · ' + bits.join(' · ') : ''}`, c.team ? '#ff9c8f' : '#9cc4ff');
+    }
+    // counters / reflections this cast drew from the other side: their own line, not the caster's damage
+    if (c.ctr) term.line(`  ↩ 반격 ${c.ctrN.size ? [...c.ctrN].join(', ') + ' ' : ''}−${fmt(c.ctr)}${c.ctrH > 1 ? ` (${c.ctrH}회)` : ''}`, c.team ? '#9cc4ff' : '#ff9c8f');
   }
   function doEvent(ev) {
     const p = play;
@@ -531,7 +534,7 @@ export function createStage(canvas) {
         flushCast(); const u = units[ev.u]; u.atk = 0;
         const col = (EL[ev.el] || EL.none).c;
         popLabel(ev.n, col, new THREE.Vector3(u.g.position.x, u.h + 0.95, u.g.position.z));
-        p.cur = { dmg: 0, n: 0, crit: 0, block: 0, miss: 0, team: u.m.team, sup: ev.sup, el: ev.el, src: ev.u };
+        p.cur = { dmg: 0, n: 0, crit: 0, block: 0, miss: 0, team: u.m.team, sup: ev.sup, el: ev.el, src: ev.u, ctr: 0, ctrH: 0, ctrN: new Set() };
         const first = ev.tg.length ? units[ev.tg[0]] : null;
         term.line(`R${p.round} ${uname(u.m)} ▸ ${ev.n}${first ? ' → ' + uname(first.m) + (ev.tg.length > 1 ? ` 외 ${ev.tg.length - 1}` : '') : ''}`, '#e8e4d8');
         const aoe = ev.sh !== 'S' || ev.tg.length > 1;
@@ -574,19 +577,35 @@ export function createStage(canvas) {
         return 0.3;
       }
       case 'hit': {
-        const t = units[ev.t], c = p.cur;
+        const t = units[ev.t], c0 = p.cur;
+        // a hit from the other side during a cast is a counter / reflection (as in the combat log)
+        const back = c0 && units[ev.a] && units[ev.a].m.team !== c0.team, c = back ? null : c0;
         t.hp = ev.hp; t.sh = ev.sh; drawBar(t);
         if (ev.k === 3) { popNum('빗나감', '#cfd3d8', head(t)); if (c) c.miss++; }
         else if (ev.k === 5) { popNum('면역', '#9fe7ff', head(t)); if (c) c.miss++; }
         else {
           t.hit = 1; t.lastHit = animT; t.bigHit = ev.d > t.m.hpMax * 0.12;
-          if ((t.sheet || t.toon) && t.an.st !== 'attack' && t.an.st !== 'skill' && ev.d > 0) setAnim(t, 'hit');
-          const col = ev.k === 1 ? '#ffd23f' : ev.k === 2 ? '#b9c4cf' : ev.k === 4 ? '#c59bff' : '#ffffff';
-          popNum((ev.k === 2 ? '🛡' : '') + fmt(ev.d) + (ev.k === 1 ? '!' : ''), col, head(t), ev.k === 1);
-          if (c) { c.dmg += ev.d; c.n++; if (ev.k === 1) c.crit++; if (ev.k === 2) c.block++; }
+          if ((t.sheet || t.toon) && (back || (t.an.st !== 'attack' && t.an.st !== 'skill')) && ev.d > 0) setAnim(t, 'hit');
+          const col = ev.k === 1 ? '#ffd23f' : ev.k === 2 ? '#b9c4cf' : ev.k === 4 ? '#c59bff' : back ? '#ffb347' : '#ffffff';
+          popNum((ev.k === 2 ? '🛡' : '') + fmt(ev.d) + (ev.k === 1 ? '!' : ''), col, head(t), ev.k === 1 || back);
+          if (back) { c0.ctr += ev.d; c0.ctrH++; }
+          else if (c) { c.dmg += ev.d; c.n++; if (ev.k === 1) c.crit++; if (ev.k === 2) c.block++; }
         }
         p.hooks.onHp && p.hooks.onHp();
         return p.burst > 10 ? 0.022 : 0.06;
+      }
+      case 'ctr': {
+        // a counter / reflection: its name over the unit striking back, and a strike toward the attacker
+        const u = units[ev.u], t = units[ev.t];
+        if (!u || !t || !u.alive) return 0;
+        if (p.cur) p.cur.ctrN.add(`${uname(u.m)}「${ev.n}」`); else term.line(`  ↩ ${uname(u.m)}「${ev.n}」 → ${uname(t.m)}`, '#ffcf8a');
+        popLabel(`↩ ${ev.n}`, '#ffb347', new THREE.Vector3(u.g.position.x, u.h + 0.95, u.g.position.z));
+        if (!u.m.pet) {
+          const dx = t.g.position.x - u.g.position.x, dz = t.g.position.z - u.g.position.z, d = Math.hypot(dx, dz) || 1;
+          u.atk = 0; u.lunge = { x: dx / d, z: dz / d }; setAnim(u, 'attack');
+          if (u.toon) u.yawT = Math.atan2(dx, dz);
+        }
+        return 0.22;
       }
       case 'heal': { const t = units[ev.t]; t.hp = ev.hp; drawBar(t); popNum('+' + fmt(ev.v), '#7dff9a', head(t)); p.hooks.onHp && p.hooks.onHp(); return 0.06; }
       case 'shield': { const t = units[ev.t]; t.sh = ev.sh; drawBar(t); popNum('실드 +' + fmt(ev.v), '#bfe6ff', head(t)); return 0.06; }
@@ -624,7 +643,7 @@ export function createStage(canvas) {
     while (p.wait <= 0 && p.i < p.ev.length && guard++ < 40) {
       if (p.stopAt != null && p.i >= p.stopAt) { p.stopAt = null; paused = true; p.hooks.onPause && p.hooks.onPause(); break; }
       const ev = p.ev[p.i++];
-      if (ev.e === 'cast') { let n = 0; for (let j = p.i; j < p.ev.length && (p.ev[j].e === 'hit' || p.ev[j].e === 'st' || p.ev[j].e === 'die' || p.ev[j].e === 'move'); j++) if (p.ev[j].e === 'hit') n++; p.burst = n; }
+      if (ev.e === 'cast') { let n = 0; for (let j = p.i; j < p.ev.length && (p.ev[j].e === 'hit' || p.ev[j].e === 'st' || p.ev[j].e === 'die' || p.ev[j].e === 'move' || p.ev[j].e === 'ctr'); j++) if (p.ev[j].e === 'hit') n++; p.burst = n; }
       p.wait += doEvent(ev);
       p.hooks.onEvent && p.hooks.onEvent(p.i);
       if (ev.e === 'end') { p.done = true; p.hooks.onEnd && p.hooks.onEnd(ev); break; }

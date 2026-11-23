@@ -182,7 +182,7 @@ function compileCharms(list, u) {
         case 'harmony': { const els = new Set(u.skills.filter((k) => k.s.kind === 'dmg' && k.s.el !== 'phy').map((k) => k.s.el)); u.mastery += Math.round(f[1][0] * R * f[1][1] * LV[f[1][2]][l] * Math.min(4, els.size)); break; }
         case 'proc': ch.procs.push({ on: f[1], p: f[2], el: f[3], ar: f[4], opt: f[5] || {}, coef, flat }); break;
         case 'inflict': ch.inflicts.push({ p: f[1], e: f[2], cond: f[3] }); break;
-        case 'react': ch[f[1]].push({ p: f[2], el: f[3], by: f[4], range: f[5], coef, flat }); break;
+        case 'react': ch[f[1]].push({ p: f[2], el: f[3], by: f[4], range: f[5], coef, flat, name: c.ko || c.en }); break;
         case 'reactInflict': ch[f[1]].push({ p: f[2].p == null ? 1 : f[2].p, range: 99, inflict: { ...f[2], p: 1, v: f[3] ? pct(f[3]) : f[2].v } }); break;
         case 'ls': u.lsAll += pct(f[1]); break;
         case 'dmgUp': ch.dmgUp.push([f[1], pct(f[2])]); break;
@@ -204,7 +204,7 @@ function compileCharms(list, u) {
         case 'omen': ch.omen = 1; break;
         case 'thunder': ch.thunder = { p: f[1], coef, flat }; break;
         case 'mark10': ch.mark = { coef, flat }; break;
-        case 'reflect': ch.reflect = pct(f[1]); break;
+        case 'reflect': ch.reflect = pct(f[1]); ch.reflectN = c.ko || c.en; break;
         // 2026-11-21: from the game hooks (duel.json passives, their trigger skills and status props)
         case 'repel': ch.repel = { p: f[1], el: f[2], r: f[3], kb: f[4], coef, flat }; break;
         case 'frostGuard': ch.frostGuard = { v: pct(f[1]), healPct, healFlat }; break;
@@ -366,7 +366,7 @@ function compileMobPassives(u, mob, mc, est) {
     if (!p || p.k === 'none' || (p.est && !est)) continue;
     switch (p.k) {
       case 'er': u.er = { ...(u.er || {}), ...p.er }; break;
-      case 'counter': ch.hurt.push({ p: p.p, el: p.el, by: 'atk', range: p.r, coef: p.c != null ? p.c : mc, flat: 0, aoe: p.aoe || 0 }); anyCh = true; break;
+      case 'counter': ch.hurt.push({ p: p.p, el: p.el, by: 'atk', range: p.r, coef: p.c != null ? p.c : mc, flat: 0, aoe: p.aoe || 0, name: p.ko || p.en }); anyCh = true; break;
       case 'venom': ch.procs.push({ on: 'hit', p: 1, el: p.el, ar: 0, opt: { eff: [{ k: 'dot', el: 'dark', p: p.p, t: p.t }] }, coef: mc, flat: 0 }); anyCh = true; break;
       case 'dot': ch.inflicts.push({ p: p.p, e: { k: 'dot', el: p.el, t: p.t } }); anyCh = true; break;
       case 'move': u.move = p.v; break;
@@ -856,14 +856,16 @@ export function simulate(P, seed, log) {
     if (c.critHeal && kind === 1) heal(a, a, a.hpMax * c.critHeal.healPct + c.critHeal.healFlat, chR(a, 'critHeal'));
     if (c.mark && t.alive) { t.marks++; if (t.marks >= 10) { t.marks = 0; hit(a, t, c.mark.coef, c.mark.flat, 'phy', { noProc: 1, noReact: 1 }); } }
   }
+  /** a counter / reflection about to strike back: the replay names it over the unit and keeps its damage apart from the cast's */
+  function ctrEv(u, t, n) { if (ev) ev.push({ e: 'ctr', u: u.id, t: t.id, n: n || '반격' }); }
   /** defender-side charm reactions (at most one round of counters per incoming cast) */
   function onHurt(a, t, kind, d) {
     // a monster's counter state (Momentum Backlash, Reflection Mask): one hit back on the attacker per incoming technique cast
     const cs = t.st.length ? has(t, 'counterSt') : null;
-    if (cs && a.alive && !B.over && t.csCast !== B.castId) { t.csCast = B.castId; hit(t, a, cs.coef, 0, cs.el, { noProc: 1, noReact: 1 }); if (B.over || !t.alive) return; }
+    if (cs && a.alive && !B.over && t.csCast !== B.castId) { t.csCast = B.castId; ctrEv(t, a, cs.name); hit(t, a, cs.coef, 0, cs.el, { noProc: 1, noReact: 1 }); if (B.over || !t.alive) return; }
     // a monster's defensive stance (Shield Fortification, Fire Shield Stance): a hit back on each blocked technique hit
     const bc = kind === 2 && t.st.length ? has(t, 'blockCtr') : null;
-    if (bc && a.alive && !B.over) { hit(t, a, bc.coef, 0, bc.el, { noProc: 1, noReact: 1 }); if (B.over || !t.alive) return; }
+    if (bc && a.alive && !B.over) { ctrEv(t, a, bc.name); hit(t, a, bc.coef, 0, bc.el, { noProc: 1, noReact: 1 }); if (B.over || !t.alive) return; }
     const c = t.ch; if (!c || B.over) return;
     t.stone++; t.eye = Math.min(10, t.eye + 1);
     if (t.reactCast === B.castId) return;
@@ -872,10 +874,10 @@ export function simulate(P, seed, log) {
       if (!a.alive || !t.alive || dUU(a, t) > r.range || rnd() >= r.p) continue;
       fired = true;
       if (r.inflict) tryStatus(t, a, r.inflict);
-      else if (r.aoe) { for (const f of U.filter((x) => x.alive && x.team !== t.team && dUU(x, t) <= r.aoe)) hit(t, f, r.coef, r.flat, r.el, { noProc: 1, noReact: 1 }); }
-      else hit(t, a, r.coef, r.flat, r.el, { base: (r.by === 'def' ? eDef(t) : eAtk(t)) * r.coef, noProc: 1, noReact: 1, mult: 1 + (c.counterUp || 0) });
+      else if (r.aoe) { ctrEv(t, a, r.name); for (const f of U.filter((x) => x.alive && x.team !== t.team && dUU(x, t) <= r.aoe)) hit(t, f, r.coef, r.flat, r.el, { noProc: 1, noReact: 1 }); }
+      else { ctrEv(t, a, r.name); hit(t, a, r.coef, r.flat, r.el, { base: (r.by === 'def' ? eDef(t) : eAtk(t)) * r.coef, noProc: 1, noReact: 1, mult: 1 + (c.counterUp || 0) }); }
     }
-    if (c.reflect && t.shield > 0 && a.alive) { fired = true; applyDamage(t, a, Math.max(1, Math.floor(d * c.reflect)), { el: 'light', kind: 4 }); }
+    if (c.reflect && t.shield > 0 && a.alive) { fired = true; ctrEv(t, a, c.reflectN || '반사'); applyDamage(t, a, Math.max(1, Math.floor(d * c.reflect)), { el: 'light', kind: 4 }); }
     if (fired) t.reactCast = B.castId;
   }
   /** one technique hit with all rolls */
@@ -937,7 +939,7 @@ export function simulate(P, seed, log) {
       const sw = has(t, 'swords');
       if (sw && sw.cast !== B.castId) {
         sw.cast = B.castId; sw.n--;
-        const cx = a.x, cy = a.y;
+        const cx = a.x, cy = a.y; ctrEv(t, a, sw.name || '광검진');
         for (const f of U) if (f.alive && f.team !== t.team && dU(f, cx, cy) <= 1) hit(t, f, sw.coef, sw.flat, 'light', { noReact: 1 });
         if (sw.n <= 0) { const i = t.st.indexOf(sw); if (i >= 0) removeStatus(t, i); recalc(t); }
       }
@@ -1558,7 +1560,7 @@ export function simulate(P, seed, log) {
       const base = { exp: T ? t.turnNo + T : 1e9, buff: true, uniq: 1, src: u.id, sid: s.id, ...(fx.nd ? { nd: 1 } : {}) };
       for (const [key, v, max] of list) {
         if (stat[key]) addStatus(t, { ...base, k: key, v: t[stat[key]] * v }); // a share of the holder's own stat
-        else if (key === 'blockCtr') addStatus(t, { ...base, k: 'blockCtr', el: v, coef: k.n.coef });
+        else if (key === 'blockCtr') addStatus(t, { ...base, k: 'blockCtr', name: s.ko || s.en, el: v, coef: k.n.coef });
         else if (key === 'next') addStatus(t, { ...base, k: 'charge', v });
         else if (key === 'immob') addStatus(t, { ...base, k: 'immob' });
         else if (key === 'boon') { const ex = has(t, 'boon'); if (ex) { ex.n = Math.min(max, ex.n + 1); recalc(t); stEv(t, ex, true); } else addStatus(t, { k: 'boon', v, n: 1, exp: 1e9, buff: true, nd: 1, src: u.id }); }
@@ -1898,10 +1900,10 @@ export function simulate(P, seed, log) {
         case 'nextAcc': addStatus(t, { ...base, k: 'nextAcc', v: n.bv, dmg: b.dmg }); break;
         case 'nextDoom': addStatus(t, { ...base, k: 'nextDoom', v: n.bv }); break;
         case 'hot': addStatus(t, { ...base, k: 'hot', v: (u.hpMax * n.healPct + n.healFlat) * skR(s) }); break;
-        case 'swords': addStatus(t, { ...base, k: 'swords', n: b.n, coef: n.coef, flat: n.flat, exp: 1e9 }); break;
+        case 'swords': addStatus(t, { ...base, k: 'swords', name: s.ko || s.en, n: b.n, coef: n.coef, flat: n.flat, exp: 1e9 }); break;
         case 'flame': addStatus(t, { ...base, k: 'flame', coef: n.coef, flat: n.flat }); flameBurst(t); break;
         // counter state (cannot be dispelled): "until the start of the caster's next turn" or for its turns
-        case 'counterSt': addStatus(t, { ...base, k: 'counterSt', el: s.el, coef: n.coef, ...(s.nd ? { nd: 1 } : {}), ...(b.next ? { exp: 1e9, until: t.turnNo + 1 } : {}) }); break;
+        case 'counterSt': addStatus(t, { ...base, k: 'counterSt', name: s.ko || s.en, el: s.el, coef: n.coef, ...(s.nd ? { nd: 1 } : {}), ...(b.next ? { exp: 1e9, until: t.turnNo + 1 } : {}) }); break;
       }
       if (s.dispel) cleanse(t, s.dispel);
     }
