@@ -3,7 +3,7 @@
 // The downloaded pages are treated purely as data; nothing from them is executed.
 import fs from 'node:fs';
 import path from 'node:path';
-import { moveAndSize, mobExtras } from './skilltext.mjs';
+import { moveAndSize, mobExtras, counterSkill } from './skilltext.mjs';
 import { PARTS, FWD0 } from './hitparts.mjs';
 
 const [, , DL, OUT] = process.argv;
@@ -434,6 +434,8 @@ for (const [mid, file, ko, en, sr, rankKo] of MAP_DEF) {
         else passiveUnparsed[e.n] = desc.slice(0, 90);
         continue;
       }
+      const cs = counterSkill(e, desc, EL); // a self counter state (Momentum Backlash, Reflection Mask)
+      if (cs) { keptSkills++; mob.sk.push(cs); continue; }
       const p = parseText(desc);
       mobExtras(desc.replace(/(\d)\s*[×x]\s*(\d)/g, '$1×$2'), p);
       const elm = /color:#[0-9a-f]{6}\\?">(Physical|Wind|Water|Fire|Light|Dark)</i.exec(e.d);
@@ -443,7 +445,8 @@ for (const [mid, file, ko, en, sr, rankKo] of MAP_DEF) {
       delete s.zi; delete s.pre;
       mob.sk.push(s);
     }
-    if (!mob.sk.length) { mob.sk.push({ en: 'Attack', el: 'phy', hits: 1, tg: { t: 'S', r: 1 } }); log('mob with fallback skill', def.n); }
+    // no damaging skill (a self-buff alone is not one): a basic attack first, the buff stays its special
+    if (!mob.sk.some((s) => s.kind !== 'counterSt')) { mob.sk.unshift({ en: 'Attack', el: 'phy', hits: 1, tg: { t: 'S', r: 1 } }); log('mob with fallback skill', def.n); }
     mobIndex.set(key, mob);
     MOBS.push(mob);
   }

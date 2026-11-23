@@ -339,7 +339,8 @@ function buildMob(key, level, opts, sr, fix, uws) {
   // boss kit (Hieromon, raid boss): the game's own hit configs, coefficients (per hit) and cooldowns; the opening
   // cooldown is CD + 1. Summons are not simulated.
   if (mob.kit) u.skills = mob.sk.filter((s) => !s.sum).map((s) => ({ s: { ...s, kind: 'kit' }, n: { coef: s.c, flat: 0 }, cd: s.cd || 0, init: (s.cd || 0) + 1 }));
-  else u.skills = mob.sk.map((s, i) => ({ s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 }));
+  // a self counter state (Momentum Backlash, Reflection Mask): a buff skill whose counter hits with the mob-skill coefficient
+  else u.skills = mob.sk.map((s, i) => s.kind === 'counterSt' ? { s: { ...s, kind: 'buff', ko: s.ko || s.en, buff: { st: 'counterSt', to: 'self', t: s.t || 1, next: s.next || 0 } }, n: { coef: mc, flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 } : ({ s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd: i ? 2 : 0, init: i ? i + 1 : 0 }));
   compileMobPassives(u, mob, mc, opts.pvEst !== false);
   return u;
 }
@@ -829,6 +830,9 @@ export function simulate(P, seed, log) {
   }
   /** defender-side charm reactions (at most one round of counters per incoming cast) */
   function onHurt(a, t, kind, d) {
+    // a monster's counter state (Momentum Backlash, Reflection Mask): one hit back on the attacker per incoming technique cast
+    const cs = t.st.length ? has(t, 'counterSt') : null;
+    if (cs && a.alive && !B.over && t.csCast !== B.castId) { t.csCast = B.castId; hit(t, a, cs.coef, 0, cs.el, { noProc: 1, noReact: 1 }); if (B.over || !t.alive) return; }
     const c = t.ch; if (!c || B.over) return;
     t.stone++; t.eye = Math.min(10, t.eye + 1);
     if (t.reactCast === B.castId) return;
@@ -1729,6 +1733,8 @@ export function simulate(P, seed, log) {
         case 'hot': addStatus(t, { ...base, k: 'hot', v: (u.hpMax * n.healPct + n.healFlat) * skR(s) }); break;
         case 'swords': addStatus(t, { ...base, k: 'swords', n: b.n, coef: n.coef, flat: n.flat, exp: 1e9 }); break;
         case 'flame': addStatus(t, { ...base, k: 'flame', coef: n.coef, flat: n.flat }); flameBurst(t); break;
+        // counter state (cannot be dispelled): "until the start of the caster's next turn" or for its turns
+        case 'counterSt': addStatus(t, { ...base, k: 'counterSt', el: s.el, coef: n.coef, ...(s.nd ? { nd: 1 } : {}), ...(b.next ? { exp: 1e9, until: t.turnNo + 1 } : {}) }); break;
       }
       if (s.dispel) cleanse(t, s.dispel);
     }
@@ -1791,6 +1797,8 @@ export function simulate(P, seed, log) {
   function takeTurn(u) {
     u.turnNo++;
     if (ev) ev.push({ e: 'turn', u: u.id, r: B.round });
+    // statuses that last "until the start of the caster's next turn" (Momentum Backlash)
+    for (let i = u.st.length - 1; i >= 0; i--) if (u.st[i].until && u.turnNo >= u.st[i].until) { removeStatus(u, i); recalc(u); }
     if (B.totem) totemAura(u);
     B.cur = u; B.turnSeq++; u.tc0 = u.tCasts || 0;
     if (u.ch && u.alive) chTurnStart(u);

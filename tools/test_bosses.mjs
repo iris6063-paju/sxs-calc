@@ -80,5 +80,28 @@ function casts(P, r, bid) {
   ok(O.st.length >= 20 && now / old > 1.5, `Master Orochi's water attacks carry its affinity / mastery: ×${(now / old).toFixed(2)} against 14-number stats`);
   ok(Math.abs(low / now - 81) < 0.5, `party rank Champion against a Master monster: monster DMG ×${(low / now).toFixed(1)} (1 + |95 − 15|)`);
 }
+// 6) Momentum Backlash (Cyclopean Geocrusher): a counter state until its next turn starts, one Light hit back per
+//    technique cast; Reflection Mask (Bronze Face) keeps a basic attack beside it
+{
+  const G = ALL_MOBS.find((x) => x.k === '3613|2'), BF = ALL_MOBS.find((x) => x.en === 'Bronze Face');
+  const mb = G.sk.find((s) => s.en === 'Momentum Backlash');
+  ok(mb && mb.kind === 'counterSt' && mb.el === 'light' && mb.next && mb.nd, 'Geocrusher keeps Momentum Backlash: Light counter state, until its next turn, cannot be dispelled');
+  ok(BF && BF.sk.some((s) => s.kind === 'counterSt' && s.el === 'phy' && s.t === 1) && BF.sk.some((s) => s.tg), 'Bronze Face: Reflection Mask (1 turn, Physical) and a basic attack');
+  const b = heroBase(130);
+  const hero = { kind: 'hero', uid: 'c', cls: 'Fashi', level: 130, atk: b.atk * 2, def: b.def * 30, hp: b.hp * 3000, spd: b.spd * 2, skills: [{ id: 10000, rank: 6 }, { id: 10028, rank: 6 }], cell: [10, 7] };
+  const P = prepare({ mode: 'pve', roundCap: 10, mobCoef: 1, teams: [[hero], [{ kind: 'mob', uid: 'g', key: G.k, level: 130, sr: 'Silver1', count: 1, cell: [10, 10] }]] });
+  const gi = P.units.findIndex((u) => u.kind === 'mob');
+  let on = 0, counters = 0, late = 0, offAtTurn = 0;
+  for (let seed = 1; seed <= 30; seed++) {
+    const r = simulate(P, seed, true); let active = false, by = null, cnt = 0, turnU = null, castSince = false;
+    for (const e of r.events) {
+      if (e.e === 'turn') { turnU = e.u; castSince = false; continue; }
+      if (e.e === 'st' && e.t === gi && e.k === 'counterSt') { if (!e.on && turnU === gi && !castSince) offAtTurn++; active = !!e.on; if (e.on) on++; }
+      if (e.e === 'cast') { by = e.u; cnt = 0; castSince = true; if (e.u === gi && active && e.n !== '기세 반격') late++; }
+      if (e.e === 'hit' && e.a === gi && by != null && by !== gi && !P.units[by].pet) { cnt++; counters++; if (!active || cnt > 1) late++; }
+    }
+  }
+  ok(on > 0 && counters > 0 && late === 0 && offAtTurn > 0, `Momentum Backlash: ${on} stances, ${counters} counters (one per hero cast, only while on), removed at its turn start`);
+}
 console.log(bad ? `FAILURES: ${bad}` : 'all boss kit tests passed');
 process.exit(bad ? 1 : 0);

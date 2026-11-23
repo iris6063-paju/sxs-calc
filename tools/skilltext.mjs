@@ -42,3 +42,16 @@ export function moveAndSize(d, o) {
   const kb = /(?:(\d+)% (?:base )?chance to )?knocks? (?:them|it|the target|enemies) back(?: by)? (\d+) grids?( to either side)?/g;
   while ((m = kb.exec(d))) (o.eff = o.eff || []).push({ k: 'kb', n: +m[2], p: m[1] ? +m[1] / 100 : 1, side: m[3] ? 1 : 0 });
 }
+
+// Korean names for monster self-buff skills (translations: no official Korean text was found for monster skills)
+const MOB_SK_KO = { 'Momentum Backlash': '기세 반격', 'Reflection Mask': '반사 가면' };
+/** a monster's self counter state, kept as a buff skill (2026-11-23): Momentum Backlash lasts until the start of the
+ *  caster's next turn, Reflection Mask 1 turn; a Technique hit on the caster is answered with one hit on the attacker.
+ *  e: the enemy skill ({ n, i }), d: its plain description, EL: English element → key. Returns the skill or null. */
+export function counterSkill(e, d, EL) {
+  const a = /enters a counterattack state until the start of the caster's next turn[\s\S]*?deals (\w+) DMG once to the attacker/.exec(d);
+  const b = /Grants the caster a buff for (\d+) turns?\. When the caster takes Technique DMG, deals (\w+) DMG once to the attacker/.exec(d);
+  const el = a ? EL[a[1]] : b ? EL[b[2]] : null;
+  if (!el) return null;
+  return { en: e.n, ko: MOB_SK_KO[e.n] || e.n, el, ic: e.i, kind: 'counterSt', ...(a ? { next: 1 } : { t: +b[1] }), ...(/cannot be dispelled/i.test(d) ? { nd: 1 } : {}) };
+}
