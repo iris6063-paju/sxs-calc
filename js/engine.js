@@ -1572,11 +1572,13 @@ export function simulate(P, seed, log) {
       case 'buff': {
         const bn = fx.st.find(([key]) => key === 'boon');
         if (bn && (has(u, 'boon') || { n: 0 }).n >= bn[2]) return false; // Underground Boon at its 10 stacks
+        if (!pre && fx.to === 'allies') supMove(u, { t: 'allies', r: fx.r, mode: 'buff', sid: s.id, ex: fx.ex, body: 1 });
         const tg = group(); open(); label(tg.map((t) => t.id));
         for (const t of tg) put(t, fx.st);
         return true;
       }
       case 'heal': {
+        if (!pre && fx.to === 'allies') supMove(u, { t: 'allies', r: fx.r, mode: 'heal', sid: s.id, ex: fx.ex, body: 1 });
         const tg = group(), hurt = tg.filter((t) => t.hp < t.hpMax);
         if (!hurt.length && !fx.st) return false;
         open(); label(tg.map((t) => t.id));
@@ -1925,6 +1927,47 @@ export function simulate(P, seed, log) {
     }
     return true;
   }
+  /** support skills on allies (heals, shields, buffs): the game's AI plans them like attacks and walks within its move
+   *  range first (duel.json aiTable): Cure — MoreHitCount, LowerTargetHp, ShorterMoveDist (SaferPos instead on the turn's
+   *  last cast); a shield on the lowest ally — LowerTargetHp first; Buff — MoreHitStatusCount (allies without it),
+   *  MoreHitCount, ShorterMoveDist. Weights: a summon counts 0.3 for a heal (CureSummonHpWeightChange −0.7) and an ally
+   *  that already has the buff 0.6 (HaveSameBuffRoleWeightChange −0.4). o: { t: 'allies' | 'allyLow' | 'owner', r,
+   *  mode: 'heal' | 'shield' | 'buff', sid, ex (not the caster), body (measure from bodies, as monster skills do) } */
+  function supMove(u, o, last) {
+    if (!(u.pool > 0) || !o.r || has(u, 'immob')) return;
+    const allies = alliesOf(u).filter((a) => !a.boom && !(o.ex && a === u) && (o.mode !== 'buff' || !a.sum || a === u));
+    if (o.t === 'owner') { const ow = U[u.owner]; if (!ow || !ow.alive) return; allies.length = 0; allies.push(ow); }
+    const need = (a) => (o.mode === 'heal' ? a.hp < a.hpMax : true);
+    if (!allies.some(need)) return;
+    const fp = o.body && u.sz > 1 ? fpOf(u) : null;
+    const dTo = (a, x, y) => (a === u ? 0 : fp ? Math.min(...fp.map(([dx, dy]) => dU(a, x + dx, y + dy))) : o.body ? dU(a, x, y) : dist(a.x, a.y, x, y));
+    const same = (a) => o.sid != null && a.st.some((x) => x.sid === o.sid);
+    let best = null;
+    for (const [dx, dy, d] of diaOf(u)) {
+      if (d > u.pool) break;
+      const x = u.x + dx, y = u.y + dy;
+      if (d && !fits(u, x, y)) continue;
+      const inR = allies.filter((a) => need(a) && dTo(a, x, y) <= o.r);
+      if (!inR.length) continue;
+      let hits = 0, fresh = 0, low = 1;
+      if (o.t === 'allies') for (const a of inR) { const w = o.mode === 'heal' && a.sum && a !== u ? 0.3 : o.mode === 'buff' && same(a) ? 0.6 : 1; hits += w; if (!same(a)) fresh++; low = Math.min(low, a.hp / a.hpMax); }
+      else { const t = inR.reduce((b, a) => (a.hp / a.hpMax < b.hp / b.hpMax ? a : b), inR[0]); hits = 1; fresh = same(t) ? 0 : 1; low = t.hp / t.hpMax; }
+      const c = { x, y, d, hits, fresh, low, safe: last ? safer(u, x, y) : 0 };
+      if (!best) { best = c; continue; }
+      const keys = o.mode === 'heal' ? [c.hits - best.hits, best.low - c.low, last ? c.safe - best.safe : best.d - c.d]
+        : o.mode === 'shield' ? [best.low - c.low, c.hits - best.hits, best.d - c.d]
+          : [c.fresh - best.fresh, c.hits - best.hits, best.d - c.d, best.low - c.low];
+      for (const v of keys) { if (v > 1e-9) { best = c; break; } if (v < -1e-9) break; }
+    }
+    if (best && best.d) { moveTo(u, best.x, best.y); u.pool -= best.d; }
+  }
+  /** the planner's view of a hero / summon support skill (castSupport0's targeting) */
+  function supSpec(s) {
+    if (s.kind === 'heal') return s.tg && s.tg.t !== 'self' ? { t: s.tg.t === 'allies' ? 'allies' : s.tg.t === 'owner' ? 'owner' : 'allyLow', r: s.tg.r, mode: 'heal' } : null;
+    if (s.kind === 'shield') return s.tg && s.tg.t !== 'self' ? { t: s.tg.t === 'allies' ? 'allies' : 'allyLow', r: s.tg.r, mode: 'shield' } : null;
+    const b = s.buff; if (!b || b.to === 'self') return null;
+    return { t: b.to === 'allies' ? 'allies' : b.to === 'owner' ? 'owner' : 'allyLow', r: b.r, mode: 'buff', sid: s.id };
+  }
   function tryCast(u, i, pre, keep) {
     const k = u.skills[i], s = k.s;
     if (s.kind === 'kit') {
@@ -1943,7 +1986,11 @@ export function simulate(P, seed, log) {
       if (s.kind === 'summon') { if (!castSummon(u, k, i)) return 0; }
       else if (s.kind === 'mobfx') { if (!castMobFx(u, k, i, pre)) return 0; }
       else if (s.kind === 'advance') { if (!castAdvance(u, k)) return 0; }
-      else if (!castSupport(u, k)) return 0;
+      else {
+        // heals / shields / buffs on allies: walk to the cell the game's AI would pick first (not before the battle)
+        const sp = !pre && supSpec(s); if (sp) supMove(u, sp, s.kind === 'heal' && lastCast(u, i));
+        if (!castSupport(u, k)) return 0;
+      }
     }
     u.cds[i] = k.cd + 1;
     u.tCasts = (u.tCasts || 0) + 1;
@@ -1951,10 +1998,31 @@ export function simulate(P, seed, log) {
     runeReact(u);
     return 1;
   }
+  /** a support summon with nobody in reach: toward the most-hurt ally (else its owner), stopping once its
+   *  shortest support range covers it */
+  function followAlly(u) {
+    const al = alliesOf(u).filter((a) => a !== u && !a.boom && !a.sum);
+    const hurt = al.filter((a) => a.hp < a.hpMax), ow = U[u.owner];
+    const t = hurt.length ? hurt.reduce((b, a) => (a.hp / a.hpMax < b.hp / b.hpMax ? a : b), hurt[0]) : ow && ow.alive ? ow : null;
+    if (!t) return;
+    const rs = u.skills.map((k) => (supSpec(k.s) || {}).r).filter((r) => r > 0), want = rs.length ? Math.min(...rs) : 1;
+    const now = Math.max(dU(t, u.x, u.y), want);
+    if (now <= want) return;
+    // any cell within that range is as good as another; then the shortest walk
+    let best = null;
+    for (const [dx, dy, d] of diaOf(u)) {
+      if (d > u.pool) break; if (!d) continue;
+      const x = u.x + dx, y = u.y + dy; if (!fits(u, x, y)) continue;
+      const nd = dU(t, x, y); if (nd < 1) continue;
+      const k = Math.max(nd, want); if (!best || k < best.k || (k === best.k && d < best.d)) best = { x, y, d, k };
+    }
+    if (best && best.k < now) { moveTo(u, best.x, best.y); u.pool -= best.d; }
+  }
   function approach(u) {
     const foes = aimFoes(u); if (!foes.length || u.pool <= 0) return;
-    // a healing summon (Waterling) stays with its side; an attacking one closes in
-    if (u.sum && u.kind !== 'mob' && !u.skills.some((k) => k.s.kind === 'kit')) return; // a summoned monster closes in
+    // a healing summon (Water Spirit, move 6) walks toward the ally that needs it most, else keeps to its owner;
+    // an attacking one closes in (a summoned monster closes in too)
+    if (u.sum && u.kind !== 'mob' && !u.skills.some((k) => k.s.kind === 'kit')) { followAlly(u); return; }
     // a large unit (raid boss) measures from its body and stops once its targeted skills reach
     const big = u.sz > 1;
     const near = (x, y) => { let m = 1e9; for (const f of foes) { const d = big ? Math.min(...fpOf(u).map(([dx, dy]) => dU(f, x + dx, y + dy))) : dU(f, x, y); if (d < m) m = d; } return m; };
