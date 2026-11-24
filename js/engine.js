@@ -313,6 +313,16 @@ function buildPet(d, owner) {
   }
   return u;
 }
+/** Ordinary monster skills have no published coefficient, so it is assumed from the 31 damage skills of the
+ * Hieromon / raid boss kits in the game data: a single hit 100% (their mean 101%); each hit of a multi-hit skill 60%
+ * (their mean per hit 60%, median 55%). A fixed combo is capped at 200% in all (their total median 199%; their 6- and
+ * 10-hit combos run 9–37% a hit), random strikes (scatter) are not (66–75% a strike). mc: the 「몹 스킬 계수」 setting. */
+export const MOB_HIT = { each: 0.6, cap: 2 };
+export function mobHitCoef(s, mc = 1) {
+  const h = (s.hits || 1) + (s.h2 || 0);
+  if (h <= 1) return mc;
+  return mc * (s.sp && s.sp.k === 'scatter' ? MOB_HIT.each : Math.min(MOB_HIT.each, MOB_HIT.cap / h));
+}
 function buildMob(key, level, opts, sr, fix, uws) {
   const mob = MOB.get(key), st = Array.isArray(fix) && fix.length >= 14 ? stFrom(fix, level) : mobStats(key, level, sr);
   if (!st) throw new Error(`${mob.ko}: 이 레벨·랭크의 능력치 자료가 없습니다`);
@@ -348,7 +358,7 @@ function buildMob(key, level, opts, sr, fix, uws) {
       if (s.kind === 'counterSt') return { s: { ...s, kind: 'buff', ko: s.ko || s.en, buff: { st: 'counterSt', to: 'self', t: s.t || 1, next: s.next || 0 } }, n: { coef: mc, flat: 0 }, cd, init };
       if (s.kind === 'mobfx') return { s: { ...s, ko: s.ko || s.en, pre: s.fx.pre ? 1 : 0 }, n: { coef: mc, flat: 0 }, cd, init: s.fx.open ? 0 : init };
       // Swordlion: a stance's Starter skill is ready when the stance begins
-      return { s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mc / Math.max(1, s.hits || 1), flat: 0 }, cd, init: s.starter ? 0 : init };
+      return { s: { ...s, kind: 'dmg', ko: `${EL_KO[s.el] || ''} ${s.tg.t === 'S' ? '공격' : '광역 공격'}`.trim() }, n: { coef: mobHitCoef(s, mc), flat: 0 }, cd, init: s.starter ? 0 : init };
     });
     if (u.skills.some((k) => k.s.stance)) { u.stance = 'tb'; u.stFresh = 1; } // starts in Twin Blades (assumption)
   }

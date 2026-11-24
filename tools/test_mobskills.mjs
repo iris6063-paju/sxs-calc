@@ -1,16 +1,16 @@
 // Monster skills without direct damage of their own (tools/mobskills.mjs): buffs, heals, shields, stances, ground
 // effects, summons. Run: node tools/test_mobskills.mjs
-import { prepare, simulate, heroBase, ALL_MOBS } from '../js/engine.js';
+import { prepare, simulate, heroBase, ALL_MOBS, mobHitCoef } from '../js/engine.js';
 import { MOB_SKILL } from './mobskills.mjs';
 
 let bad = 0;
 const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) bad++; };
 const mobOf = (en) => ALL_MOBS.find((m) => m.en === en && (m.map || m.sr) && !m.fixed) || ALL_MOBS.find((m) => m.en === en);
 /** a sturdy party (they rarely kill, so the monster gets many turns) against one monster; cells keep them in reach */
-function fight(en, { level, n = 1, seed = 1, rounds = 12, est = true, heroes = 2, atk = 0.2, cells } = {}) {
+function fight(en, { level, n = 1, seed = 1, rounds = 12, est = true, heroes = 2, atk = 0.2, cells, mc = 1 } = {}) {
   const m = mobOf(en), L = level || m.lv || (m.map === 'fa4' ? 100 : m.map === 'fa3' ? 80 : 60), b = heroBase(L);
   const party = Array.from({ length: heroes }, (_, i) => ({ kind: 'hero', uid: 'h' + i, name: '캐릭터' + i, cls: 'Zhanshi', level: L, atk: b.atk * atk, def: b.def * 50, hp: b.hp * 5e4, spd: b.spd * 0.8, blockRate: 0, skills: [{ id: 10008, rank: 6 }], cell: cells ? cells[i] : undefined }));
-  const P = prepare({ mode: 'pve', roundCap: rounds, pvEst: est, teams: [party, [{ kind: 'mob', uid: 'm', key: m.k, level: L, sr: m.sr, count: n, cell: [10, 11] }]] });
+  const P = prepare({ mode: 'pve', roundCap: rounds, pvEst: est, mobCoef: mc, teams: [party, [{ kind: 'mob', uid: 'm', key: m.k, level: L, sr: m.sr, count: n, cell: [10, 11] }]] });
   const r = simulate(P, seed, true);
   return { P, r, m, ev: r.events, mob: P.units.find((u) => u.kind === 'mob' && !u.sum), U: P.units };
 }
@@ -111,6 +111,23 @@ const stOn = (f, k, pred = () => true) => f.ev.filter((e) => e.e === 'st' && e.o
   const on = fight('Beetle Samurai').mob.skills.map((k) => k.s.en), off = fight('Beetle Samurai', { est: false }).mob.skills.map((k) => k.s.en);
   const geo = fight('Cyclopean Geocrusher', { est: false }).mob.skills.map((k) => k.s.en);
   ok(on.includes('Defensive Stance') && !off.includes('Defensive Stance') && geo.includes('Momentum Backlash'), 'estimates off: Defensive Stance is dropped, Momentum Backlash stays');
+}
+// 9) assumed coefficients (mobHitCoef, from the boss kits): one hit 100%, each hit of a multi-hit skill 60%, a fixed combo
+//    at most 200% in all, random strikes 60% each; the 「몹 스킬 계수」 setting scales them all
+{
+  const co = (en, sk, mc) => { const f = fight(en, mc ? { mc } : {}); const k = f.mob.skills.find((x) => x.s.en === sk); return k ? +k.n.coef.toFixed(4) : null; };
+  ok(co('Quadhorn Goat', 'Stone Hammer') === 1 && co('Quadhorn Goat', 'Bash') === 0.6, 'Quadhorn Goat: Stone Hammer (1 hit) 100%, Bash (2 hits) 60% a hit');
+  ok(co('Swordlion', 'Sword Formation (Twin Blades Starter)') === +(2 / 7).toFixed(4), 'Swordlion Sword Formation (7 hits): 200% / 7 a hit');
+  ok(co('Cyclopean Geocrusher', 'Total Purge') === 0.6, 'Cyclopean Geocrusher Total Purge (14 random strikes): 60% a strike');
+  ok(co('Quadhorn Goat', 'Bash', 1.5) === 0.9 && mobHitCoef({ hits: 1 }, 1.5) === 1.5 && mobHitCoef({ hits: 5 }) === 0.4, 'the 「몹 스킬 계수」 setting scales the assumed coefficients');
+  // the coefficient reaches the damage: Bash's normal hits are 60% of Stone Hammer's on the same hero (both Physical, single target)
+  const f = fight('Quadhorn Goat', { rounds: 30, heroes: 1, cells: [[10, 9]] });
+  // both show as 「물리 공격」 in the log: a cast with one hit event is Stone Hammer, with two Bash
+  const per = { 'Stone Hammer': [], Bash: [] }, groups = []; let g = null;
+  for (const e of f.ev) { if (e.e === 'cast') { g = f.U[e.u] === f.mob ? [] : null; if (g) groups.push(g); } else if (e.e === 'hit' && g && f.U[e.a] === f.mob) g.push(e); else if (e.e === 'turn') g = null; }
+  for (const h of groups) if (h.length === 1 || h.length === 2) for (const e of h) if (e.k === 0 && e.d > 0) per[h.length === 1 ? 'Stone Hammer' : 'Bash'].push(e.d);
+  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length, r = avg(per.Bash) / avg(per['Stone Hammer']);
+  ok(per.Bash.length && per['Stone Hammer'].length && Math.abs(r - 0.6) < 0.02, `Bash hits for ${(r * 100).toFixed(1)}% of Stone Hammer (${per.Bash.length} / ${per['Stone Hammer'].length} hits)`);
 }
 console.log(bad ? `FAILURES: ${bad}` : 'all monster skill tests passed');
 process.exit(bad ? 1 : 0);

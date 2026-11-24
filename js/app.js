@@ -1,6 +1,6 @@
 // UI: team builder (skills, charms, Fantomon), encounter presets, Monte Carlo runner and results.
 import { CLASSES, SKILLS, MAPS, RANKS, MAXLV } from './gamedata.js';
-import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH, rankGap, rankGroup, statBases, SUBRANKS, prepare, pvpGovernor } from './engine.js';
+import { SK, MOB, MAP, CLS, heroBase, mobStats, stFrom, skillNumbers, roster, replay, monteCarlo, HERO_DEFAULTS, ALL_MOBS, CHARM, CHARMS, PET, PETS, ENC, MOB_PV, CELL_BOX, W as GW, H as GH, rankGap, rankGroup, statBases, SUBRANKS, prepare, pvpGovernor, mobHitCoef } from './engine.js';
 import { createStage, GROUND_LIST } from './scene.js';
 import { ST_KO } from './status.js';
 import { loadSheets, designOf, sheet, sheetURL, faceIndex } from './sheets.js';
@@ -475,7 +475,9 @@ function mobHtml(u) {
   // buffs, heals, shields, stances, ground effects, summons (tools/mobskills.mjs): their text and whether the sizes are estimates
   const fxTags = (s) => (s.kind === 'none' ? tag(`⚠ 미반영 · ${s.why || '자료 없음'}`, 'warn') : s.est ? (state.pvEst !== false ? tag('추정 수치로 반영', 'est') : tag('추정값 꺼짐 · 미반영', 'warn')) : tag('반영', 'ok'));
   const STANCE_KO = { tb: '쌍검 자세', gs: '대검 자세' };
-  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.ko || s.en)}</b>${s.ko ? ` <small class="en">${esc(s.en)}</small>` : ''}${(s.h || s.kind) && s.d ? `<div class="desc" style="margin-top:2px">${esc(s.d)}</div>` : ''}<div class="sum" style="margin:3px 0 0">${s.h ? kitTags(s) : s.kind === 'counterSt' ? csTags(s) : s.kind === 'mobfx' || s.kind === 'none' ? fxTags(s) : skillTags({ ...s, kind: 'dmg', cd: 0 }, null) + (s.sp && s.sp.k === 'scatter' ? tag(`무작위 ${s.sp.n}회${s.sp.min ? ` (최소 ${s.sp.min})` : ''}`) : '') + (s.rage ? tag('격노 상태 전용') : '') + (s.stance ? tag(STANCE_KO[s.stance] + (s.starter ? ' 시작 스킬' : '')) : '')}</div></div></div></div>`).join('');
+  // ordinary mob damage skills: the assumed coefficient (engine mobHitCoef) with the 「몹 스킬 계수」 setting applied
+  const mobCoefTag = (s) => { const h = s.hits || 1, c = +(mobHitCoef(s, state.mobCoef / 100) * 100).toFixed(1); return tag(h <= 1 ? `${c}% (가정)` : s.sp && s.sp.k === 'scatter' ? `낙하 1회당 ${c}% (가정)` : `타당 ${c}% · 합계 ${+(c * h).toFixed(1)}% (가정)`, 'est'); };
+  const sk = mob.sk.map((s) => `<div class="skill"><div class="mobsk">${MOBSKILL_ICON(s)}<div><b>${esc(s.ko || s.en)}</b>${s.ko ? ` <small class="en">${esc(s.en)}</small>` : ''}${(s.h || s.kind) && s.d ? `<div class="desc" style="margin-top:2px">${esc(s.d)}</div>` : ''}<div class="sum" style="margin:3px 0 0">${s.h ? kitTags(s) : s.kind === 'counterSt' ? csTags(s) : s.kind === 'mobfx' || s.kind === 'none' ? fxTags(s) : skillTags({ ...s, kind: 'dmg', cd: 0 }, null) + mobCoefTag(s) + (s.sp && s.sp.k === 'scatter' ? tag(`무작위 ${s.sp.n}회${s.sp.min ? ` (최소 ${s.sp.min})` : ''}`) : '') + (s.rage ? tag('격노 상태 전용') : '') + (s.stance ? tag(STANCE_KO[s.stance] + (s.starter ? ' 시작 스킬' : '')) : '')}</div></div></div></div>`).join('');
   const pvs = (mob.pv || []).map((id) => MOB_PV[id]).filter(Boolean);
   const pvBadge = (p) => (p.k === 'none' ? tag(`⚠ 미반영 · ${p.why || '효과 비공개'}`, 'warn') : p.est ? (state.pvEst !== false ? tag('추정 수치로 반영', 'est') : tag('추정값 꺼짐 · 미반영', 'warn')) : tag('반영', 'ok'));
   const pvHtml = pvs.length ? `<div class="sec"><span>비전 (패시브 ${pvs.length})</span></div>` + pvs.map((p) => `<div class="skill"><div class="mobsk">${p.i ? MOBSKILL_ICON({ ic: p.i, el: p.el || 'none' }) : '<span class="ico mob"><em>✦</em></span>'}<div><b>${esc(p.ko)}</b> <small class="en">${esc(p.en)}</small><div class="desc" style="margin-top:2px">${esc(p.d)}</div><div class="sum" style="margin:4px 0 0">${pvBadge(p)}</div></div></div></div>`).join('') : '';
@@ -500,7 +502,7 @@ function mobHtml(u) {
       })()}
       <div class="mobstats"><span>치명타 대미지 ${st.critDmg}%</span><span>막기 대미지 저항 ${st.blockEff}%</span>${st.critRate ? `<span>치명타율 ${st.critRate}%</span>` : ''}${st.blockRate ? `<span>막기율 ${st.blockRate}%</span>` : ''}${st.dmgRes ? `<span>대미지 저항 ${st.dmgRes}%</span>` : ''}${er ? `<span>${er}</span>` : ''}${st.ele ? (() => { const e = st.ele, a = Object.values(e.aff), g = Object.values(e.aeg), one = (v) => (v.every((x) => x === v[0]) ? fmt(v[0]) : `${fmt(Math.min(...v))}~${fmt(Math.max(...v))}`); return `${a.some(Boolean) ? `<span>원소 친화력 ${one(a)}</span><span>원소 가호 ${one(g)}</span>` : ''}${e.mast ? `<span>원소·물리 마스터리 ${fmt(e.mast)}</span><span>원소·물리 저항 ${fmt(e.eres)}</span>` : ''}`; })() : ''}</div>
       ${mob.raid ? `<div class="note" style="margin:4px 0 0">레이드 보스 · 몸체 5×5 · 이동력 ${mob.raid.move}칸 · ${mob.raid.rounds}라운드. 섬멸의 발톱(9×3)은 게임 자료에 대미지 계수가 없어 뺐습니다.</div>` : mob.kit ? `<div class="note" style="margin:4px 0 0">몸체 ${mob.sz}×${mob.sz} · 스킬은 게임 자료의 타격 구역을 한 타씩 처리합니다(넉백으로 밀린 대상이 다음 타격 범위에 다시 들어가면 또 맞음). 계수 조정(「몹 스킬 계수」)은 적용되지 않습니다.</div>` : ''}
-      <div class="sec"><span>${mob.kit ? '스킬 (게임 자료 · 준비된 스킬을 순서대로 모두 사용)' : `스킬 (턴당 1개 · 계수 ${state.mobCoef}% 가정)`}</span></div>${sk}${pvHtml}
+      <div class="sec"><span>${mob.kit ? '스킬 (게임 자료 · 준비된 스킬을 순서대로 모두 사용)' : `스킬 (턴당 1개 · 계수 가정: 1타 100% · 여러 타는 타당 60%, 연타 합계 최대 200%${state.mobCoef !== 100 ? ` · ×${state.mobCoef}%` : ''})`}</span></div>${sk}${pvHtml}
     </div></article>`;
 }
 function presetHtml() {
