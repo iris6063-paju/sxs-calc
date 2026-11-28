@@ -218,6 +218,7 @@ function skillTags(s, n, order) {
     if (s.sp && s.sp.k === 'recast') t.push(tag(`${Math.round(s.sp.p * 100)}% 확률 재사용`));
     if (s.sp && s.sp.k === 'killRecast') t.push(tag('처치 시 재사용'));
     if (s.sp && s.sp.k === 'execute') t.push(tag('잃은 생명 비례 최대 +50%'));
+    if (s.sp && s.sp.k === 'erode') t.push(tag(`대상의 침식마다 즉시 ${s.sp.n}회 발동${s.sp.est ? ' (횟수 가정)' : ''}`, s.sp.est ? 'est' : ''));
   } else if (s.kind === 'summon') {
     // summons from the game data: what appears, for how long, and the share of the caster's stats it inherits
     const sm = s.sum, c = sm.cr, pct = (v) => (n && n.coef != null ? `${(n.coef * 100).toFixed(1)}%${n.flat ? ' + ' + fmt(n.flat) : ''}` : '');

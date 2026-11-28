@@ -6,7 +6,16 @@ import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, 
 export { MOB_PV };
 
 // official Korean client names / descriptions + extra tables
-for (const s of SKILLS) { if (KO_SKILL[s.id]) s.ko = KO_SKILL[s.id]; if (KO_DESC[s.id]) s.desc = KO_DESC[s.id]; }
+// skills with no Korean client text (metahub has only the English one): a translation, and what the sim assumes
+const DESC_TR = {
+  10078: { desc: '3칸 범위 내의 적 1명에게 어둠 원소 대미지를 1회 줍니다. 대상이 침식 보유 시, 모든 침식을 즉시 발동시킵니다. (대형 대상 우선)', note: '한국어 원문이 없어 영어 설명을 번역했습니다. 「모든 침식 즉시 발동」의 횟수는 게임 자료에 없어, 대상이 가진 침식마다 3회 발동으로 가정했습니다.', spEst: 1 },
+};
+for (const s of SKILLS) {
+  if (KO_SKILL[s.id]) s.ko = KO_SKILL[s.id];
+  if (KO_DESC[s.id]) s.desc = KO_DESC[s.id];
+  const tr = DESC_TR[s.id];
+  if (tr && !s.desc) { s.desc = tr.desc; s.note = s.note ? s.note + ' ' + tr.note : tr.note; if (tr.spEst && s.sp) s.sp.est = 1; }
+}
 for (const c of CHARMS) { if (KO_SKILL[c.id]) c.ko = KO_SKILL[c.id]; if (KO_DESC[c.id]) c.desc = KO_DESC[c.id]; }
 const ROLE_KO = { WT: '방어형 · 막기/실드/도발', WD: '공격형 · 근접 대미지', MD: '공격형 · 광역 원소 대미지', MS: '지원형 · 치유/소환/디버프' };
 for (const c of CLASSES) { if (KO_CLASS[c.key]) c.ko = KO_CLASS[c.key]; c.role = c.tier === 1 ? (c.line === 'W' ? '근접 물리 · 기본 직업' : '원거리 원소 · 기본 직업') : `${ROLE_KO[c.line]} · ${c.tier}차 전직`; }

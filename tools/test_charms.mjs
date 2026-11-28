@@ -1,5 +1,5 @@
 // Charms modelled from their game hooks (2026-11-21): node tools/test_charms.mjs
-import { heroBase, prepare, simulate, ALL_MOBS, skillNumbers, flatBase } from '../js/engine.js';
+import { heroBase, prepare, simulate, ALL_MOBS, skillNumbers, flatBase, SK } from '../js/engine.js';
 
 let bad = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) bad++; };
@@ -133,6 +133,24 @@ const label = (runs, name) => runs.reduce((a, { r }) => a + r.events.filter((e) 
   let after = 0, died = 0;
   for (const { r } of frail) { let dead = false; for (const e of r.events) { if (e.e === 'die' && e.u === 0) { dead = true; died++; } if (dead && e.e === 'cast' && e.u === 0 && e.n.startsWith('침식(')) after++; } }
   ok(died > 0 && after === 0, `no Erosion ticks after the caster falls (${died} falls, ${after} ticks after)`);
+}
+// Terminate Shadow: "triggers all Erosion stacks immediately" — every Erosion on the target fires at once (3× each,
+// assumed); the card has a translated description and marks the count as an assumption
+{
+  const ts = SK.get(10078);
+  ok(!!ts.desc && /침식/.test(ts.desc) && ts.sp.k === 'erode' && ts.sp.est === 1 && /가정/.test(ts.note || ''), 'Terminate Shadow: translated description, trigger count marked as assumed');
+  const sage = { kind: 'hero', uid: 'ts', name: '종결', cls: 'Mishushi', level: 104, atk: 124000, def: 137000, hp: 728000, spd: 116000, skills: [{ id: 10081, rank: 12 }, { id: 10078, rank: 11 }], charms: [{ id: 10565, rank: 16 }], cell: [10, 8] };
+  const tank = { kind: 'hero', uid: 'tt', name: '표적', cls: 'Dunjiashi', level: 104, atk: 1000, def: 137000, hp: 40000000, spd: 90000, skills: [], cell: [10, 11] };
+  let casts = 0, fired = 0, odd = 0;
+  for (const { r } of many([[sage], [tank]], 6, 10, 'pvp')) {
+    for (let i = 0; i < r.events.length; i++) {
+      const e = r.events[i]; if (!(e.e === 'cast' && e.u === 0 && e.n === '터미네이트 섀도')) continue;
+      casts++; const per = new Map();
+      for (let j = i + 1; j < r.events.length; j++) { const x = r.events[j]; if (x.e === 'turn' || (x.e === 'cast' && !(x.u === 0 && x.n.startsWith('침식(')))) break; if (x.e === 'cast') { fired++; per.set(x.n, (per.get(x.n) || 0) + 1); } }
+      for (const n of per.values()) if (n % 3) odd++;
+    }
+  }
+  ok(casts > 0 && fired > 0 && odd === 0, `Terminate Shadow triggers the target's Erosion at once, 3× per Erosion (${casts} casts, ${fired} triggered ticks)`);
 }
 // Shadow Form: "combat skill cooldowns reduced by 2 turns" — Terminate Shadow (CD 2) is ready on the next turn
 {
