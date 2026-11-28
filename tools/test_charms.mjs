@@ -90,5 +90,17 @@ const label = (runs, name) => runs.reduce((a, { r }) => a + r.events.filter((e) 
   const onArmor = e2.slice(sTurn, next < 0 ? undefined : next).filter((e) => e.e === 'st' && e.t === 1 && e.k === 'dmgRed' && e.on);
   ok(onArmor.length > 0 && onArmor.every((e) => !e.u), `Sanctified Soul next to Magic Armor: added beside it, not replacing it (${onArmor.map((e) => (e.u ? 'replaced' : 'added')).join(', ')})`);
 }
+// Rating stats from charms (mastery, affinity, Effect Hit) at a level past the rank's cap: 숙련 III (Silver3, cap Lv100)
+// at Lv103 takes them at Lv100, so 쾌속 영창 / 원소의 하모니 / 통찰 stay the same share of the rank's bases; 챔피언 I (Gold1)
+// at Lv103 and 숙련 III at Lv95 use their own level as before
+{
+  const unit = (level, rank, charms) => prepare({ mode: 'pvp', roundCap: 5, teams: [[hero({ level, rank, skills: [{ id: 10034, rank: 6 }, { id: 10038, rank: 6 }], charms, cell: [10, 6] })], [hero({ level, rank, cell: [10, 14] })]] }).units[0];
+  const ch = [{ id: 10604, rank: 10 }, { id: 10602, rank: 11 }, { id: 10559, rank: 10 }, { id: 10520, rank: 10 }];
+  const at100 = unit(100, 'Silver3', ch), at103 = unit(103, 'Silver3', ch), g103 = unit(103, 'Gold1', ch), at95 = unit(95, 'Silver3', ch), none = unit(103, 'Silver3', []);
+  ok(at103.mastery === at100.mastery && at103.mastery > none.mastery, `숙련 III Lv103: charm mastery as at Lv100 (${at103.mastery} = ${at100.mastery})`);
+  ok(Math.abs(at103.effHit - at100.effHit) < 1e-9 && at103.affEl.fire === at100.affEl.fire, '숙련 III Lv103: 통찰 Effect Hit and fire affinity as at Lv100');
+  ok(g103.mastery > at103.mastery * 4 && at95.mastery < at100.mastery, `챔피언 I Lv103 and 숙련 III Lv95 keep their own level (${g103.mastery}, ${at95.mastery})`);
+  ok(at103.mastery / at103.bMas < 1.5 && g103.mastery / g103.bMas < 1.5, `charm mastery stays a sane share of the rank base (${(at103.mastery / at103.bMas).toFixed(2)}, ${(g103.mastery / g103.bMas).toFixed(2)})`);
+}
 console.log(bad ? `FAILURES: ${bad}` : 'all charm tests passed');
 process.exit(bad ? 1 : 0);

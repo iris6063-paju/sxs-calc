@@ -167,6 +167,12 @@ function compileCharms(list, u) {
   const ch = newCh();
   let any = false;
   const l = lvi(u.level);
+  // rating stats (mastery, affinity, element / physical resistance, Effect Hit) are measured against the sub-rank's
+  // bases, and the level tables step up with the next rank (Lv100 → 101: mastery / crit / Effect Hit bases ×5). A
+  // character still below that rank (숙련 III at Lv103) takes them at its rank's level cap, so a charm's rating stays
+  // the same share of the bases that divide it (at the cap the tables equal RANK_BASE)
+  const cap = u.sr && RANK_BASE[u.sr] ? RANK_BASE[u.sr][4] : 0, lr = cap && cap < u.level ? lvi(cap) : l;
+  const lvOf = (curve) => (curve === 'mas' || curve === 'aff' || curve === 'eres' || curve === 'crit' ? lr : l);
   for (const sl of list || []) {
     const c = sl && CHARM.get(sl.id); if (!c || !c.fx) continue;
     any = true;
@@ -177,9 +183,9 @@ function compileCharms(list, u) {
     for (const f of c.fx) {
       switch (f[0]) {
         case 'stat': if (f[1] === 'healUp') u.healUp += pct(f[2]); else u[f[1]] += pct(f[2]); break;
-        case 'flat': { const v = f[2][0] * R * f[2][1] * LV[f[2][2]][l]; if (f[1] === 'hp') u.hpMax += Math.round(v); else if (f[1] === 'effHit') u.effHit += v / LV.eres[l]; else u[f[1]] += Math.round(v); break; }
-        case 'aff': u.affEl[f[1]] = (u.affEl[f[1]] || 0) + f[2][0] * R * f[2][1] * LV[f[2][2]][l]; break;
-        case 'harmony': { const els = new Set(u.skills.filter((k) => k.s.kind === 'dmg' && k.s.el !== 'phy').map((k) => k.s.el)); u.mastery += Math.round(f[1][0] * R * f[1][1] * LV[f[1][2]][l] * Math.min(4, els.size)); break; }
+        case 'flat': { const v = f[2][0] * R * f[2][1] * LV[f[2][2]][lvOf(f[2][2])]; if (f[1] === 'hp') u.hpMax += Math.round(v); else if (f[1] === 'effHit') u.effHit += v / LV.eres[lvOf('eres')]; else u[f[1]] += Math.round(v); break; }
+        case 'aff': u.affEl[f[1]] = (u.affEl[f[1]] || 0) + f[2][0] * R * f[2][1] * LV[f[2][2]][lvOf(f[2][2])]; break;
+        case 'harmony': { const els = new Set(u.skills.filter((k) => k.s.kind === 'dmg' && k.s.el !== 'phy').map((k) => k.s.el)); u.mastery += Math.round(f[1][0] * R * f[1][1] * LV[f[1][2]][lvOf(f[1][2])] * Math.min(4, els.size)); break; }
         case 'proc': ch.procs.push({ on: f[1], p: f[2], el: f[3], ar: f[4], opt: f[5] || {}, coef, flat }); break;
         case 'inflict': ch.inflicts.push({ p: f[1], e: f[2], cond: f[3] }); break;
         case 'react': ch[f[1]].push({ p: f[2], el: f[3], by: f[4], range: f[5], coef, flat, name: c.ko || c.en }); break;
