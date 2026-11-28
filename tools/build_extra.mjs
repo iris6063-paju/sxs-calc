@@ -560,9 +560,23 @@ if (have.has('duel.json')) {
 /* skills fired by a hero skill's status or ground (duel.json `trig`): Meteoric Flames' burning ground (11600) and
    Laceration's damage on moving (11950) — coefficient and fixed part (fx × SkillFixedAttack curve of group fg) by rank */
 const TRIG = {};
+/* Erosion a Technique inflicts (Dark Bullet, Mana Blast): the status (action Poisoned) fires its own trigger skill at
+   the holder's turn start, with the inflicting skill's rank → DOTSK[skill id] = trigger id (in TRIG) */
+const DOTSK = {};
 if (have.has('duel.json')) {
   const duel = J('duel.json');
-  for (const id of [11600, 11950]) {
+  const ids = [11600, 11950];
+  for (const s of duel.skills) {
+    if (s.kind !== 'Technique' || !s.ec) continue;
+    for (const h of s.ec.hits || []) for (const o of h.on || []) {
+      const st = duel.statuses[String(o.status)]; if (!st || st.action !== 'Poisoned') continue;
+      const hk = (st.hooks || []).find((x) => x.kind === 'roundStart' && x.triggers && x.triggers.length);
+      if (!hk) { log('DOTSK no trigger', s.id, s.name, o.status); continue; }
+      DOTSK[s.id] = hk.triggers[0].skill; if (!ids.includes(DOTSK[s.id])) ids.push(DOTSK[s.id]);
+      log('DOTSK', s.id, s.name, 'status', o.status, 'dur', st.dur, 'addDur', st.addDur, st.sameBeh, '→ trig', DOTSK[s.id]);
+    }
+  }
+  for (const id of ids) {
     const t = duel.trig[String(id)]; if (!t) { log('TRIG missing', id); continue; }
     const a = (k) => Array.from({ length: 34 }, (_, i) => +(+((t.r[String(i + 1)] || {})[k] || 0)).toFixed(5));
     TRIG[id] = { c: a('SkillAttack1').map((x) => +(x / 100).toFixed(5)), fx: a('fx'), fg: (t.r['1'] || {}).fg || 1 };
@@ -609,6 +623,7 @@ export const MOB_PV = ${JSON.stringify(MOB_PV)};
 export const SUMMONS = ${JSON.stringify(SUMMONS)};
 export const SUMCURVE = ${JSON.stringify(SUMCURVE)};
 export const TRIG = ${JSON.stringify(TRIG)};
+export const DOTSK = ${JSON.stringify(DOTSK)};
 export const PVPR = ${JSON.stringify(PVPR)};
 export const PVP_GOV = ${JSON.stringify(PVP_GOV)};
 `;

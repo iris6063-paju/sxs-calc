@@ -212,7 +212,7 @@ function skillTags(s, n, order) {
     if (s.multi) t.push(tag('대형 대상 칸마다 다단 히트'));
     if (s.bigFirst) t.push(tag('대형 대상 우선'));
     if (s.rep) t.push(tag(`같은 대상 ${s.rep.from > 1 ? s.rep.from + 1 + '번째 타격부터' : '반복 타격'} −${Math.round(s.rep.d * 100)}%`));
-    for (const e of s.eff || []) t.push(tag(`${effName(e)} · ${Math.round((e.p == null ? 1 : e.p) * 100)}%`));
+    for (const e of s.eff || []) t.push(tag(`${effName(e)} · ${Math.round((e.p == null ? 1 : e.p) * 100)}%${e.k === 'dot' && n && n.dc != null ? ` · 턴마다 ${(n.dc * 100).toFixed(2)}%${n.df ? ' + ' + fmt(n.df) : ''}` : ''}`));
     if (s.sp && s.sp.k === 'chain') t.push(tag(`최대 ${s.sp.n}회 연쇄`));
     if (s.sp && s.sp.k === 'bounce') t.push(tag(`최대 ${s.sp.n}회 튕김`));
     if (s.sp && s.sp.k === 'recast') t.push(tag(`${Math.round(s.sp.p * 100)}% 확률 재사용`));
@@ -265,9 +265,9 @@ function charmTags(c, rank) {
       case 'aff': t.push(tag(`${EL[f[1]].ko} 원소 친화력 증가`)); break;
       case 'harmony': t.push(tag('장착 전투 스킬 원소 1종당 원소 마스터리')); break;
       case 'proc': t.push(tag(`${f[1] === 'crit' ? '치명타 시' : Math.round(f[2] * 100) + '% 확률'} 추가 ${EL[f[3]].ko} 대미지 ${c.c ? c.c[q] + '%' : ''}${f[4] ? ' · 주변 ' + f[4] + '칸' : ''}`)); break;
-      case 'inflict': t.push(tag(`${EL[f[3]] ? EL[f[3]].ko + ' 대미지 시 ' : ''}${Math.round(f[1] * 100)}% ${effName(f[2])}`)); break;
+      case 'inflict': t.push(tag(`${EL[f[3]] ? EL[f[3]].ko + ' 대미지 시 ' : ''}${Math.round(f[1] * 100)}% ${effName(f[2])}${f[2].k === 'dot' && c.c ? ` · 턴마다 ${c.c[q]}%` : ''}`)); break;
       case 'react': t.push(tag(`${f[1] === 'block' ? '막기 시' : '피격 시 ' + Math.round(f[2] * 100) + '%'} 반격 ${c.c ? c.c[q] + '%' : ''}${f[4] === 'def' ? '(방어력 기반)' : ''}`)); break;
-      case 'reactInflict': t.push(tag(`${f[1] === 'block' ? '막기 시' : '피격 시'} 공격자에게 ${effName(f[2])}`)); break;
+      case 'reactInflict': t.push(tag(`${f[1] === 'block' ? '막기 시' : '피격 시'} 공격자에게 ${effName(f[2])}${f[2].k === 'dot' && c.c ? ` · 턴마다 ${c.c[q]}%` : ''}`)); break;
       case 'ls': t.push(tag(`생명 흡수 ${pc(f[1])}`)); break;
       case 'dmgUp': t.push(tag(`${UP_KO[f[1]]} 대미지 +${pc(f[2])}`)); break;
       case 'dmgRed': t.push(tag(`${RED_KO[f[1]]} 받는 대미지 −${pc(f[2])}`)); break;
@@ -301,7 +301,7 @@ function charmTags(c, rank) {
       case 'resurrect': t.push(tag('아군 모험가 사망 시 1회 부활 + 치유')); break;
       case 'sumAtk': t.push(tag(`소환수 공격력 +${pc(f[1])}${f[2] ? ` · 존재 ${f[2]}턴 감소` : ''}`)); break;
       case 'overheal': t.push(tag(`치유 시 ${Math.round(f[1] * 100)}% 대상 주변 1칸 아군 추가 치유`)); break;
-      case 'erodeTwice': t.push(tag(`침식 부여 시 ${Math.round(f[1] * 100)}% 침식 1개 추가`)); break;
+      case 'erodeTwice': t.push(tag(`침식 부여 시 ${Math.round(f[1] * 100)}% 침식 1개 추가${c.c ? ` · 턴마다 ${c.c[q]}%` : ''}`)); break;
       case 'shadowVeng': t.push(tag(`첫 치명 대미지에 생명 1로 생존 · 섀도우 형태(면역, 대미지 +${pc(f[1])})`)); break;
       case 'vigil': t.push(tag(`턴 시작 시 생명 비율 낮은 아군의 대미지 50% 대신 받음 (−${pc(f[1])}, 방어력 우위만큼 추가 감소)`)); break;
       case 'ownTurnRed': t.push(tag(`자신의 턴 동안 받는 대미지 −${pc(f[1])}`)); break;

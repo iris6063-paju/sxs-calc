@@ -2,7 +2,7 @@
 // Pure module: runs in the page, in a Web Worker and in Node.
 import { LV, FLAT, RANK_Q, RANK_R, SKILLS, MOBS, CURVES, MAPS, MAXLV, CLASSES } from './gamedata.js';
 
-import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV, RANK_BASE, SUMMONS, SUMCURVE, TRIG, PVPR, PVP_GOV } from './gamedata2.js';
+import { KO_SKILL, KO_CLASS, KO_DESC, FLAT2, CHARMS, PETS, MOBS2, CURVES2, RPG, ENC, MOB_PV, RANK_BASE, SUMMONS, SUMCURVE, TRIG, DOTSK, PVPR, PVP_GOV } from './gamedata2.js';
 export { MOB_PV };
 
 // official Korean client names / descriptions + extra tables
@@ -107,6 +107,9 @@ export function skillNumbers(id, rank, level) {
   if (s.c) { o.coef = s.c[q] / 100; o.flat = (s.fm || 0) * R * A; }
   if (s.c2) { o.coef2 = s.c2[q] / 100; o.flat2 = (s.fm2 || 0) * R * A; }
   if (s.trig && TRIG && TRIG[s.trig]) { const T = TRIG[s.trig]; o.tc = T.c[r - 1]; o.tf = T.fx[r - 1] * flatBase(T.fg, level); }
+  // the Erosion this skill inflicts: its trigger skill at the inflicting skill's rank (Dark Bullet r12: 11.37% + fixed)
+  const dt = DOTSK && DOTSK[id] && TRIG && TRIG[DOTSK[id]];
+  if (dt) { o.dc = dt.c[r - 1]; o.df = dt.fx[r - 1] * flatBase(dt.fg, level); }
   if (s.hv) { o.healPct = s.hv[q] / 100; o.healFlat = (s.hfm || 0) * R * A * CURE_BASE; }
   if (s.bv) { o.bv = s.bv[q] / 100; o.bflat = s.bfm ? s.bfm[q] * A : 0; }
   return o;
@@ -187,9 +190,11 @@ function compileCharms(list, u) {
         case 'aff': u.affEl[f[1]] = (u.affEl[f[1]] || 0) + f[2][0] * R * f[2][1] * LV[f[2][2]][lvOf(f[2][2])]; break;
         case 'harmony': { const els = new Set(u.skills.filter((k) => k.s.kind === 'dmg' && k.s.el !== 'phy').map((k) => k.s.el)); u.mastery += Math.round(f[1][0] * R * f[1][1] * LV[f[1][2]][lvOf(f[1][2])] * Math.min(4, els.size)); break; }
         case 'proc': ch.procs.push({ on: f[1], p: f[2], el: f[3], ar: f[4], opt: f[5] || {}, coef, flat }); break;
-        case 'inflict': ch.inflicts.push({ p: f[1], e: f[2], cond: f[3] }); break;
+        // a Charm's own Erosion (Shadow Erosion, Cursed Armor's, Linked Misfortune's extra one) ticks with that Charm's
+        // coefficient and fixed part at its rank (game data: statuses 24222 / 24486 / 24472 → skills 11360 / 12650 / 12540)
+        case 'inflict': ch.inflicts.push({ p: f[1], e: f[2].k === 'dot' ? { ...f[2], coef, flat, sid: c.id, nm: c.ko || c.en } : f[2], cond: f[3] }); break;
         case 'react': ch[f[1]].push({ p: f[2], el: f[3], by: f[4], range: f[5], coef, flat, name: c.ko || c.en }); break;
-        case 'reactInflict': ch[f[1]].push({ p: f[2].p == null ? 1 : f[2].p, range: 99, inflict: { ...f[2], p: 1, v: f[3] ? pct(f[3]) : f[2].v } }); break;
+        case 'reactInflict': ch[f[1]].push({ p: f[2].p == null ? 1 : f[2].p, range: 99, inflict: { ...f[2], p: 1, v: f[3] ? pct(f[3]) : f[2].v, ...(f[2].k === 'dot' ? { coef, flat, sid: c.id, nm: c.ko || c.en } : {}) } }); break;
         case 'ls': u.lsAll += pct(f[1]); break;
         case 'dmgUp': ch.dmgUp.push([f[1], pct(f[2])]); break;
         case 'dmgRed': ch.dmgRed.push([f[1], pct(f[2])]); break;
@@ -223,7 +228,7 @@ function compileCharms(list, u) {
         case 'resurrect': ch.resurrect = { healPct, healFlat }; break;
         case 'sumAtk': ch.sumAtk = (ch.sumAtk || 0) + pct(f[1]); if (f[2]) ch.sumLife = (ch.sumLife || 0) + f[2]; break;
         case 'overheal': ch.overheal = { p: f[1], healPct, healFlat }; break;
-        case 'erodeTwice': ch.erodeTwice = f[1]; break;
+        case 'erodeTwice': ch.erodeTwice = { p: f[1], coef, flat, sid: c.id, nm: c.ko || c.en }; break;
         case 'shadowVeng': ch.shadowVeng = pct(f[1]); break;
         case 'vigil': ch.vigil = pct(f[1]); break;
         case 'ownTurnRed': ch.ownTurnRed = pct(f[1]); break;
@@ -753,7 +758,8 @@ export function simulate(P, seed, log) {
     // Decoy Clone: the HP it loses, the linked unit loses too (True DMG; shields still take it)
     if (t.clone && hpDmg > 0 && U[t.link] && U[t.link].alive) applyDamage(a, U[t.link], Math.max(1, Math.floor(hpDmg * (t.linkV || 1))), { el: o.el, kind: 4 });
     if (t.hp <= 0) { kill(t, a); return hpDmg; }
-    if (shadow) { t.shadowF = 1; pvLabel(t, '섀도우 형태'); addStatus(t, { k: 'dmgUp', v: t.ch.shadowVeng, exp: t.turnNo + 1, buff: true, nd: 1, shadow: 1 }); }
+    // Shadow Form: DMG dealt up, and "combat skill cooldowns reduced by 2 turns"
+    if (shadow) { t.shadowF = 1; pvLabel(t, '섀도우 형태'); addStatus(t, { k: 'dmgUp', v: t.ch.shadowVeng, exp: t.turnNo + 1, buff: true, nd: 1, shadow: 1 }); if (t.cds) for (let i = 0; i < t.cds.length; i++) t.cds[i] = Math.max(0, t.cds[i] - 2); }
     if (hadShield && t.shield <= 0 && t.ch && t.ch.ripple && !B.over) chRipple(t);
     if (hpDmg > 0 && t.ch && (t.ch.overload || t.ch.shadowstep)) chLossStacks(t, hpDmg);
     if (hpDmg > 0 && B.elixir.length && t.hp < t.hpMax * 0.5 && t.hp + hpDmg >= t.hpMax * 0.5) chElixir(t);
@@ -998,8 +1004,10 @@ export function simulate(P, seed, log) {
       addStatus(t, { k, v, exp: t.turnNo + turns }); return;
     }
     if (k === 'dot') {
-      addStatus(t, { k, el: e.el || 'dark', src: a.id, exp: t.turnNo + (e.t || 3) });
-      if ((e.el || 'dark') === 'dark' && a.ch && a.ch.erodeTwice && rnd() < a.ch.erodeTwice) addStatus(t, { k, el: 'dark', src: a.id, exp: t.turnNo + (e.t || 3) }); // Linked Misfortune
+      const el = e.el || 'dark', dur = e.t || 3;
+      putDot(a, t, el, dur, e);
+      const lm = a.ch && a.ch.erodeTwice; // Linked Misfortune: its own Erosion, on every successful one (a refresh too)
+      if (el === 'dark' && lm && rnd() < lm.p) putDot(a, t, 'dark', dur, lm);
       return;
     }
     if (k === 'freeze' && a.ch && a.ch.shatter) { addStatus(t, { k, v, exp: t.turnNo + turns, uniq: 1, cast: B.castId, src: a.id, shatter: 1 }); return; }
@@ -1007,8 +1015,28 @@ export function simulate(P, seed, log) {
     if (k === 'lacer') { addStatus(t, { k, src: a.id, coef: e.coef || 0, flat: e.flat || 0, exp: t.turnNo + turns, uniq: 1 }); return; }
     addStatus(t, { k, v, exp: t.turnNo + turns, uniq: 1, cast: B.castId });
   }
+  /** Erosion with game data (sid: the inflicting skill or Charm): one per caster and source; inflicting it again adds
+   *  its duration to what is left (status sameBeh Paral, addDur, maxAddDur 100), as the tooltip says. Other damage over
+   *  time (monster passives) keeps one status per application. */
+  function putDot(a, t, el, dur, e) {
+    if (e.sid != null) {
+      const ex = t.st.find((x) => x.k === 'dot' && x.src === a.id && x.sid === e.sid);
+      if (ex) { ex.exp = t.turnNo + Math.min(100, dur + Math.max(0, ex.exp - t.turnNo)); stEv(t, ex, true); return; }
+      addStatus(t, { k: 'dot', el, src: a.id, exp: t.turnNo + dur, sid: e.sid, coef: e.coef || 0, flat: e.flat || 0, nm: e.nm });
+      return;
+    }
+    addStatus(t, { k: 'dot', el, src: a.id, exp: t.turnNo + dur });
+  }
   function dotTick(t, s) {
     const a = U[s.src]; if (!a || !t.alive) return;
+    if (s.sid != null) {
+      // the status fires its trigger skill: a normal hit of that skill (crit / block roll); it stops once its caster is
+      // down (forbidOnApplicatorDie)
+      if (!a.alive) return;
+      if (ev) ev.push({ e: 'cast', u: a.id, n: s.nm ? `침식(${s.nm})` : '침식', el: s.el, tg: [t.id], ax: t.x, ay: t.y, sh: 'S', ar: 0, pet: 1 });
+      hit(a, t, s.coef, s.flat, s.el, { noProc: 1, noReact: 1 });
+      return;
+    }
     const atk = eAtk(a), def = eDef(t);
     let d = ((atk * DOT_COEF) / (t.psdr || 1)) * (atk / (atk + def)) * elemMult(a, t, s.el) * ((1 + a.dmgBoost + a.bDmg) / (1 + t.dmgRes)) * (1 + t.vuln) * t.red * levelOffset(a, t) / (t.prosdr || 1);
     if (P.balance) d *= (t.kind === 'hero' ? B.pvpScale : t.sum ? B.sumScale : 1) * B.gov;
@@ -1333,7 +1361,7 @@ export function simulate(P, seed, log) {
     const hitN = new Map();
     const decay = (t) => { const i = hitN.get(t.id) || 0; hitN.set(t.id, i + 1); return s.rep && i >= s.rep.from ? Math.pow(1 - s.rep.d, i - s.rep.from + 1) : 1; };
     const one = (t, coef, flat, mult) => { o.mult = mult || 1; if (s.big && t.big) o.mult *= 1 + s.big; if (sp.k === 'lucky' && rnd() < sp.p) o.mult *= sp.m; if (sp.k === 'execute') o.mult *= 1 + Math.min(sp.max, Math.floor((1 - t.hp / t.hpMax) / 0.05) * sp.step); const d = hit(u, t, coef, flat, s.el, o); dealt += d; return d; };
-    const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e.k === 'lacer' ? { ...e, coef: n.tc, flat: n.tf } : e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
+    const afterHit = (t) => { if (s.eff && t.alive) for (const e of s.eff) tryStatus(u, t, e.k === 'lacer' ? { ...e, coef: n.tc, flat: n.tf } : e.k === 'dot' && n.dc != null ? { ...e, coef: n.dc, flat: n.df, sid: s.id, nm: s.ko } : e, s); if (s.dispelBuff && t.alive) { const bi = t.st.map((x, i) => (x.buff && !x.nd ? i : -1)).filter((i) => i >= 0); if (bi.length) { removeStatus(t, bi[Math.floor(rnd() * bi.length)]); recalc(t); } } };
     if (sp.k === 'shieldBurst') {
       let sh = 0; for (let i = u.st.length - 1; i >= 0; i--) if (u.st[i].k === 'shield') { sh += u.st[i].v; u.st.splice(i, 1); } recalc(u);
       o.base = sh * n.coef;

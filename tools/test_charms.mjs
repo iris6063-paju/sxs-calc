@@ -1,5 +1,5 @@
 // Charms modelled from their game hooks (2026-11-21): node tools/test_charms.mjs
-import { heroBase, prepare, simulate, ALL_MOBS } from '../js/engine.js';
+import { heroBase, prepare, simulate, ALL_MOBS, skillNumbers, flatBase } from '../js/engine.js';
 
 let bad = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) bad++; };
@@ -101,6 +101,52 @@ const label = (runs, name) => runs.reduce((a, { r }) => a + r.events.filter((e) 
   ok(Math.abs(at103.effHit - at100.effHit) < 1e-9 && at103.affEl.fire === at100.affEl.fire, '숙련 III Lv103: 통찰 Effect Hit and fire affinity as at Lv100');
   ok(g103.mastery > at103.mastery * 4 && at95.mastery < at100.mastery, `챔피언 I Lv103 and 숙련 III Lv95 keep their own level (${g103.mastery}, ${at95.mastery})`);
   ok(at103.mastery / at103.bMas < 1.5 && g103.mastery / g103.bMas < 1.5, `charm mastery stays a sane share of the rank base (${(at103.mastery / at103.bMas).toFixed(2)}, ${(g103.mastery / g103.bMas).toFixed(2)})`);
+}
+// Erosion from game data (2026-11-28): each source ticks with its own trigger skill (duel.json statuses → trig), one
+// status per caster and source whose duration grows on a re-application, no ticks once the caster is down
+{
+  const near = (a, b, m) => Math.abs(a - b) <= m;
+  const db = skillNumbers(10081, 12, 104), mb = skillNumbers(10064, 16, 104);
+  ok(near(db.dc, 0.1137, 1e-6) && near(db.df, 0.468 * flatBase(2, 104), 1), `Dark Bullet r12 Erosion: 11.37% + 0.468 × fixed (${(db.dc * 100).toFixed(2)}%, ${Math.round(db.df)})`);
+  ok(near(mb.dc, 0.1638, 1e-6) && near(mb.df, 0.8305 * flatBase(3, 104), 1), `Mana Blast r16 Erosion: 16.38% + 0.8305 × fixed (${(mb.dc * 100).toFixed(2)}%, ${Math.round(mb.df)})`);
+  const sage = (o = {}) => ({ kind: 'hero', uid: 'e' + Math.random(), name: '비술', cls: 'Mishushi', level: 104, atk: 124000, def: 137000, hp: 728000, spd: 116000, skills: [{ id: 10081, rank: 12 }, { id: 10064, rank: 16 }], charms: [{ id: 10565, rank: 16 }, { id: 10585, rank: 17 }], cell: [10, 8], ...o });
+  const tank = (o = {}) => ({ kind: 'hero', uid: 't' + Math.random(), name: '표적', cls: 'Dunjiashi', level: 104, atk: 1000, def: 137000, hp: 40000000, spd: 90000, skills: [], cell: [10, 11], ...o });
+  const u0 = prepare({ mode: 'pvp', roundCap: 5, teams: [[sage()], [tank()]] }).units[0];
+  ok(near(u0.ch.inflicts[0].e.coef, 0.5061, 1e-6) && near(u0.ch.inflicts[0].e.flat, 2.56575 * flatBase(2, 104), 1), `Shadow Erosion r16: 50.61% + 2.56575 × fixed (game skill 11360)`);
+  ok(near(u0.ch.erodeTwice.coef, 0.6327, 1e-6) && near(u0.ch.erodeTwice.flat, 3.61584 * flatBase(3, 104), 1), `Linked Misfortune r17: 63.27% + 3.61584 × fixed (game skill 12540)`);
+  const runs = many([[sage()], [tank()]], 6, 12, 'pvp');
+  let ticks = 0, dup = 0, longer = 0;
+  const srcs = new Set();
+  for (const { P, r } of runs) {
+    let seen = new Set();
+    for (const e of r.events) {
+      if (e.e === 'turn') seen = new Set();
+      if (e.e === 'cast' && e.n.startsWith('침식(')) { ticks++; srcs.add(e.n); const k = e.u + e.n + e.tg[0]; if (seen.has(k)) dup++; seen.add(k); }
+      if (e.e === 'st' && e.k === 'dot' && e.u && e.d > 3) longer++;
+    }
+  }
+  ok(ticks > 0 && srcs.size >= 3, `Erosion ticks under their sources' names (${[...srcs].join(', ')}; ${ticks} ticks)`);
+  ok(dup === 0, `one Erosion per caster and source: never two ticks of one source in a turn (${dup})`);
+  ok(longer > 0, `re-inflicting adds to the duration (${longer} refreshes past 3 turns)`);
+  // the caster down: its Erosion stops (forbidOnApplicatorDie)
+  const frail = many([[sage({ hp: 200000, def: 20000 })], [tank({ atk: 900000, spd: 60000, skills: [{ id: 10049, rank: 10 }] })]], 8, 12, 'pvp');
+  let after = 0, died = 0;
+  for (const { r } of frail) { let dead = false; for (const e of r.events) { if (e.e === 'die' && e.u === 0) { dead = true; died++; } if (dead && e.e === 'cast' && e.u === 0 && e.n.startsWith('침식(')) after++; } }
+  ok(died > 0 && after === 0, `no Erosion ticks after the caster falls (${died} falls, ${after} ticks after)`);
+}
+// Shadow Form: "combat skill cooldowns reduced by 2 turns" — Terminate Shadow (CD 2) is ready on the next turn
+{
+  const sage = { kind: 'hero', uid: 'sv', name: '그림자', cls: 'Mishushi', level: 104, atk: 124000, def: 30000, hp: 300000, spd: 116000, skills: [{ id: 10078, rank: 10 }], charms: [{ id: 10586, rank: 14 }], cell: [10, 9] };
+  const brute = { kind: 'hero', uid: 'br', name: '강타', cls: 'Kuangzhanshi', level: 104, atk: 400000, def: 137000, hp: 40000000, spd: 60000, skills: [{ id: 10011, rank: 10 }], cell: [10, 11] };
+  let shadowN = 0, readyN = 0;
+  for (const { r } of many([[sage], [brute]], 12, 12, 'pvp')) {
+    const i = r.events.findIndex((e) => e.e === 'cast' && e.u === 0 && e.n === '섀도우 형태'); if (i < 0) continue;
+    shadowN++;
+    const t = r.events.findIndex((e, j) => j > i && e.e === 'turn' && e.u === 0); if (t < 0) continue;
+    const end = r.events.findIndex((e, j) => j > t && e.e === 'turn');
+    if (r.events.slice(t, end < 0 ? undefined : end).some((e) => e.e === 'cast' && e.u === 0 && e.n === '터미네이트 섀도')) readyN++;
+  }
+  ok(shadowN > 0 && readyN === shadowN, `Shadow Form: Terminate Shadow cast on the next turn every time (${readyN}/${shadowN})`);
 }
 console.log(bad ? `FAILURES: ${bad}` : 'all charm tests passed');
 process.exit(bad ? 1 : 0);
